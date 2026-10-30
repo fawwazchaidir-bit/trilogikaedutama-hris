@@ -11,6 +11,7 @@ import { FilterBar, FilterField, filterInput } from "@/components/filter-bar";
 import { ExportLinks } from "@/components/export-links";
 import { AddEmployeeButton } from "@/components/employee-forms";
 import { EmployeeImport } from "@/components/employee-import";
+import { DivisionsManager } from "@/components/divisions-manager";
 import { actorCan } from "@/server/actor";
 import { buildQuery, flattenSearchParams, type SearchParams } from "@/lib/query-string";
 import { formatDateShort } from "@/lib/format";
@@ -23,7 +24,9 @@ export const dynamic = "force-dynamic";
 export default async function EmployeesPage({ searchParams }: { searchParams: SearchParams }) {
   const user = await requirePagePermission("employee:view");
   const sp = await flattenSearchParams(searchParams);
-  const [res, divisions] = await Promise.all([listEmployees(user, sp), listDivisions(user)]);
+  const canManage0 = actorCan(user, "employee:manage");
+  const [res, allDivisions] = await Promise.all([listEmployees(user, sp), listDivisions(user, { includeInactive: canManage0 })]);
+  const divisions = allDivisions.filter((d) => d.isActive);
   const canManage = actorCan(user, "employee:manage");
   const filters = { q: sp.q, divisionId: sp.divisionId, employmentStatus: sp.employmentStatus, active: sp.active };
   return (
@@ -32,6 +35,7 @@ export default async function EmployeesPage({ searchParams }: { searchParams: Se
         actions={<>
           {actorCan(user, "employee:export") && <ExportLinks base="/api/employees/export" params={filters} formats={["xlsx", "csv"]} />}
           {actorCan(user, "employee:import") && <EmployeeImport />}
+          {canManage && <DivisionsManager divisions={allDivisions} />}
           {canManage && <AddEmployeeButton divisions={divisions} today={todayIso(env().APP_TIMEZONE)} />}
         </>} />
       <FilterBar action="/karyawan" resetHref="/karyawan">

@@ -49,6 +49,27 @@ test.describe("HR — pengajuan & saldo cuti", () => {
 });
 
 test.describe("HR — data karyawan", () => {
+  test("kelola divisi: tambah, ubah nama, nonaktifkan; nama ganda ditolak", async ({ page }) => {
+    await login(page, USERS.hr);
+    await page.goto("/karyawan");
+    await page.getByRole("button", { name: "Kelola divisi" }).click();
+    const dlg = page.getByRole("dialog");
+    await dlg.getByLabel("Nama divisi baru").fill("Divisi E2E");
+    await dlg.getByRole("button", { name: "Tambah", exact: true }).click();
+    await expect(page.getByText("Divisi ditambahkan.")).toBeVisible();
+    await expect(dlg.getByText("Divisi E2E")).toBeVisible();
+    await dlg.getByLabel("Nama divisi baru").fill("divisi e2e");
+    await dlg.getByRole("button", { name: "Tambah", exact: true }).click();
+    await expect(alertWith(dlg, /sudah ada/i)).toBeVisible();
+    await dlg.getByRole("button", { name: "Ubah nama Divisi E2E" }).click();
+    await dlg.getByLabel("Nama baru untuk Divisi E2E").fill("Divisi E2E Baru");
+    await dlg.getByRole("button", { name: "Simpan" }).click();
+    await expect(page.getByText("Divisi diubah.")).toBeVisible();
+    await dlg.getByRole("button", { name: "Nonaktifkan divisi Divisi E2E Baru" }).click();
+    await expect(page.getByText("Divisi dinonaktifkan.")).toBeVisible();
+    await expect(dlg.getByText("Nonaktif")).toBeVisible();
+  });
+
   test("tambah → validasi → cari → detail → komponen gaji → ubah → rekening → nonaktifkan", async ({ page }) => {
     await login(page, USERS.hr);
     await page.getByRole("link", { name: "Karyawan", exact: true }).click();

@@ -11,8 +11,8 @@ async function main() {
   const tables = ["users", "employees", "attendances", "attendance_corrections", "leave_requests", "leave_balance_entries", "salary_components", "payroll_runs", "payroll_items", "payslips", "audit_logs"];
   console.log("Jumlah baris:");
   for (const t of tables) {
-    const [{ n }] = await prisma.$queryRawUnsafe<{ n: bigint }[]>(`SELECT count(*) AS n FROM "${t}"`) as { n: bigint }[];
-    console.log(`  ${t.padEnd(26)} ${n}`);
+    const rows = await prisma.$queryRawUnsafe<{ n: bigint }[]>(`SELECT count(*) AS n FROM "${t}"`);
+    console.log(`  ${t.padEnd(26)} ${rows[0]?.n ?? 0}`);
   }
   const problems: string[] = [];
   const orphan = await prisma.$queryRaw<{ n: bigint }[]>`SELECT count(*) AS n FROM payslips s JOIN payroll_items i ON i.id = s."itemId" WHERE s."netPay" <> i."netPay" AND s.status = 'ACTIVE'`;
