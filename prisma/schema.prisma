@@ -1,0 +1,700 @@
+// Trilogika Edutama — Mini HRIS
+//
+// Prinsip desain skema (lihat docs/ARCHITECTURE.md):
+//  * Uang = bilangan bulat Rupiah (BigInt). Tidak ada float untuk nominal.
+//  * Status harian absensi (hadir/terlambat/izin/…) TIDAK disimpan: diturunkan dari jadwal + kalender + pengajuan + catatan
+//    absensi setiap kali dibaca, sehingga selalu konsisten dengan data sumber dan dapat ditelusuri per hari.
+//  * Slip gaji = SNAPSHOT. Saat diterbitkan, isi slip disalin ke `payslips` (JSON) dan dikunci oleh trigger database;
+//    koreksi absensi/komponen sesudahnya tidak mengubah slip yang sudah terbit.
+//  * Tidak ada cascade delete ke data karyawan/gaji: relasi `Restrict`. Karyawan tidak dihapus, hanya dinonaktifkan.
+//  * Trigger di migrasi `*_integrity_guards` menegakkan append-only (audit, koreksi absensi, buku saldo cuti),
+//    kunci slip terbit, dan kunci item penggajian di luar status DRAFT (defense in depth).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ───────────────────────────── Enums ─────────────────────────────
+
+enum Role {
+  SUPER_ADMIN
+  HR_ADMIN
+  EMPLOYEE
+}
+
+enum EmploymentStatus {
+  PERMANENT
+  CONTRACT
+  INTERN
+}
+
+enum LeaveType {
+  IZIN
+  SAKIT
+  CUTI
+}
+
+enum RequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CANCELLED
+}
+
+enum CalendarKind {
+  /// Hari libur: tidak ada jadwal kerja.
+  HOLIDAY
+  /// Hari kerja khusus: tetap dijadwalkan walau jatuh pada hari libur mingguan.
+  SPECIAL_WORKDAY
+}
+
+enum ScheduleScope {
+  ALL
+  DIVISION
+  EMPLOYEE
+}
+
+enum LeaveLedgerKind {
+  /// Saldo awal / kuota tahunan.
+  GRANT
+  /// Penyesuaian manual oleh admin (positif/negatif) dengan catatan.
+  ADJUSTMENT
+  /// Pemakaian karena pengajuan cuti disetujui (negatif).
+  USAGE
+  /// Pengembalian karena pengajuan yang sudah disetujui dibatalkan (positif).
+  RESTORE
+}
+
+enum ComponentKind {
+  EARNING
+  DEDUCTION
+}
+
+enum ComponentCategory {
+  BASE_SALARY
+  POSITION_ALLOWANCE
+  TRANSPORT_ALLOWANCE
+  MEAL_ALLOWANCE
+  INCENTIVE
+  OVERTIME
+  OTHER_EARNING
+  LATE_DEDUCTION
+  ABSENCE_DEDUCTION
+  LOAN
+  BPJS
+  TAX
+  OTHER_DEDUCTION
+}
+
+enum ComponentCalc {
+  /// Nominal tetap per periode.
+  FIXED
+  /// Nominal × jumlah hari hadir pada periode absensi (mis. uang makan/transport harian).
+  PER_PRESENT_DAY
+  /// Persen dari gaji pokok (basis point; 100 = 1%). Dipakai untuk BPJS/pajak SESUAI konfigurasi admin.
+  PERCENT_OF_BASE
+}
+
+enum ComponentRecurrence {
+  /// Berlaku untuk setiap periode yang beririsan dengan rentang berlakunya.
+  RECURRING
+  /// Hanya masuk ke SATU periode: periode penggajian yang memuat tanggal `effectiveFrom`.
+  ONE_TIME
+}
+
+enum PayrollStatus {
+  DRAFT
+  PENDING_APPROVAL
+  APPROVED
+  ISSUED
+  CANCELLED
+}
+
+enum LineSource {
+  COMPONENT
+  RULE_LATE
+  RULE_ABSENCE
+  RULE_OVERTIME
+  ADJUSTMENT
+}
+
+enum PayslipStatus {
+  ACTIVE
+  VOIDED
+}
+
+enum FileKind {
+  LOGO
+  EMPLOYEE_PHOTO
+  LEAVE_ATTACHMENT
+}
+
+enum LateDeductionMode {
+  NONE
+  PER_OCCURRENCE
+  PER_MINUTE
+}
+
+enum AbsenceDeductionMode {
+  NONE
+  /// Nominal tetap per hari.
+  FIXED_PER_DAY
+  /// Gaji pokok ÷ pembagi (hari) per hari.
+  SALARY_DIVISOR
+}
+
+enum OvertimeMode {
+  /// Lembur diinput manual sebagai komponen/penyesuaian (default, paling aman).
+  MANUAL
+  /// Dihitung dari menit setelah jam pulang × tarif per jam (wajib diverifikasi HR).
+  AUTO
+}
+
+// ───────────────────────────── Pengguna & sesi ─────────────────────────────
+
+model User {
+  id                 String    @id @default(uuid()) @db.Uuid
+  email              String    @unique
+  name               String
+  passwordHash       String
+  role               Role
+  isActive           Boolean   @default(true)
+  /// Akun demonstrasi (hanya untuk pengujian) — antarmuka menampilkan banner peringatan.
+  isDemo             Boolean   @default(false)
+  mustChangePassword Boolean   @default(false)
+  lastLoginAt        DateTime?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  sessions      Session[]
+  employee      Employee?
+  notifications Notification[]
+  auditLogs     AuditLog[]
+
+  @@map("users")
+}
+
+model Session {
+  id         String    @id @default(uuid()) @db.Uuid
+  userId     String    @db.Uuid
+  /// SHA-256 dari token acak di cookie. Token mentah tidak pernah disimpan.
+  tokenHash  String    @unique
+  createdAt  DateTime  @default(now())
+  lastSeenAt DateTime  @default(now())
+  expiresAt  DateTime
+  revokedAt  DateTime?
+  ip         String?
+  userAgent  String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("sessions")
+}
+
+model RateLimitBucket {
+  key          String    @id
+  count        Int       @default(0)
+  windowStart  DateTime  @default(now())
+  blockedUntil DateTime?
+
+  @@map("rate_limit_buckets")
+}
+
+// ───────────────────────────── Data karyawan ─────────────────────────────
+
+model Division {
+  id        String   @id @default(uuid()) @db.Uuid
+  name      String
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  employees   Employee[]
+  assignments ScheduleAssignment[]
+
+  @@map("divisions")
+}
+
+model Employee {
+  id                String           @id @default(uuid()) @db.Uuid
+  /// Nomor induk karyawan (unik, tanpa membedakan huruf besar/kecil).
+  employeeNo        String
+  fullName          String
+  userId            String?          @unique @db.Uuid
+  divisionId        String?          @db.Uuid
+  position          String
+  employmentStatus  EmploymentStatus
+  joinDate          DateTime         @db.Date
+  /// Tanggal berhenti (diisi saat dinonaktifkan). Hari setelah tanggal ini tidak dihitung dalam rekap & gaji.
+  endDate           DateTime?        @db.Date
+  phone             String?
+  email             String?
+  address           String?
+  photoFileId       String?          @db.Uuid
+  bankName          String?
+  /// Nomor rekening dienkripsi AES-256-GCM (kunci DATA_ENCRYPTION_KEY). Tidak pernah ditampilkan lengkap di slip.
+  bankAccountEnc    String?
+  bankAccountLast4  String?
+  bankAccountHolder String?
+  isActive          Boolean          @default(true)
+  notes             String?
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+
+  user         User?                  @relation(fields: [userId], references: [id], onDelete: Restrict)
+  division     Division?              @relation(fields: [divisionId], references: [id], onDelete: Restrict)
+  photo        StoredFile?            @relation("EmployeePhoto", fields: [photoFileId], references: [id], onDelete: Restrict)
+  attendances  Attendance[]
+  corrections  AttendanceCorrection[]
+  leaves       LeaveRequest[]
+  balance      LeaveBalanceEntry[]
+  components   SalaryComponent[]
+  assignments  ScheduleAssignment[]
+  payrollItems PayrollItem[]
+  payslips     Payslip[]
+
+  @@index([divisionId])
+  @@index([isActive])
+  @@index([fullName])
+  @@map("employees")
+}
+
+// ───────────────────────────── Jadwal & kalender ─────────────────────────────
+
+model WorkSchedule {
+  id                   String   @id @default(uuid()) @db.Uuid
+  name                 String
+  description          String?
+  /// Hari kerja ISO: 1 = Senin … 7 = Minggu.
+  workDays             Int[]
+  /// "HH:mm" waktu lokal (APP_TIMEZONE).
+  startTime            String
+  endTime              String
+  lateToleranceMinutes Int      @default(0)
+  /// Tanpa check-in sampai jam ini → "Tidak hadir" (hanya berlaku untuk hari ini; hari lampau langsung final).
+  absentCutoffTime     String
+  isDefault            Boolean  @default(false)
+  isActive             Boolean  @default(true)
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  assignments ScheduleAssignment[]
+
+  @@map("work_schedules")
+}
+
+model ScheduleAssignment {
+  id          String        @id @default(uuid()) @db.Uuid
+  scheduleId  String        @db.Uuid
+  scope       ScheduleScope
+  divisionId  String?       @db.Uuid
+  employeeId  String?       @db.Uuid
+  startDate   DateTime      @db.Date
+  endDate     DateTime?     @db.Date
+  note        String?
+  createdById String        @db.Uuid
+  createdAt   DateTime      @default(now())
+
+  schedule WorkSchedule @relation(fields: [scheduleId], references: [id], onDelete: Restrict)
+  division Division?    @relation(fields: [divisionId], references: [id], onDelete: Restrict)
+  employee Employee?    @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+
+  @@index([scope, startDate])
+  @@index([employeeId])
+  @@index([divisionId])
+  @@map("schedule_assignments")
+}
+
+model CalendarDay {
+  id          String       @id @default(uuid()) @db.Uuid
+  date        DateTime     @unique @db.Date
+  kind        CalendarKind
+  name        String
+  createdById String       @db.Uuid
+  createdAt   DateTime     @default(now())
+
+  @@map("calendar_days")
+}
+
+// ───────────────────────────── Absensi ─────────────────────────────
+
+/// Satu baris per karyawan per hari (unik) → tidak mungkin ada check-in ganda. Baris ada ⇔ sudah check-in.
+model Attendance {
+  id               String    @id @default(uuid()) @db.Uuid
+  employeeId       String    @db.Uuid
+  /// Tanggal lokal (APP_TIMEZONE) saat check-in.
+  date             DateTime  @db.Date
+  checkInAt        DateTime
+  checkOutAt       DateTime?
+  checkInNote      String?
+  checkOutNote     String?
+  checkInLat       Float?
+  checkInLng       Float?
+  checkInAccuracy  Float?
+  checkInDistance  Int?
+  checkOutLat      Float?
+  checkOutLng      Float?
+  checkOutAccuracy Float?
+  checkOutDistance Int?
+  /// SELF = dicatat karyawan sendiri; ADMIN = dibuat/diubah lewat koreksi admin.
+  source           String    @default("SELF")
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+
+  @@unique([employeeId, date])
+  @@index([date])
+  @@map("attendances")
+}
+
+/// Riwayat koreksi absensi — append-only. `before`/`after` = null berarti baris belum ada / dihapus.
+model AttendanceCorrection {
+  id            BigInt   @id @default(autoincrement())
+  employeeId    String   @db.Uuid
+  date          DateTime @db.Date
+  before        Json?
+  after         Json?
+  reason        String
+  correctedById String   @db.Uuid
+  createdAt     DateTime @default(now())
+
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+
+  @@index([employeeId, date])
+  @@index([createdAt])
+  @@map("attendance_corrections")
+}
+
+// ───────────────────────────── Pengajuan izin / sakit / cuti ─────────────────────────────
+
+model LeaveRequest {
+  id               String        @id @default(uuid()) @db.Uuid
+  employeeId       String        @db.Uuid
+  type             LeaveType
+  startDate        DateTime      @db.Date
+  endDate          DateTime      @db.Date
+  reason           String
+  attachmentFileId String?       @db.Uuid
+  status           RequestStatus @default(PENDING)
+  /// Jumlah hari kerja terjadwal yang tercakup — dihitung ulang saat disetujui, lalu dibekukan.
+  workingDays      Int?
+  reviewedById     String?       @db.Uuid
+  reviewedAt       DateTime?
+  reviewNote       String?
+  cancelledAt      DateTime?
+  cancelReason     String?
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+
+  employee   Employee            @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  attachment StoredFile?         @relation("LeaveAttachment", fields: [attachmentFileId], references: [id], onDelete: Restrict)
+  ledger     LeaveBalanceEntry[]
+
+  @@index([employeeId, status])
+  @@index([status, createdAt])
+  @@index([startDate, endDate])
+  @@map("leave_requests")
+}
+
+/// Buku saldo cuti per karyawan per tahun — append-only. Saldo = SUM(days).
+model LeaveBalanceEntry {
+  id          BigInt          @id @default(autoincrement())
+  employeeId  String          @db.Uuid
+  year        Int
+  kind        LeaveLedgerKind
+  days        Int
+  requestId   String?         @db.Uuid
+  note        String?
+  createdById String          @db.Uuid
+  createdAt   DateTime        @default(now())
+
+  employee Employee      @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  request  LeaveRequest? @relation(fields: [requestId], references: [id], onDelete: Restrict)
+
+  @@index([employeeId, year])
+  @@index([requestId])
+  @@map("leave_balance_entries")
+}
+
+// ───────────────────────────── Komponen gaji & penggajian ─────────────────────────────
+
+model SalaryComponent {
+  id            String              @id @default(uuid()) @db.Uuid
+  employeeId    String              @db.Uuid
+  kind          ComponentKind
+  category      ComponentCategory
+  name          String
+  calc          ComponentCalc       @default(FIXED)
+  /// Rupiah. FIXED: nominal per periode. PER_PRESENT_DAY: nominal per hari hadir. PERCENT_OF_BASE: 0.
+  amount        BigInt              @default(0)
+  /// Hanya untuk PERCENT_OF_BASE (basis point, 100 = 1%).
+  percentBp     Int?
+  recurrence    ComponentRecurrence @default(RECURRING)
+  effectiveFrom DateTime            @db.Date
+  effectiveTo   DateTime?           @db.Date
+  description   String?
+  isActive      Boolean             @default(true)
+  createdById   String              @db.Uuid
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
+
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+
+  @@index([employeeId, isActive])
+  @@map("salary_components")
+}
+
+model PayrollRun {
+  id              String        @id @default(uuid()) @db.Uuid
+  /// Nomor urut berjalan (dipakai pada nomor slip).
+  runNumber       Int           @unique @default(autoincrement())
+  label           String
+  periodStart     DateTime      @db.Date
+  periodEnd       DateTime      @db.Date
+  /// Rentang absensi yang menjadi dasar penghitungan (boleh berbeda dari periode gaji, mis. cut-off tgl 25).
+  attendanceStart DateTime      @db.Date
+  attendanceEnd   DateTime      @db.Date
+  status          PayrollStatus @default(DRAFT)
+  /// Aturan penggajian yang berlaku saat dihitung (dibekukan agar hasil dapat ditelusuri).
+  rulesSnapshot   Json?
+  calculatedAt    DateTime?
+  note            String?
+  createdById     String        @db.Uuid
+  submittedById   String?       @db.Uuid
+  submittedAt     DateTime?
+  approvedById    String?       @db.Uuid
+  approvedAt      DateTime?
+  approvalNote    String?
+  returnedNote    String?
+  issuedById      String?       @db.Uuid
+  issuedAt        DateTime?
+  issueDate       DateTime?     @db.Date
+  cancelledById   String?       @db.Uuid
+  cancelledAt     DateTime?
+  cancelReason    String?
+  revisionOfId    String?       @db.Uuid
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  revisionOf PayrollRun?   @relation("PayrollRevision", fields: [revisionOfId], references: [id], onDelete: Restrict)
+  revisions  PayrollRun[]  @relation("PayrollRevision")
+  items      PayrollItem[]
+  payslips   Payslip[]
+
+  @@index([status])
+  @@index([periodStart, periodEnd])
+  @@map("payroll_runs")
+}
+
+model PayrollItem {
+  id                String           @id @default(uuid()) @db.Uuid
+  runId             String           @db.Uuid
+  employeeId        String           @db.Uuid
+  // Snapshot identitas karyawan saat dihitung.
+  employeeNo        String
+  employeeName      String
+  position          String
+  divisionName      String?
+  employmentStatus  EmploymentStatus
+  bankName          String?
+  bankAccountMasked String?
+  baseSalary        BigInt           @default(0)
+  totalEarnings     BigInt           @default(0)
+  totalDeductions   BigInt           @default(0)
+  netPay            BigInt           @default(0)
+  /// Ringkasan rekap absensi (hari terjadwal, hadir, terlambat, …) yang menjadi dasar penghitungan.
+  attendanceSummary Json
+  /// Hash rekap harian sumber — dipakai mendeteksi koreksi absensi setelah penghitungan.
+  sourceHash        String
+  warnings          Json?
+  slipNote          String?
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+
+  run      PayrollRun        @relation(fields: [runId], references: [id], onDelete: Restrict)
+  employee Employee          @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  lines    PayrollItemLine[]
+  payslip  Payslip?
+
+  @@unique([runId, employeeId])
+  @@index([employeeId])
+  @@map("payroll_items")
+}
+
+model PayrollItemLine {
+  id          String            @id @default(uuid()) @db.Uuid
+  itemId      String            @db.Uuid
+  kind        ComponentKind
+  category    ComponentCategory
+  name        String
+  source      LineSource
+  amount      BigInt
+  /// Penjelasan perhitungan yang tampil di layar pemeriksaan, mis. "3 hari × Rp 20.000".
+  formula     String?
+  /// Alasan (wajib untuk penyesuaian manual).
+  reason      String?
+  /// Komponen gaji sumber (tanpa FK: komponen boleh berubah, baris ini adalah snapshot).
+  componentId String?           @db.Uuid
+  sortOrder   Int               @default(0)
+  createdById String?           @db.Uuid
+  createdAt   DateTime          @default(now())
+
+  item PayrollItem @relation(fields: [itemId], references: [id], onDelete: Restrict)
+
+  @@index([itemId])
+  @@map("payroll_item_lines")
+}
+
+/// Slip gaji terbit — snapshot tak berubah (dikunci trigger). Hanya status ACTIVE → VOIDED yang diizinkan.
+model Payslip {
+  id         String        @id @default(uuid()) @db.Uuid
+  runId      String        @db.Uuid
+  itemId     String        @unique @db.Uuid
+  employeeId String        @db.Uuid
+  number     String        @unique
+  status     PayslipStatus @default(ACTIVE)
+  issueDate  DateTime      @db.Date
+  issuedAt   DateTime      @default(now())
+  netPay     BigInt
+  /// Seluruh isi slip (lembaga, karyawan, periode, rincian, total, ringkasan absensi, catatan).
+  snapshot   Json
+  voidedAt   DateTime?
+  voidReason String?
+  voidedById String?       @db.Uuid
+
+  run      PayrollRun  @relation(fields: [runId], references: [id], onDelete: Restrict)
+  item     PayrollItem @relation(fields: [itemId], references: [id], onDelete: Restrict)
+  employee Employee    @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+
+  @@index([employeeId, issueDate])
+  @@index([runId])
+  @@map("payslips")
+}
+
+// ───────────────────────────── Pengaturan lembaga & kebijakan ─────────────────────────────
+
+/// Singleton (id = 1).
+model CompanySettings {
+  id         Int     @id @default(1)
+  name       String
+  legalName  String?
+  tagline    String?
+  address    String?
+  phone      String?
+  email      String?
+  website    String?
+  logoFileId String? @db.Uuid
+
+  // Slip gaji
+  slipShowAttendance Boolean @default(true)
+  slipFooterNote     String?
+  slipNumberPrefix   String  @default("SG")
+
+  // Kebijakan absensi (perlu dikonfirmasi oleh Super Admin)
+  /// Menit keterlambatan dihitung setelah toleransi (true) atau dari jam masuk (false, default).
+  lateMinutesAfterTolerance   Boolean   @default(false)
+  locationEnabled             Boolean   @default(false)
+  locationName                String?
+  locationLat                 Float?
+  locationLng                 Float?
+  locationRadiusMeters        Int       @default(100)
+  /// Akurasi GPS terburuk yang diterima (meter). Lebih buruk dari ini → ditolak dengan pesan jelas.
+  locationMaxAccuracyMeters   Int       @default(150)
+  /// Berapa hari ke belakang pengajuan izin/sakit boleh diajukan.
+  requestBackdateDays         Int       @default(7)
+  attendancePolicyConfirmedAt DateTime?
+
+  // Kebijakan cuti
+  annualLeaveQuota          Int     @default(12)
+  allowNegativeLeaveBalance Boolean @default(false)
+
+  // Aturan penggajian (TIDAK ada tarif baku — semua nol/nonaktif sampai dikonfigurasi & diverifikasi)
+  lateDeductionMode         LateDeductionMode    @default(NONE)
+  lateDeductionAmount       BigInt               @default(0)
+  absenceDeductionMode      AbsenceDeductionMode @default(NONE)
+  absenceDeductionAmount    BigInt               @default(0)
+  absenceSalaryDivisor      Int?
+  izinDeductsPay            Boolean              @default(true)
+  sakitDeductsPay           Boolean              @default(false)
+  cutiDeductsPay            Boolean              @default(false)
+  overtimeMode              OvertimeMode         @default(MANUAL)
+  overtimeRatePerHour       BigInt               @default(0)
+  overtimeMinMinutes        Int                  @default(60)
+  overtimeMaxMinutesPerDay  Int                  @default(240)
+  payrollRulesConfirmedAt   DateTime?
+  payrollRulesConfirmedById String?              @db.Uuid
+
+  updatedAt DateTime @updatedAt
+
+  @@map("company_settings")
+}
+
+// ───────────────────────────── Berkas, notifikasi, audit ─────────────────────────────
+
+model StoredFile {
+  id           String   @id @default(uuid()) @db.Uuid
+  kind         FileKind
+  originalName String
+  mimeType     String
+  size         Int
+  sha256       String
+  data         Bytes
+  uploadedById String   @db.Uuid
+  createdAt    DateTime @default(now())
+
+  photoOf     Employee[]     @relation("EmployeePhoto")
+  attachments LeaveRequest[] @relation("LeaveAttachment")
+
+  @@index([kind])
+  @@map("stored_files")
+}
+
+model Notification {
+  id        BigInt    @id @default(autoincrement())
+  userId    String    @db.Uuid
+  type      String
+  title     String
+  body      String?
+  href      String?
+  createdAt DateTime  @default(now())
+  readAt    DateTime?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, readAt])
+  @@index([userId, createdAt])
+  @@map("notifications")
+}
+
+model AuditLog {
+  id         BigInt   @id @default(autoincrement())
+  createdAt  DateTime @default(now())
+  actorId    String?  @db.Uuid
+  actorEmail String?
+  actorRole  Role?
+  /// mis. "employee.update", "attendance.correct", "payroll.approve"
+  action     String
+  entityType String
+  entityId   String?
+  summary    String?
+  before     Json?
+  after      Json?
+  reason     String?
+  ip         String?
+  userAgent  String?
+
+  actor User? @relation(fields: [actorId], references: [id], onDelete: Restrict)
+
+  @@index([entityType, entityId])
+  @@index([createdAt])
+  @@index([actorId])
+  @@index([action])
+  @@map("audit_logs")
+}
