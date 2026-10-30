@@ -6,9 +6,10 @@ import { Errors } from "../errors";
 import { parseInput } from "../validate";
 import { assertCan, type Actor } from "../actor";
 import { writeAudit } from "../audit";
+import { env } from "../env";
 import { dateToIso, isoToDate } from "../json";
 import { hhmm, isoDate, optionalText, requiredText, uuid } from "@/lib/validation/common";
-import { rangesOverlap, timeToMinutes } from "@/lib/time";
+import { rangesOverlap, timeToMinutes, todayIso } from "@/lib/time";
 import type { ScheduleLite } from "@/lib/attendance";
 import { CALENDAR_KIND_LABEL } from "@/lib/labels";
 
@@ -83,7 +84,7 @@ export async function updateSchedule(actor: Actor, id: string, raw: unknown): Pr
     if (before.isDefault && input.isDefault === false) throw Errors.validation("Jadwal default tidak dapat dilepas; jadikan jadwal lain sebagai default.");
     if (before.isDefault && input.isActive === false) throw Errors.validation("Jadwal default tidak dapat dinonaktifkan.");
     if (input.isActive === false) {
-      const used = await tx.scheduleAssignment.count({ where: { scheduleId: id, OR: [{ endDate: null }, { endDate: { gte: isoToDate(new Date().toISOString().slice(0, 10)) } }] } });
+      const used = await tx.scheduleAssignment.count({ where: { scheduleId: id, OR: [{ endDate: null }, { endDate: { gte: isoToDate(todayIso(env().APP_TIMEZONE)) } }] } });
       if (used > 0) throw Errors.conflict("Jadwal masih dipakai penugasan yang berlaku. Hapus/akhiri penugasan terlebih dulu.");
     }
     if (input.isDefault === true && !before.isDefault) await tx.workSchedule.updateMany({ where: { isDefault: true }, data: { isDefault: false } });

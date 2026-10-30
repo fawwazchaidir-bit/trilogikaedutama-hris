@@ -23,7 +23,8 @@
     "db:seed:dev": "tsx --conditions=react-server prisma/seed-dev.ts",
     "db:backup": "bash scripts/backup.sh",
     "db:restore": "bash scripts/restore.sh",
-    "user:create": "tsx --conditions=react-server scripts/create-user.ts"
+    "user:create": "tsx --conditions=react-server scripts/create-user.ts",
+    "db:verify": "tsx scripts/verify-db.ts"
   },
   "dependencies": {
     "@prisma/client": "^6.19.3",
