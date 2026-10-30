@@ -165,7 +165,7 @@ export async function listEmployeeOptions(actor: Actor, opts: { includeInactive?
   if (!actorCan(actor, "employee:view") && !actorCan(actor, "attendance:view_all") && !actorCan(actor, "recap:view_all") && !actorCan(actor, "leave:view_all")) throw Errors.forbidden();
   const rows = await prisma.employee.findMany({
     where: opts.includeInactive ? {} : { isActive: true },
-    select: { id: true, employeeNo: true, fullName: true, divisionId: true, isActive: true },
+    select: { id: true, employeeNo: true, fullName: true, divisionId: true, isActive: true, userId: true },
     orderBy: { fullName: "asc" },
   });
   return rows;

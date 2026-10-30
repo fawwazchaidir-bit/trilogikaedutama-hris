@@ -18,7 +18,7 @@ import type { PayslipSnapshot } from "@/lib/payslip";
 import { formatDateRange } from "@/lib/format";
 import { formatRupiah } from "@/lib/money";
 import { diffDays, todayIso } from "@/lib/time";
-import { isoDate, optionalText, requiredText, rupiah, uuid } from "@/lib/validation/common";
+import { isoDate, optionalText, requiredText, rupiah } from "@/lib/validation/common";
 import { PAYROLL_STATUS_LABEL, type PayrollStatus } from "@/lib/labels";
 
 const MAX_PERIOD_DAYS = 62;

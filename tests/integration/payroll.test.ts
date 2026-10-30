@@ -6,7 +6,6 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { prisma } from "@/server/db";
 import { AppError } from "@/server/errors";
 import { isoToDate } from "@/server/json";
-import { addCalendarDay } from "@/server/services/schedules";
 import { correctAttendance } from "@/server/services/attendance";
 import { getRecap, getRecapDetail, recapTable } from "@/server/services/recap";
 import { toCsv } from "@/server/export";

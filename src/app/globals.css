@@ -39,3 +39,9 @@ dialog { margin: auto; }
 :focus-visible { outline: 2px solid var(--color-brand-600); outline-offset: 2px; }
 
 @media print { .no-print { display: none !important; } }
+
+/*
+ * Item grid boleh menyusut: tanpa ini, tabel lebar (min-w-max) di dalam kartu pada grid satu-kolom
+ * melebarkan trek grid sehingga halaman meluber horizontal di ponsel. Tabel tetap scroll di dalam kartunya.
+ */
+.grid > * { min-width: 0; }

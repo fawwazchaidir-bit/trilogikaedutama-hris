@@ -1,0 +1,75 @@
+import type { Metadata } from "next";
+import Link from "next/link";
+import { notFound } from "next/navigation";
+import { ArrowLeft, UserRound } from "lucide-react";
+import { requirePagePermission } from "@/server/auth/current";
+import { actorCan } from "@/server/actor";
+import { AppError } from "@/server/errors";
+import { getEmployee, listDivisions } from "@/server/services/employees";
+import { listComponents } from "@/server/services/components";
+import { getBalance, getLedger } from "@/server/services/leave";
+import { listCorrections } from "@/server/services/attendance";
+import { env } from "@/server/env";
+import { Card, CardHeader, EmptyState, PageHeader } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { EmployeeActions } from "@/components/employee-forms";
+import { ComponentsManager } from "@/components/components-manager";
+import { BalanceCard } from "@/components/balance-card";
+import { formatClock, formatDateLong, formatDateTime } from "@/lib/format";
+import { EMPLOYMENT_LABEL } from "@/lib/labels";
+import { todayIso } from "@/lib/time";
+import { z } from "zod";
+
+export const metadata: Metadata = { title: "Detail Karyawan" };
+export const dynamic = "force-dynamic";
+
+export default async function EmployeeDetailPage({ params }: { params: Promise<{ id: string }> }) {
+  const user = await requirePagePermission("employee:view");
+  const { id } = await params;
+  if (!z.string().uuid().safeParse(id).success) notFound();
+  let e;
+  try { e = await getEmployee(user, id); } catch (err) { if (err instanceof AppError) notFound(); throw err; }
+  const today = todayIso(env().APP_TIMEZONE);
+  const year = Number(today.slice(0, 4));
+  const [divisions, comps, balance, ledger, corrections] = await Promise.all([
+    listDivisions(user),
+    actorCan(user, "payroll:components") ? listComponents(user, id) : Promise.resolve(null),
+    actorCan(user, "leave:view_all") ? getBalance(user, id, year) : Promise.resolve(null),
+    actorCan(user, "leave:view_all") ? getLedger(user, id, year) : Promise.resolve([]),
+    actorCan(user, "attendance:view_all") ? listCorrections(user, { employeeId: id, limit: 10 }) : Promise.resolve([]),
+  ]);
+  const row = (k: string, v: React.ReactNode) => (<div className="grid grid-cols-[9rem_1fr] gap-2 py-2 text-sm"><dt className="text-muted">{k}</dt><dd className="font-medium">{v || "—"}</dd></div>);
+  return (
+    <div className="space-y-4">
+      <Link href="/karyawan" className="inline-flex items-center gap-1 text-sm text-muted hover:text-ink"><ArrowLeft className="size-4" />Daftar karyawan</Link>
+      <PageHeader title={e.fullName} description={`${e.employeeNo} · ${e.position}${e.divisionName ? ` · ${e.divisionName}` : ""}`}
+        actions={<EmployeeActions employee={e} divisions={divisions} today={today} canManage={actorCan(user, "employee:manage")} canCreateAccount={actorCan(user, "user:manage") || actorCan(user, "user:manage_employee")} />} />
+      <Card>
+        <div className="flex items-center gap-4 border-b border-line p-5">
+          {e.photoUrl
+            // eslint-disable-next-line @next/next/no-img-element
+            ? <img src={e.photoUrl} alt={`Foto ${e.fullName}`} className="size-16 rounded-full border border-line object-cover" />
+            : <span className="grid size-16 place-items-center rounded-full bg-brand-50 text-brand-700"><UserRound className="size-8" /></span>}
+          <div className="flex flex-wrap gap-1.5"><Badge>{EMPLOYMENT_LABEL[e.employmentStatus]}</Badge>{e.isActive ? <Badge tone="green">Aktif</Badge> : <Badge tone="red">Nonaktif · berhenti {formatDateLong(e.endDate)}</Badge>}{e.userEmail ? <Badge tone="blue">Akun: {e.userEmail}</Badge> : <Badge>Belum punya akun login</Badge>}</div>
+        </div>
+        <dl className="grid divide-y divide-line px-5 md:grid-cols-2 md:gap-x-10 md:divide-y-0">
+          <div className="divide-y divide-line">{row("Mulai bekerja", formatDateLong(e.joinDate))}{row("Telepon", e.phone)}{row("Email", e.email)}{row("Alamat", e.address)}</div>
+          <div className="divide-y divide-line">{row("Bank", e.bankName)}{row("No. rekening", e.bankAccountMasked)}{row("Atas nama", e.bankAccountHolder)}{row("Catatan", e.notes)}</div>
+        </dl>
+      </Card>
+      {comps && <ComponentsManager employeeId={id} items={comps} today={today} />}
+      {balance && <BalanceCard employeeId={id} balance={balance} ledger={ledger} canManage={actorCan(user, "leave_balance:manage")} />}
+      {actorCan(user, "attendance:view_all") && (
+        <Card>
+          <CardHeader title="Koreksi absensi terbaru" actions={<Link className="text-sm text-brand-700 hover:underline" href={`/rekap?employeeId=${id}`}>Rekap karyawan ini</Link>} />
+          {corrections.length === 0 ? <EmptyState title="Belum ada koreksi" /> : (
+            <ul className="divide-y divide-line text-sm">{corrections.map((c) => (
+              <li key={c.id} className="px-5 py-3"><p className="font-medium">{formatDateLong(c.date)} <span className="font-normal text-muted">· {c.correctedBy} · {formatDateTime(c.createdAt)}</span></p>
+                <p className="text-muted">{c.before ? `Sebelum: ${formatClock(c.before.checkInAt)}–${c.before.checkOutAt ? formatClock(c.before.checkOutAt) : "—"}` : "Sebelum: tidak ada catatan"} → {c.after ? `Sesudah: ${formatClock(c.after.checkInAt)}–${c.after.checkOutAt ? formatClock(c.after.checkOutAt) : "—"}` : "Catatan dihapus"} · Alasan: {c.reason}</p></li>
+            ))}</ul>
+          )}
+        </Card>
+      )}
+    </div>
+  );
+}

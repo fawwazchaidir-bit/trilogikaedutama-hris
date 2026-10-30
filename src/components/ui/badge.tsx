@@ -1,4 +1,6 @@
 import { cn } from "@/lib/cn";
+import { STATUS_LABEL, type DayStatus } from "@/lib/attendance";
+import { PAYROLL_STATUS_LABEL, REQUEST_STATUS_LABEL, type PayrollStatus, type RequestStatus } from "@/lib/labels";
 
 type Tone = "gray" | "green" | "amber" | "red" | "blue" | "dark";
 
@@ -19,31 +21,26 @@ export function Badge({ tone = "gray", children, className }: { tone?: Tone; chi
   );
 }
 
-export type InvoiceStatus = "DRAFT" | "SUBMITTED" | "ISSUED" | "CANCELLED";
-export type PaymentStatusValue = "UNPAID" | "PARTIALLY_PAID" | "PAID";
+const DAY_TONE: Record<DayStatus, Tone> = {
+  HADIR: "green", TERLAMBAT: "amber", IZIN: "blue", SAKIT: "blue", CUTI: "blue", TIDAK_HADIR: "red",
+  LIBUR: "gray", BELUM_ABSEN: "amber", MENDATANG: "gray", DI_LUAR_MASA_KERJA: "gray",
+};
 
-export function InvoiceStatusBadge({ status }: { status: InvoiceStatus }) {
-  const map: Record<InvoiceStatus, [Tone, string]> = {
-    DRAFT: ["gray", "Draft"],
-    SUBMITTED: ["amber", "Menunggu Verifikasi"],
-    ISSUED: ["blue", "Diterbitkan"],
-    CANCELLED: ["dark", "Dibatalkan"],
-  };
-  const [tone, label] = map[status];
-  return <Badge tone={tone}>{label}</Badge>;
+export function DayStatusBadge({ status, missingCheckout }: { status: DayStatus; missingCheckout?: boolean }) {
+  return (
+    <span className="inline-flex flex-wrap items-center gap-1">
+      <Badge tone={DAY_TONE[status]}>{STATUS_LABEL[status]}</Badge>
+      {missingCheckout && <Badge tone="amber">Belum check-out</Badge>}
+    </span>
+  );
 }
 
-/** `overdue` diturunkan dari jatuh tempo + saldo (tidak disimpan). */
-export function PaymentStatusBadge({ status, overdue, invoiceStatus }: { status: PaymentStatusValue; overdue?: boolean; invoiceStatus?: InvoiceStatus }) {
-  if (invoiceStatus && invoiceStatus !== "ISSUED") return <span className="text-muted">—</span>;
-  if (overdue && status !== "PAID") {
-    return <Badge tone="red">{status === "PARTIALLY_PAID" ? "Jatuh Tempo · Sebagian" : "Jatuh Tempo"}</Badge>;
-  }
-  const map: Record<PaymentStatusValue, [Tone, string]> = {
-    UNPAID: ["amber", "Belum Dibayar"],
-    PARTIALLY_PAID: ["blue", "Dibayar Sebagian"],
-    PAID: ["green", "Lunas"],
-  };
-  const [tone, label] = map[status];
-  return <Badge tone={tone}>{label}</Badge>;
+const REQ_TONE: Record<RequestStatus, Tone> = { PENDING: "amber", APPROVED: "green", REJECTED: "red", CANCELLED: "gray" };
+export function RequestStatusBadge({ status }: { status: RequestStatus }) {
+  return <Badge tone={REQ_TONE[status]}>{REQUEST_STATUS_LABEL[status]}</Badge>;
+}
+
+const PAY_TONE: Record<PayrollStatus, Tone> = { DRAFT: "gray", PENDING_APPROVAL: "amber", APPROVED: "blue", ISSUED: "green", CANCELLED: "dark" };
+export function PayrollStatusBadge({ status }: { status: PayrollStatus }) {
+  return <Badge tone={PAY_TONE[status]}>{PAYROLL_STATUS_LABEL[status]}</Badge>;
 }

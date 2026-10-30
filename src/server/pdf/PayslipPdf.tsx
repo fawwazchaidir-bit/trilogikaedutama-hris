@@ -86,6 +86,7 @@ function SlipPage({ item }: { item: PayslipPdfItem }) {
     <Page size="A4" style={s.page}>
       {item.voided && <Text style={s.watermark} fixed>DIBATALKAN</Text>}
       <View style={s.head}>
+        {/* eslint-disable-next-line jsx-a11y/alt-text -- <Image> milik react-pdf tidak punya atribut alt */}
         {logoSrc && <Image src={logoSrc} style={s.logo} />}
         <View style={{ flex: 1 }}>
           <Text style={s.company}>{pdfSafe(d.company.name)}</Text>

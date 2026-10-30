@@ -1,7 +1,7 @@
 import "server-only";
 import { NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
-import { ZodError, type ZodType } from "zod";
+import { z, ZodError, type ZodType } from "zod";
 import { AppError, Errors } from "./errors";
 import { env } from "./env";
 import { zodFieldErrors } from "./validate";
@@ -136,4 +136,16 @@ function toResponse(result: unknown): Response {
     return NextResponse.json({ data: result.data }, { status: result.status, headers: result.headers });
   }
   return NextResponse.json({ data: result ?? null });
+}
+
+/** Isi JSON permintaan apa adanya; validasi dilakukan oleh service (`parseInput`) agar aturan sama di semua jalur. */
+export async function readBody(req: Request, maxBytes = MAX_BODY_BYTES): Promise<unknown> {
+  return readJson(req, z.unknown(), maxBytes);
+}
+
+/** Query string → objek (nilai kosong diabaikan). Divalidasi oleh service. */
+export function queryObject(req: Request): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [k, v] of new URL(req.url).searchParams) if (v !== "") out[k] = v;
+  return out;
 }

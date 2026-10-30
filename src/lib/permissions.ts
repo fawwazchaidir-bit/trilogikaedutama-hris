@@ -39,7 +39,6 @@ export const PERMISSIONS = [
   "payroll:revoke",          // batalkan periode yang sudah disetujui/terbit (pimpinan)
   "payroll:rules",           // aturan penggajian
   "payslip:download_all",
-  "report:view",
   "audit:view",
   "settings:view",
   "settings:manage",         // profil lembaga, logo, kebijakan absensi/cuti
@@ -59,8 +58,7 @@ export const ROLE_PERMISSIONS: Record<Role, ReadonlySet<Permission>> = {
     "recap:view_all", "recap:export",
     "payroll:components", "payroll:view", "payroll:prepare",
     "payslip:download_all",
-    "report:view",
-    "settings:view",
+      "settings:view",
   ]),
   EMPLOYEE: new Set<Permission>([]),
 };
@@ -105,7 +103,6 @@ export const NAV_ITEMS: readonly NavItem[] = [
   { href: "/pengajuan", label: "Pengajuan & Cuti", anyOf: ["leave:view_all"], group: "sdm" },
   { href: "/rekap", label: "Rekap Absensi", anyOf: ["recap:view_all"], group: "sdm" },
   { href: "/penggajian", label: "Penggajian", anyOf: ["payroll:view"], group: "gaji" },
-  { href: "/laporan", label: "Laporan", anyOf: ["report:view"], group: "gaji" },
   { href: "/audit-log", label: "Audit Log", anyOf: ["audit:view"], group: "sistem" },
   { href: "/pengaturan", label: "Pengaturan", anyOf: ["settings:view"], group: "sistem" },
   { href: "/pengguna", label: "Akun Pengguna", anyOf: ["user:manage", "user:manage_employee"], group: "sistem" },
