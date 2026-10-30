@@ -4,7 +4,7 @@ Aplikasi web internal untuk **data karyawan, absensi, rekap otomatis, penggajian
 responsif (komputer & ponsel), tampilan mengikuti aplikasi invoice Trilogika agar familier.
 
 > **Bukan mockup.** Setiap tombol terhubung ke database PostgreSQL dan diuji: 225 tes unit/integrasi (terhadap PostgreSQL sungguhan)
-> dan 37 tes E2E di browser (login → absensi → pengajuan → persetujuan → penggajian → slip PDF → pembatalan/revisi).
+> dan 38 tes E2E di browser (login → absensi → pengajuan → persetujuan → penggajian → slip PDF → pembatalan/revisi).
 > Data demo bersifat fiktif. **Baca [docs/KEPUTUSAN-BISNIS.md](docs/KEPUTUSAN-BISNIS.md) sebelum dipakai operasional.**
 
 ## Peran

@@ -67,7 +67,7 @@ test.describe("HR — data karyawan", () => {
     await expect(page.getByText("Divisi diubah.")).toBeVisible();
     await dlg.getByRole("button", { name: "Nonaktifkan divisi Divisi E2E Baru" }).click();
     await expect(page.getByText("Divisi dinonaktifkan.")).toBeVisible();
-    await expect(dlg.getByText("Nonaktif")).toBeVisible();
+    await expect(dlg.getByText("Nonaktif", { exact: true })).toBeVisible();
   });
 
   test("tambah → validasi → cari → detail → komponen gaji → ubah → rekening → nonaktifkan", async ({ page }) => {
