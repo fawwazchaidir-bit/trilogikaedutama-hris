@@ -261,6 +261,16 @@ ALTER TABLE "work_schedules" ADD CONSTRAINT "work_schedules_times" CHECK (
   AND "endTime" <> "startTime"
   AND "absentCutoffTime" <> "startTime"
   AND ("endTime" < "startTime" OR "absentCutoffTime" > "startTime")
+  AND (
+    "endTime" > "startTime"
+    OR (
+      -- Shift lintas tengah malam: durasi maksimal 16 jam dan batas "tidak hadir" harus jatuh sebelum shift berakhir.
+      ("endTime"::time - "startTime"::time) + interval '24 hours' <= interval '16 hours'
+      AND (CASE WHEN "absentCutoffTime" > "startTime" THEN "absentCutoffTime"::time - "startTime"::time
+                ELSE "absentCutoffTime"::time - "startTime"::time + interval '24 hours' END)
+          <= ("endTime"::time - "startTime"::time) + interval '24 hours'
+    )
+  )
 );
 
 -- ─────────────────────────── Pengajuan: setengah hari ───────────────────────────

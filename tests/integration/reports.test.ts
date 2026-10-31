@@ -17,7 +17,7 @@ import { addAttendance, addComponent, resetDb, seedFixtures, type Fixtures } fro
 
 let fx: Fixtures;
 const fail = async (p: Promise<unknown>) => { try { await p; return null; } catch (e) { return e as AppError; } };
-const [AYU, BUDI, CITRA] = [0, 1, 2] as const;
+const [AYU, BUDI] = [0, 1] as const;
 let soloDiv: string;
 
 /** Data Januari 2026 yang sama dengan tes penggajian: Ayu 17 hadir (1 terlambat 20 mnt), 1 tidak hadir, 1 izin, 2 sakit, dari 21 hari kerja (libur 1 Jan). */

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { assessRisk, blockedMessage, BLOCK_AT, decide, FLAG_AT, type RiskFacts } from "@/lib/location-risk";
-import { ipInNetworks, isValidNetwork, parseNetwork } from "@/lib/ip";
+import { clientIpFromForwardedFor, ipInNetworks, isValidNetwork, parseNetwork } from "@/lib/ip";
 
 const NOW = 1_760_000_000_000;
 /** Pembacaan GPS yang tampak sah: presisi tinggi, baru, jam perangkat sinkron. */
@@ -129,3 +129,25 @@ describe("pencocokan IP / CIDR", () => {
     expect(parseNetwork("203.0.113.77/24")!.prefix).toBe(24);
   });
 });
+
+describe("alamat klien dari X-Forwarded-For", () => {
+  it("memakai entri yang ditambahkan proxy tepercaya (kanan), bukan yang dikirim klien (kiri) — anti pemalsuan jaringan kantor", () => {
+    // Klien jahat mengirim "X-Forwarded-For: 203.0.113.7" (IP kantor); proxy menambahkan alamat asli di kanan.
+    expect(clientIpFromForwardedFor("203.0.113.7, 198.51.100.99")).toBe("198.51.100.99");
+    expect(clientIpFromForwardedFor("198.51.100.99")).toBe("198.51.100.99");
+    expect(clientIpFromForwardedFor(" 198.51.100.99 ")).toBe("198.51.100.99");
+  });
+  it("dua proxy tepercaya (mis. CDN → Nginx): entri ke-2 dari kanan; entri kurang dari jumlah proxy → paling kiri yang ada", () => {
+    expect(clientIpFromForwardedFor("6.6.6.6, 198.51.100.5, 10.0.0.2", 2)).toBe("198.51.100.5");
+    expect(clientIpFromForwardedFor("198.51.100.5", 2)).toBe("198.51.100.5");
+  });
+  it("kosong / sampah / terlalu panjang → null; hops tak valid dianggap 1", () => {
+    expect(clientIpFromForwardedFor(null)).toBeNull();
+    expect(clientIpFromForwardedFor("")).toBeNull();
+    expect(clientIpFromForwardedFor(" , ,")).toBeNull();
+    expect(clientIpFromForwardedFor("x".repeat(65))).toBeNull();
+    expect(clientIpFromForwardedFor("1.1.1.1, 2.2.2.2", 0)).toBe("2.2.2.2");
+    expect(clientIpFromForwardedFor("1.1.1.1, 2.2.2.2", Number.NaN)).toBe("2.2.2.2");
+  });
+});
+

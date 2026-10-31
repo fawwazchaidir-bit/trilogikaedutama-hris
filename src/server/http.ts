@@ -66,7 +66,8 @@ export function errorResponse(err: unknown): NextResponse {
     if (err.code === "P2002") {
       return NextResponse.json({ error: { code: "CONFLICT", message: "Data dengan nilai yang sama sudah ada." } }, { status: 409 });
     }
-    if (err.code === "P2025") {
+    // P2023: nilai kolom tidak sesuai tipenya — di sini hampir selalu id ngawur pada URL (bukan UUID) → sama dengan "tidak ada".
+    if (err.code === "P2025" || err.code === "P2023") {
       return NextResponse.json({ error: { code: "NOT_FOUND", message: "Data tidak ditemukan." } }, { status: 404 });
     }
     if (err.code === "P2003") {

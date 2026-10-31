@@ -14,6 +14,8 @@ const schema = z.object({
     try { new Intl.DateTimeFormat("en", { timeZone: tz }); return true; } catch { return false; }
   }, "APP_TIMEZONE bukan zona waktu IANA yang valid"),
   TRUST_PROXY: bool.default(false),
+  /** Jumlah reverse proxy tepercaya di depan aplikasi (1 = Nginx/Caddy langsung; 2 = mis. Cloudflare → Nginx). Alamat klien diambil dari X-Forwarded-For sebanyak ini dari KANAN. */
+  TRUST_PROXY_HOPS: int(1, 1, 10),
   LOGIN_MAX_ATTEMPTS: int(5, 1, 100),
   LOGIN_WINDOW_MINUTES: int(15, 1, 1440),
   LOGIN_LOCKOUT_MINUTES: int(15, 1, 1440),
