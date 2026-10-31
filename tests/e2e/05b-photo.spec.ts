@@ -81,9 +81,8 @@ test("HR melihat foto absensi di rincian rekap; berkas JPEG nyata (bercap), hany
   const hrCtx = await browser.newContext();
   const hr = await hrCtx.newPage();
   await login(hr, USERS.hr);
-  await hr.goto("/karyawan?q=Budi");
-  await hr.getByRole("link", { name: /Budi/ }).first().click();
-  const employeeId = hr.url().split("/karyawan/")[1]!.split(/[?#]/)[0]!;
+  const found = (await (await hr.request.get("/api/employees?q=Budi")).json()).data.items as { id: string; fullName: string }[];
+  const employeeId = found.find((e) => /^Budi/.test(e.fullName))!.id;
   await hr.goto(`/rekap/${employeeId}?view=bulanan`);
   const link = hr.getByRole("link", { name: "Masuk" }).first();
   await expect(link).toBeVisible();
