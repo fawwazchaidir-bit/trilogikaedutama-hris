@@ -51,6 +51,7 @@ async function AdminView() {
         <Tile label="Pengajuan menunggu" value={d.pendingRequests} tone={d.pendingRequests ? "red" : undefined} hint={d.pendingRequests ? "Perlu persetujuan HR" : undefined} href="/pengajuan?status=PENDING" />
         <Tile label="Absensi belum lengkap" value={d.incomplete} tone={d.incomplete ? "red" : undefined} hint="Tanpa check-out, 31 hari terakhir" href="/absensi?status=BELUM_CHECKOUT" />
         <Tile label="Belum check-out hari ini" value={d.openCheckouts} hint="Informasi — belum dihitung tidak lengkap" />
+        {d.openLocationReviews !== null && d.openLocationReviews > 0 && <Tile label="Lokasi perlu ditinjau" value={d.openLocationReviews} tone="amber" hint="Absensi lokasi ditandai/ditolak" href="/lokasi" />}
       </section>
 
       <div className="grid gap-4 lg:grid-cols-2">

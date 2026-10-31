@@ -25,11 +25,12 @@ function useServerClock(serverNow: string, timeZone: string) {
   return new Intl.DateTimeFormat("id-ID", { timeZone, hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23" }).format(now).replace(/\./g, ":");
 }
 
-function readLocation(): Promise<{ lat: number; lng: number; accuracy: number }> {
+/** Koordinat + waktu pembacaan (jam perangkat) agar server dapat menilai kesegaran pembacaan. */
+function readLocation(): Promise<{ lat: number; lng: number; accuracy: number; timestamp: number; clientNow: number }> {
   return new Promise((resolve, reject) => {
     if (!("geolocation" in navigator)) return reject(new Error("Perangkat/browser Anda tidak mendukung lokasi."));
     navigator.geolocation.getCurrentPosition(
-      (p) => resolve({ lat: p.coords.latitude, lng: p.coords.longitude, accuracy: p.coords.accuracy }),
+      (p) => resolve({ lat: p.coords.latitude, lng: p.coords.longitude, accuracy: p.coords.accuracy, timestamp: p.timestamp, clientNow: Date.now() }),
       (e) => reject(new Error(
         e.code === e.PERMISSION_DENIED ? "Izin lokasi ditolak. Aktifkan izin lokasi untuk situs ini di pengaturan browser/ponsel, lalu coba lagi."
           : e.code === e.TIMEOUT ? "Lokasi tidak berhasil dibaca (waktu habis). Pastikan GPS aktif dan coba lagi."
@@ -105,7 +106,7 @@ export function AttendancePanel({ initial }: { initial: TodayState }) {
         {state.geo.enabled && (state.canCheckIn || state.canCheckOut) && (
           <p className="flex items-start gap-1.5 text-xs text-muted"><MapPin className="mt-0.5 size-3.5 shrink-0" />
             Absensi berbasis lokasi aktif{state.geo.name ? ` (${state.geo.name})` : ""}: browser akan meminta izin lokasi satu kali saat Anda menekan tombol. Radius {state.geo.radiusMeters} m.
-            Lokasi perangkat hanya alat bantu dan tidak dilacak terus-menerus.
+            Lokasi dibaca sekali dan diperiksa kewajarannya (mis. terhadap aplikasi lokasi palsu); tidak dilacak terus-menerus.
           </p>
         )}
         <div className="grid grid-cols-2 gap-3">

@@ -5,7 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useState } from "react";
 import {
   Bell, CalendarDays, CircleUserRound, ClipboardCheck, ClipboardList, FileText, KeyRound, LayoutDashboard, LogOut, Menu,
-  ScrollText, Settings, ShieldCheck, TableProperties, Users, UserCog, Wallet, X, Clock, FilePlus2, Timer, BarChart3, ShieldEllipsis,
+  ScrollText, Settings, ShieldCheck, TableProperties, Users, UserCog, Wallet, X, Clock, FilePlus2, Timer, BarChart3, ShieldEllipsis, MapPinned,
 } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { api } from "@/lib/api-client";
@@ -19,6 +19,7 @@ const ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
   "/slip-saya": FileText,
   "/lembur-saya": Timer,
   "/lembur": Timer,
+  "/lokasi": MapPinned,
   "/laporan": BarChart3,
   "/akun": ShieldEllipsis,
   "/profil": CircleUserRound,

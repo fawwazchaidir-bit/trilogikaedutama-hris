@@ -10,17 +10,11 @@ import { writeAudit } from "../audit";
 import { dateToIso, isoToDate } from "../json";
 import { computeEmployeePeriod, employeeLite, loadRangeContext } from "./context";
 import { geoPolicyOf, getSettings } from "./settings";
-import { evaluateGeofence, isValidReading } from "@/lib/geo";
+import { evaluatePunchLocation, locationSchema, persistLocationCheck, type PunchContext } from "./location";
 import { isOvernight, OVERNIGHT_CHECKOUT_GRACE_MINUTES, resolveSchedule, shiftWindow, type DayResult, type ScheduleLite } from "@/lib/attendance";
 import { formatClock } from "@/lib/format";
 import { hhmm, isoDate, optionalText, requiredText, uuid } from "@/lib/validation/common";
 import { addDays, monthRange, todayIso, zonedInstant } from "@/lib/time";
-
-const locationSchema = z.object({
-  lat: z.number().min(-90).max(90),
-  lng: z.number().min(-180).max(180),
-  accuracy: z.number().min(0).max(100_000).nullable().optional(),
-}).nullable().optional();
 
 export const punchSchema = z.object({
   note: optionalText(200, "Catatan"),
@@ -124,16 +118,8 @@ export async function getTodayState(actor: Actor, now: Date = new Date(), opts: 
   };
 }
 
-function geoOrThrow(policy: ReturnType<typeof geoPolicyOf>, loc: z.infer<typeof locationSchema>) {
-  const reading = loc ? { lat: loc.lat, lng: loc.lng, accuracy: loc.accuracy ?? null } : null;
-  if (reading && !isValidReading(reading)) throw Errors.validation("Data lokasi dari perangkat tidak valid.");
-  const verdict = evaluateGeofence(policy, reading);
-  if (!verdict.ok) throw Errors.validation(verdict.message, undefined);
-  return { reading: policy.enabled ? reading : null, distance: verdict.distance };
-}
-
 /** Check-in. Waktu = jam SERVER. Satu baris per karyawan per hari (unik) → check-in ganda mustahil, juga saat klik ganda/balapan. */
-export async function checkIn(actor: Actor, raw: unknown, now: Date = new Date()): Promise<TodayState> {
+export async function checkIn(actor: Actor, raw: unknown, now: Date = new Date(), ctx: PunchContext = { ip: null, deviceToken: null }): Promise<TodayState> {
   const employeeId = requireSelf(actor);
   const input = parseInput(punchSchema, raw ?? {});
   const { emp, workDate: today, day, att } = await dayContext(employeeId, now);
@@ -143,7 +129,7 @@ export async function checkIn(actor: Actor, raw: unknown, now: Date = new Date()
   if (fullDayLeave(day)) {
     throw Errors.validation(`Anda memiliki ${day.status.toLowerCase()} yang disetujui hari ini, sehingga tidak dapat check-in. Hubungi HR bila ingin membatalkannya.`);
   }
-  const geo = geoOrThrow(geoPolicyOf(await getSettings()), input.location);
+  const geo = await evaluatePunchLocation({ employeeId, employeeName: emp.fullName, kind: "CHECK_IN", workDate: today, now, location: input.location, ctx });
   try {
     await transaction(async (tx) => {
       const a = await tx.attendance.create({
@@ -152,9 +138,10 @@ export async function checkIn(actor: Actor, raw: unknown, now: Date = new Date()
           ...(geo.reading ? { checkInLat: geo.reading.lat, checkInLng: geo.reading.lng, checkInAccuracy: geo.reading.accuracy, checkInDistance: geo.distance } : {}),
         },
       });
+      await persistLocationCheck(tx, geo, { employeeId, employeeName: emp.fullName, attendanceId: a.id, kind: "CHECK_IN", workDate: today });
       await writeAudit(tx, actor, {
         action: "attendance.check_in", entityType: "Attendance", entityId: a.id,
-        summary: `Check-in ${formatClock(now, env().APP_TIMEZONE)}${geo.distance !== null ? ` (${geo.distance} m dari titik lokasi)` : ""}`,
+        summary: `Check-in ${formatClock(now, env().APP_TIMEZONE)}${geo.distance !== null ? ` (${geo.distance} m dari titik lokasi)` : ""}${geo.check?.decision === "FLAGGED" ? ` — lokasi ditandai (skor ${geo.check.riskScore})` : ""}`,
       });
     });
   } catch (e) {
@@ -168,14 +155,14 @@ export async function checkIn(actor: Actor, raw: unknown, now: Date = new Date()
   return getTodayState(actor, now, { workDate: today });
 }
 
-export async function checkOut(actor: Actor, raw: unknown, now: Date = new Date()): Promise<TodayState> {
+export async function checkOut(actor: Actor, raw: unknown, now: Date = new Date(), ctx: PunchContext = { ip: null, deviceToken: null }): Promise<TodayState> {
   const employeeId = requireSelf(actor);
   const input = parseInput(punchSchema, raw ?? {});
   const { emp, att, workDate } = await dayContext(employeeId, now);
   if (!emp.isActive) throw Errors.forbidden("Data karyawan Anda nonaktif.");
   if (!att) throw Errors.validation("Anda belum check-in hari ini.");
   if (att.checkOutAt) throw Errors.conflict(`Anda sudah check-out hari ini pukul ${formatClock(att.checkOutAt, env().APP_TIMEZONE)}.`);
-  const geo = geoOrThrow(geoPolicyOf(await getSettings()), input.location);
+  const geo = await evaluatePunchLocation({ employeeId, employeeName: emp.fullName, kind: "CHECK_OUT", workDate, now, location: input.location, ctx });
   // Jaga agar check-out selalu setelah check-in (CHECK constraint) walau jam server bergeser.
   const outAt = now.getTime() > att.checkInAt.getTime() ? now : new Date(att.checkInAt.getTime() + 1000);
   await transaction(async (tx) => {
@@ -187,9 +174,10 @@ export async function checkOut(actor: Actor, raw: unknown, now: Date = new Date(
       },
     });
     if (r.count === 0) throw Errors.conflict("Anda sudah check-out hari ini.");
+    await persistLocationCheck(tx, geo, { employeeId, employeeName: emp.fullName, attendanceId: att.id, kind: "CHECK_OUT", workDate });
     await writeAudit(tx, actor, {
       action: "attendance.check_out", entityType: "Attendance", entityId: att.id,
-      summary: `Check-out ${formatClock(outAt, env().APP_TIMEZONE)}${geo.distance !== null ? ` (${geo.distance} m dari titik lokasi)` : ""}`,
+      summary: `Check-out ${formatClock(outAt, env().APP_TIMEZONE)}${geo.distance !== null ? ` (${geo.distance} m dari titik lokasi)` : ""}${geo.check?.decision === "FLAGGED" ? ` — lokasi ditandai (skor ${geo.check.riskScore})` : ""}`,
     });
   });
   // Shift malam: check-out dini hari menutup shift kemarin — kembalikan state shift itu (bukan hari baru yang kosong).
