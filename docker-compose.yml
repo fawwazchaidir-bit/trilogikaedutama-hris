@@ -41,5 +41,19 @@ services:
       APP_URL: ${APP_URL:?isi APP_URL (https://…) di .env}
       APP_TIMEZONE: Asia/Jakarta
       TRUST_PROXY: "true"            # aplikasi berada di belakang reverse proxy tepercaya
+      TRUST_PROXY_HOPS: "1"          # jumlah proxy tepercaya di depan aplikasi (alamat klien diambil dari kanan X-Forwarded-For)
+      # Notifikasi email / WhatsApp & lupa password (opsional; kosong = nonaktif). Lihat docs/DEPLOYMENT.md.
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_SECURE: ${SMTP_SECURE:-false}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      MAIL_FROM: ${MAIL_FROM:-}
+      WHATSAPP_PROVIDER: ${WHATSAPP_PROVIDER:-}
+      WHATSAPP_TOKEN: ${WHATSAPP_TOKEN:-}
+      WHATSAPP_API_URL: ${WHATSAPP_API_URL:-}
+      WHATSAPP_PHONE_NUMBER_ID: ${WHATSAPP_PHONE_NUMBER_ID:-}
+      WHATSAPP_TEMPLATE_NAME: ${WHATSAPP_TEMPLATE_NAME:-}
+      CRON_SECRET: ${CRON_SECRET:-}
 volumes:
   pgdata:

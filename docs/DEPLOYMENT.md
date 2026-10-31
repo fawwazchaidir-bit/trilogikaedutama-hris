@@ -8,10 +8,16 @@
 | `DATA_ENCRYPTION_KEY` | ya | 32 byte base64 untuk enkripsi nomor rekening: `openssl rand -base64 32`. **Simpan terpisah dari database & cadangan.** Hilang = nomor rekening tak terbaca; **mengganti nilainya** membuat data lama gagal didekripsi (belum ada rotasi otomatis). |
 | `APP_URL` | ya | URL publik. Produksi wajib `https://` (cookie `Secure`/`__Host-`, pemeriksaan Origin). |
 | `APP_TIMEZONE` | tidak | Default `Asia/Jakarta`. Semua "hari ini", jam masuk/pulang, dan batas tidak hadir mengacu ke sini. |
-| `TRUST_PROXY` | tidak | `true` **hanya** bila di belakang reverse proxy tepercaya (agar rate limit per-IP memakai `X-Forwarded-For`). |
+| `TRUST_PROXY` | tidak | `true` **hanya** bila di belakang reverse proxy tepercaya (agar rate limit per-IP dan "jaringan kantor" memakai `X-Forwarded-For`). |
+| `TRUST_PROXY_HOPS` | tidak | Jumlah proxy tepercaya di depan aplikasi (default `1`; Cloudflare → Nginx = `2`). Alamat klien diambil dari `X-Forwarded-For` sebanyak ini dari **kanan** — entri paling kiri dapat dikirim klien sendiri sehingga tidak pernah dipercaya. |
 | `LOGIN_MAX_ATTEMPTS` `LOGIN_WINDOW_MINUTES` `LOGIN_LOCKOUT_MINUTES` | tidak | Default 5 / 15 / 15. |
 | `SESSION_IDLE_HOURS` `SESSION_ABSOLUTE_DAYS` | tidak | Default 8 jam tak aktif / 7 hari. |
 | `MAX_UPLOAD_MB` | tidak | Default 3. |
+| `SMTP_HOST` `SMTP_PORT` `SMTP_SECURE` `SMTP_USER` `SMTP_PASS` `MAIL_FROM` | tidak | Email (notifikasi & **lupa password mandiri**). Tanpa `SMTP_HOST`+`MAIL_FROM` fitur email nonaktif (notifikasi dalam aplikasi tetap jalan; reset oleh Admin/HR tetap ada). `SMTP_SECURE=true` untuk port 465; selain itu STARTTLS. |
+| `WHATSAPP_PROVIDER` `WHATSAPP_TOKEN` `WHATSAPP_API_URL` `WHATSAPP_PHONE_NUMBER_ID` `WHATSAPP_TEMPLATE_NAME` `WHATSAPP_TEMPLATE_LANG` | tidak | WhatsApp: `fonnte` (token), `cloud_api` (token + phone number id; template untuk pesan di luar jendela 24 jam), atau `webhook` (POST JSON `{channel,to,text,app}` ke URL Anda). Kosong = nonaktif. |
+| `DELIVERY_WORKER` | tidak | `true` (default): pekerja pengiriman antrean di dalam aplikasi, tiap 30 detik. `false` bila memakai pemicu eksternal. |
+| `CRON_SECRET` | tidak | ≥ 16 karakter; mengaktifkan `POST /api/internal/deliveries` (Bearer) untuk cron/systemd timer. |
+| `PASSWORD_RESET_MINUTES` | tidak | Masa berlaku tautan lupa password; default 30. |
 | `ADMIN_EMAIL` `ADMIN_NAME` `ADMIN_PASSWORD` | seed produksi | Super Admin pertama. Tanpa password default; seed gagal bila lemah. |
 
 Rahasia hanya dari environment — tidak ada kredensial di kode. `.env` tidak di-commit (`.gitignore`).
@@ -36,6 +42,19 @@ docker compose up -d --build     # db → migrate+seed (sekali) → app (127.0.0
 Aplikasi hanya mendengarkan loopback; pasang Caddy/Nginx dengan TLS. Contoh Caddy: `hris.contoh.id { reverse_proxy 127.0.0.1:3000 }`.
 > Catatan: image belum dibuild di lingkungan pengembangan (tanpa daemon Docker). Mode `standalone` yang dipakai Dockerfile sudah diuji berjalan; uji `compose up --build` di server Anda sebelum produksi.
 
+## Notifikasi email & WhatsApp
+
+1. Isi variabel SMTP/WhatsApp di `.env`, restart aplikasi.
+2. Masuk → **Keamanan & Notifikasi → Kirim email/WhatsApp uji** untuk membuktikan konfigurasi bekerja (dibatasi 5/jam).
+3. **Pengaturan → Pengiriman email & WhatsApp** menampilkan antrean (menunggu/terkirim/gagal), alasan kegagalan terakhir, serta tombol *Proses sekarang* dan *Antre ulang yang gagal* (Super Admin).
+4. Pengguna memilih saluran & nomor WhatsApp sendiri di *Keamanan & Notifikasi* (format 08…/+62… dinormalisasi).
+5. Pemicu eksternal (opsional): `DELIVERY_WORKER=false`, `CRON_SECRET=…`, lalu cron tiap menit: `curl -fsS -X POST -H "Authorization: Bearer $CRON_SECRET" https://hris.contoh.id/api/internal/deliveries`.
+
+Catatan: **WhatsApp Cloud API** hanya mengirim teks bebas dalam jendela 24 jam sejak pesan terakhir pengguna; untuk notifikasi proaktif buat template (satu variabel isi `{{1}}`) di Meta, tunggu disetujui, lalu isi `WHATSAPP_TEMPLATE_NAME`. **Fonnte**: sambungkan perangkat WhatsApp di dashboard Fonnte dan isi tokennya. Integrasi dengan penyedia sungguhan belum diuji di lingkungan pengembangan.
+
+## Jaringan kantor (pencegahan lokasi palsu)
+Butuh `TRUST_PROXY=true` dan proxy yang meneruskan alamat klien asli lewat `X-Forwarded-For` (Caddy/Nginx; atur `TRUST_PROXY_HOPS` sesuai jumlah proxy). Aplikasi mengambil entri yang **ditambahkan** proxy (dari kanan), sehingga header palsu dari klien tidak dapat dipakai berpura-pura berada di jaringan kantor — tetapi port aplikasi tidak boleh dapat dijangkau langsung dari internet (hanya lewat proxy). Isi alamat IP publik/CIDR Wi-Fi kantor di Pengaturan → Kebijakan. IP yang diteruskan dari proxy adalah yang dicatat dan dicocokkan.
+
 ## Cadangan & pemulihan
 
 ```bash
@@ -56,7 +75,7 @@ CONFIRM_RESTORE=yes TARGET_URL=… npm run db:restore -- backups/hris_….dump
 - **Salin arsip ke penyimpanan di luar server** (terenkripsi). Arsip berisi data pribadi & gaji.
 - Cadangkan `DATA_ENCRYPTION_KEY` **secara terpisah** dari arsip.
 - Pemulihan ke versi aplikasi yang lebih lama tidak didukung: jalankan versi aplikasi yang sama atau lebih baru, lalu `npm run db:migrate`.
-- Latihan pemulihan diverifikasi di lingkungan pengembangan: dump 22 tabel → pulih ke DB kosong → `db:verify` lulus → penimpaan tanpa konfirmasi ditolak.
+- Latihan pemulihan diverifikasi di lingkungan pengembangan: dump 22 tabel (versi Tahap 1; Tahap 2 menambah tabel: pengajuan lembur, catatan lokasi, antrean pengiriman, pemulihan 2FA, tantangan login, token reset) → pulih ke DB kosong → `db:verify` lulus → penimpaan tanpa konfirmasi ditolak.
 
 ## Pemeliharaan
 - **Pembaruan:** `git pull` → `npm ci` → `npm run db:migrate` → `npm run build` → restart. Migrasi bersifat maju-saja; cadangkan sebelum migrasi.
