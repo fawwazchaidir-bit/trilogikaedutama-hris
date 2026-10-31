@@ -25,8 +25,10 @@ test("Super Admin mewajibkan foto absensi; opsi jaringan kantor (Wi-Fi/IP) sudah
   await login(page, USERS.pimpinan);
   await page.goto("/pengaturan");
   const form = page.getByRole("form", { name: "Form kebijakan" });
-  await expect(form.getByText(/jaringan kantor/i)).toHaveCount(0);
-  await expect(form.getByText(/Wi-Fi/)).toHaveCount(1); // hanya pada keterangan foto: "tanpa Wi-Fi/jaringan kantor"
+  // Tidak ada lagi isian/pilihan jaringan kantor (kata itu hanya muncul pada keterangan foto: "tidak bergantung pada Wi-Fi/jaringan kantor").
+  await expect(form.getByLabel(/jaringan kantor/i)).toHaveCount(0);
+  await expect(form.getByRole("checkbox", { name: /jaringan/i })).toHaveCount(0);
+  await expect(form.getByRole("textbox", { name: /jaringan/i })).toHaveCount(0);
   const mode = form.locator('select:has(option[value="OPTIONAL"])');
   await mode.selectOption("REQUIRED");
   await expect(form.getByLabel("Foto wajib disertai lokasi (izin GPS)")).toBeChecked();
