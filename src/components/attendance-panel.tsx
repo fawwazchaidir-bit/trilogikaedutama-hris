@@ -70,7 +70,7 @@ export function AttendancePanel({ initial }: { initial: TodayState }) {
   const d = state.day;
   return (
     <Card>
-      <CardHeader title="Absensi hari ini" description={formatDateWithDay(state.today)} />
+      <CardHeader title="Absensi hari ini" description={state.workDate !== state.today ? `Shift ${formatDateWithDay(state.workDate)} masih berjalan` : formatDateWithDay(state.today)} />
       <div className="space-y-5 p-5">
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div>
@@ -81,7 +81,7 @@ export function AttendancePanel({ initial }: { initial: TodayState }) {
             {state.schedule ? (
               <>
                 <p className="font-medium text-ink">{state.schedule.name}</p>
-                <p className="text-muted">{dotTime(state.schedule.startTime)} – {dotTime(state.schedule.endTime)} · toleransi {state.schedule.lateToleranceMinutes} mnt</p>
+                <p className="text-muted">{dotTime(state.schedule.startTime)} – {dotTime(state.schedule.endTime)}{state.schedule.endTime < state.schedule.startTime ? " (+1 hari)" : ""} · toleransi {state.schedule.lateToleranceMinutes} mnt</p>
               </>
             ) : <p className="text-muted">Tidak ada jadwal kerja</p>}
             <div className="mt-1.5 flex justify-end"><DayStatusBadge status={d.status} missingCheckout={d.missingCheckout} /></div>
@@ -94,8 +94,8 @@ export function AttendancePanel({ initial }: { initial: TodayState }) {
         {error && <Notice tone="danger">{error}</Notice>}
 
         <dl className="grid grid-cols-2 gap-3 text-sm">
-          <div className="rounded-md border border-line bg-canvas/60 p-3"><dt className="text-xs text-muted">Check-in</dt><dd className="tabular mt-0.5 text-lg font-semibold">{d.checkInTime ? dotTime(d.checkInTime) : "—"}</dd></div>
-          <div className="rounded-md border border-line bg-canvas/60 p-3"><dt className="text-xs text-muted">Check-out</dt><dd className="tabular mt-0.5 text-lg font-semibold">{d.checkOutTime ? dotTime(d.checkOutTime) : "—"}</dd></div>
+          <div className="rounded-md border border-line bg-canvas/60 p-3"><dt className="text-xs text-muted">Check-in</dt><dd className="tabular mt-0.5 text-lg font-semibold">{d.checkInTime ? dotTime(d.checkInTime) : "—"}{d.checkInNextDay && <span className="ml-1 text-xs font-normal text-muted">(+1 hari)</span>}</dd></div>
+          <div className="rounded-md border border-line bg-canvas/60 p-3"><dt className="text-xs text-muted">Check-out</dt><dd className="tabular mt-0.5 text-lg font-semibold">{d.checkOutTime ? dotTime(d.checkOutTime) : "—"}{d.checkOutNextDay && <span className="ml-1 text-xs font-normal text-muted">(+1 hari)</span>}</dd></div>
         </dl>
         {d.checkInTime && <p className="text-xs text-muted">{d.explain}</p>}
 

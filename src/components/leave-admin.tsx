@@ -10,7 +10,8 @@ import { RequestStatusBadge } from "@/components/ui/badge";
 import { Table, TableWrap, Td, Th } from "@/components/ui/table";
 import { useToast } from "@/components/ui/toast";
 import { api, ApiClientError, errorMessage } from "@/lib/api-client";
-import { formatDateRange, formatDateTime } from "@/lib/format";
+import { formatDateRange, formatDateTime, formatDays } from "@/lib/format";
+import { DAY_PART_LABEL } from "@/lib/attendance";
 import { LEAVE_TYPE_LABEL } from "@/lib/labels";
 import type { LeaveDto } from "@/server/services/leave";
 
@@ -47,7 +48,7 @@ export function LeaveReviewTable({ items, canReview, selfEmployeeId, isSuper }: 
             return (
               <tr key={l.id}>
                 <Td className="font-medium">{l.employeeName}<span className="block text-xs font-normal text-muted">{l.employeeNo}{l.division ? ` · ${l.division}` : ""}</span></Td>
-                <Td>{LEAVE_TYPE_LABEL[l.type]}</Td><Td className="whitespace-nowrap">{formatDateRange(l.startDate, l.endDate)}</Td><Td align="right">{l.workingDays ?? "—"}</Td>
+                <Td>{LEAVE_TYPE_LABEL[l.type]}</Td><Td className="whitespace-nowrap">{formatDateRange(l.startDate, l.endDate)}</Td><Td align="right">{l.workingDays !== null ? formatDays(l.workingDays) : "—"}{l.dayPart !== "FULL" && <span className="block text-xs text-muted">{DAY_PART_LABEL[l.dayPart]}</span>}</Td>
                 <Td className="min-w-56 max-w-sm">{l.reason}{l.attachmentUrl && <a href={l.attachmentUrl} className="mt-1 flex items-center gap-1 text-brand-700 hover:underline"><Paperclip className="size-3.5" />Lampiran</a>}
                   {l.reviewedBy && <span className="mt-1 block text-xs text-muted">{l.status === "APPROVED" ? "Disetujui" : l.status === "REJECTED" ? "Ditolak" : "Diputuskan"} oleh {l.reviewedBy}, {formatDateTime(l.reviewedAt)}{l.reviewNote ? ` · ${l.reviewNote}` : ""}</span>}
                   {l.status === "CANCELLED" && <span className="mt-1 block text-xs text-muted">Dibatalkan: {l.cancelReason}</span>}</Td>
@@ -64,7 +65,7 @@ export function LeaveReviewTable({ items, canReview, selfEmployeeId, isSuper }: 
         </Table></TableWrap>
       )}
       <Dialog open={!!action} onClose={() => !busy && close()} size="sm" title={title}
-        description={action ? `${action.leave.employeeName} · ${LEAVE_TYPE_LABEL[action.leave.type]} ${formatDateRange(action.leave.startDate, action.leave.endDate)} (${action.leave.workingDays} hari kerja)` : undefined}
+        description={action ? `${action.leave.employeeName} · ${LEAVE_TYPE_LABEL[action.leave.type]} ${formatDateRange(action.leave.startDate, action.leave.endDate)} (${action.leave.workingDays !== null ? formatDays(action.leave.workingDays) : "—"} hari kerja${action.leave.dayPart !== "FULL" ? `, ${DAY_PART_LABEL[action.leave.dayPart].toLowerCase()}` : ""})` : undefined}
         footer={<><Button onClick={close} disabled={busy}>Batal</Button><Button variant={action?.kind === "APPROVE" ? "primary" : "danger"} loading={busy} onClick={submit}>{action?.kind === "APPROVE" ? "Setujui" : action?.kind === "REJECT" ? "Tolak" : "Batalkan pengajuan"}</Button></>}>
         <div className="space-y-4">
           {error && <Notice tone="danger">{error}</Notice>}

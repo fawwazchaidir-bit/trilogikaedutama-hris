@@ -1,6 +1,6 @@
 import { Card, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { formatDateLong, formatDateRange, formatDuration } from "@/lib/format";
+import { formatDateLong, formatDateRange, formatDuration, formatDays } from "@/lib/format";
 import { formatRupiah } from "@/lib/money";
 import { terbilang } from "@/lib/terbilang";
 import { EMPLOYMENT_LABEL } from "@/lib/labels";
@@ -63,8 +63,8 @@ export function PayslipView({ s, voided }: { s: PayslipSnapshot; voided?: boolea
         <Card>
           <CardHeader title="Ringkasan kehadiran" description={formatDateRange(s.attendanceBasis.start, s.attendanceBasis.end)} />
           <dl className="grid grid-cols-2 gap-3 p-5 text-sm sm:grid-cols-4">
-            {[["Hari kerja terjadwal", a.scheduledDays], ["Hadir", a.presentDays], ["Terlambat", `${a.lateCount}x (${formatDuration(a.lateMinutes)})`], ["Tidak hadir", a.absentDays],
-              ["Izin", a.izinDays], ["Sakit", a.sakitDays], ["Cuti", a.cutiDays], ["Jam kerja tercatat", formatDuration(a.workedMinutes)]].map(([k, v]) => (
+            {[["Hari kerja terjadwal", formatDays(a.scheduledDays)], ["Hadir", formatDays(a.presentDays)], ["Terlambat", `${a.lateCount}x (${formatDuration(a.lateMinutes)})`], ["Tidak hadir", formatDays(a.absentDays)],
+              ["Izin", formatDays(a.izinDays)], ["Sakit", formatDays(a.sakitDays)], ["Cuti", formatDays(a.cutiDays)], ["Jam kerja tercatat", formatDuration(a.workedMinutes)]].map(([k, v]) => (
               <div key={String(k)}><dt className="text-xs text-muted">{k}</dt><dd className="font-semibold">{v}</dd></div>
             ))}
           </dl>

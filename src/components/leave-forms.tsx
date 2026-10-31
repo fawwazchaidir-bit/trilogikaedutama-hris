@@ -10,14 +10,15 @@ import { ConfirmDialog } from "@/components/ui/dialog";
 import { useToast } from "@/components/ui/toast";
 import { api, ApiClientError, errorMessage } from "@/lib/api-client";
 import { uploadFile } from "@/components/upload";
-import { formatDateRange, formatDateTime } from "@/lib/format";
+import { formatDateRange, formatDateTime, formatDays } from "@/lib/format";
+import { DAY_PART_LABEL, type DayPart } from "@/lib/attendance";
 import { LEAVE_TYPE_LABEL, type LeaveType } from "@/lib/labels";
 import type { LeaveDto } from "@/server/services/leave";
 
 export function LeaveForm({ today, maxBackdateDays }: { today: string; maxBackdateDays: number }) {
   const router = useRouter();
   const toast = useToast();
-  const [form, setForm] = useState({ type: "CUTI" as LeaveType, startDate: today, endDate: today, reason: "" });
+  const [form, setForm] = useState({ type: "CUTI" as LeaveType, startDate: today, endDate: today, reason: "", dayPart: "FULL" as DayPart });
   const [file, setFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -28,7 +29,7 @@ export function LeaveForm({ today, maxBackdateDays }: { today: string; maxBackda
     setBusy(true); setError(null); setFe({});
     try {
       const attachmentFileId = file ? (await uploadFile("/api/leaves/attachment", file)).id : null;
-      await api("/api/leaves", { body: { ...form, attachmentFileId } });
+      await api("/api/leaves", { body: { ...form, dayPart: form.startDate === form.endDate ? form.dayPart : "FULL", attachmentFileId } });
       toast.success("Pengajuan terkirim dan menunggu persetujuan.");
       setForm({ ...form, reason: "" }); setFile(null);
       router.refresh();
@@ -50,6 +51,12 @@ export function LeaveForm({ today, maxBackdateDays }: { today: string; maxBackda
           <TextField label="Tanggal mulai" type="date" required value={form.startDate} onChange={(e) => setForm({ ...form, startDate: e.target.value, endDate: e.target.value > form.endDate ? e.target.value : form.endDate })} error={fe.startDate} />
           <TextField label="Tanggal selesai" type="date" required value={form.endDate} min={form.startDate} onChange={(e) => setForm({ ...form, endDate: e.target.value })} error={fe.endDate} />
         </div>
+        {form.startDate === form.endDate && (
+          <SelectField label="Bagian hari" value={form.dayPart} onChange={(e) => setForm({ ...form, dayPart: e.target.value as DayPart })} error={fe.dayPart}
+            hint="Setengah hari memotong/menghitung 0,5 hari. Batas pagi/siang = titik tengah jam kerja (mis. 12.00 untuk jadwal 08.00–16.00).">
+            {(Object.keys(DAY_PART_LABEL) as DayPart[]).map((p) => <option key={p} value={p}>{DAY_PART_LABEL[p]}</option>)}
+          </SelectField>
+        )}
         <TextAreaField label="Alasan" required rows={3} maxLength={500} value={form.reason} onChange={(e) => setForm({ ...form, reason: e.target.value })} error={fe.reason} placeholder="Jelaskan singkat alasan pengajuan" />
         <div className="space-y-1.5">
           <label htmlFor="lampiran" className="block text-sm font-medium text-ink-soft">Lampiran pendukung (opsional)</label>
@@ -84,7 +91,7 @@ export function MyLeaveList({ items }: { items: LeaveDto[] }) {
           {items.map((l) => (
             <li key={l.id} className="space-y-1 px-5 py-4 text-sm">
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <p className="font-medium">{LEAVE_TYPE_LABEL[l.type]} · {formatDateRange(l.startDate, l.endDate)} <span className="font-normal text-muted">({l.workingDays} hari kerja)</span></p>
+                <p className="font-medium">{LEAVE_TYPE_LABEL[l.type]} · {formatDateRange(l.startDate, l.endDate)} <span className="font-normal text-muted">({l.dayPart !== "FULL" ? `${DAY_PART_LABEL[l.dayPart]} · ` : ""}{l.workingDays !== null ? formatDays(l.workingDays) : "—"} hari kerja)</span></p>
                 <RequestStatusBadge status={l.status} />
               </div>
               <p className="text-muted">{l.reason}</p>

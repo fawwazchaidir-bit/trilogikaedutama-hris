@@ -11,10 +11,10 @@ import { dateToIso, isoToDate } from "../json";
 import { computeEmployeePeriod, employeeLite, loadRangeContext } from "./context";
 import { geoPolicyOf, getSettings } from "./settings";
 import { evaluateGeofence, isValidReading } from "@/lib/geo";
-import { resolveSchedule, type DayResult, type ScheduleLite } from "@/lib/attendance";
+import { isOvernight, OVERNIGHT_CHECKOUT_GRACE_MINUTES, resolveSchedule, shiftWindow, type DayResult, type ScheduleLite } from "@/lib/attendance";
 import { formatClock } from "@/lib/format";
 import { hhmm, isoDate, optionalText, requiredText, uuid } from "@/lib/validation/common";
-import { monthRange, todayIso, zonedInstant } from "@/lib/time";
+import { addDays, monthRange, todayIso, zonedInstant } from "@/lib/time";
 
 const locationSchema = z.object({
   lat: z.number().min(-90).max(90),
@@ -30,7 +30,13 @@ export const punchSchema = z.object({
 export interface TodayState {
   /** Waktu server (ISO) saat state dibuat — dasar jam yang ditampilkan di layar. */
   serverNow: string;
+  /** Tanggal kalender hari ini (zona waktu bisnis). */
   today: string;
+  /**
+   * Tanggal KERJA yang sedang berlaku untuk absensi. Sama dengan `today`, kecuali shift malam kemarin masih berjalan
+   * (mis. check-out pukul 06:00 menutup shift yang dimulai kemarin malam).
+   */
+  workDate: string;
   timeZone: string;
   schedule: ScheduleLite | null;
   day: DayResult;
@@ -46,36 +52,70 @@ export interface TodayState {
   hasDefaultSchedule: boolean;
 }
 
-/** Konteks hari ini untuk satu karyawan: status turunan + apakah check-in/out boleh. */
-async function dayContext(employeeId: string, now: Date) {
+/**
+ * Tanggal kerja untuk punch pada `now`. Shift malam dimiliki tanggal ia DIMULAI, jadi pada dini hari:
+ *  - ada check-in kemarin yang belum check-out dan masih dalam masa tenggang → punch ini = check-out shift kemarin;
+ *  - belum ada check-in kemarin tetapi shift malam kemarin belum berakhir → punch ini = check-in terlambat untuk shift kemarin;
+ *  - selain itu → hari ini.
+ */
+async function resolveWorkDate(
+  emp: { id: string; divisionId: string | null; joinDate: Date; endDate: Date | null },
+  now: Date,
+): Promise<string> {
+  const tz = env().APP_TIMEZONE;
+  const today = todayIso(tz, now);
+  const yesterday = addDays(today, -1);
+  if (dateToIso(emp.joinDate) > yesterday) return today;
+  const ctx = await loadRangeContext(yesterday, yesterday, { employeeIds: [emp.id], now });
+  const sched = resolveSchedule({
+    date: yesterday, employeeId: emp.id, divisionId: emp.divisionId, assignments: ctx.assignments, schedules: ctx.schedules, defaultSchedule: ctx.defaultSchedule,
+  });
+  if (!sched || !isOvernight(sched)) return today;
+  const att = await prisma.attendance.findUnique({ where: { employeeId_date: { employeeId: emp.id, date: isoToDate(yesterday) } } });
+  const win = shiftWindow(yesterday, sched, tz);
+  if (att) {
+    return !att.checkOutAt && now.getTime() <= win.end.getTime() + OVERNIGHT_CHECKOUT_GRACE_MINUTES * 60_000 ? yesterday : today;
+  }
+  if (now.getTime() < win.end.getTime() && computeEmployeePeriod(employeeLite(emp), ctx).days[0]?.scheduled) return yesterday;
+  return today;
+}
+
+/** Konteks hari kerja berjalan untuk satu karyawan: status turunan + apakah check-in/out boleh. */
+async function dayContext(employeeId: string, now: Date, forceWorkDate?: string) {
   const emp = await prisma.employee.findUnique({ where: { id: employeeId } });
   if (!emp) throw Errors.notFound("Karyawan");
   const today = todayIso(env().APP_TIMEZONE, now);
-  const ctx = await loadRangeContext(today, today, { employeeIds: [employeeId], now });
+  const workDate = forceWorkDate ?? (await resolveWorkDate(emp, now));
+  const ctx = await loadRangeContext(workDate, workDate, { employeeIds: [employeeId], now });
   const lite = employeeLite(emp);
   const { days } = computeEmployeePeriod(lite, ctx);
   const schedule = resolveSchedule({
-    date: today, employeeId, divisionId: emp.divisionId, assignments: ctx.assignments, schedules: ctx.schedules, defaultSchedule: ctx.defaultSchedule,
+    date: workDate, employeeId, divisionId: emp.divisionId, assignments: ctx.assignments, schedules: ctx.schedules, defaultSchedule: ctx.defaultSchedule,
   });
-  const att = await prisma.attendance.findUnique({ where: { employeeId_date: { employeeId, date: isoToDate(today) } } });
-  return { emp, today, ctx, day: days[0]!, schedule, att };
+  const att = await prisma.attendance.findUnique({ where: { employeeId_date: { employeeId, date: isoToDate(workDate) } } });
+  return { emp, today, workDate, ctx, day: days[0]!, schedule, att };
 }
 
-export async function getTodayState(actor: Actor, now: Date = new Date()): Promise<TodayState> {
+/** Pengajuan SEHARI PENUH yang disetujui menghalangi check-in; setengah hari tidak (karyawan tetap bekerja separuh hari). */
+function fullDayLeave(day: DayResult): boolean {
+  return (day.status === "IZIN" || day.status === "SAKIT" || day.status === "CUTI") && day.dayPart === "FULL";
+}
+
+export async function getTodayState(actor: Actor, now: Date = new Date(), opts: { workDate?: string } = {}): Promise<TodayState> {
   const employeeId = requireSelf(actor);
-  const { emp, today, day, schedule, att } = await dayContext(employeeId, now);
+  const { emp, today, workDate, day, schedule, att } = await dayContext(employeeId, now, opts.workDate);
   const settings = await getSettings();
   const geo = geoPolicyOf(settings);
   let blockedReason: string | null = null;
   if (!emp.isActive) blockedReason = "Data karyawan Anda nonaktif.";
   else if (day.status === "DI_LUAR_MASA_KERJA") blockedReason = "Hari ini di luar masa kerja Anda.";
-  else if (!att && (day.status === "IZIN" || day.status === "SAKIT" || day.status === "CUTI")) {
+  else if (!att && fullDayLeave(day)) {
     blockedReason = `Anda memiliki ${day.status.toLowerCase()} yang disetujui hari ini. Hubungi HR bila ingin membatalkannya.`;
   }
   const canCheckIn = !att && !blockedReason;
   const canCheckOut = !!att && !att.checkOutAt && emp.isActive;
   return {
-    serverNow: now.toISOString(), today, timeZone: env().APP_TIMEZONE, schedule, day,
+    serverNow: now.toISOString(), today, workDate, timeZone: env().APP_TIMEZONE, schedule, day,
     checkInAt: att?.checkInAt.toISOString() ?? null, checkOutAt: att?.checkOutAt?.toISOString() ?? null,
     checkInNote: att?.checkInNote ?? null, checkOutNote: att?.checkOutNote ?? null,
     canCheckIn, canCheckOut, blockedReason,
@@ -96,11 +136,11 @@ function geoOrThrow(policy: ReturnType<typeof geoPolicyOf>, loc: z.infer<typeof 
 export async function checkIn(actor: Actor, raw: unknown, now: Date = new Date()): Promise<TodayState> {
   const employeeId = requireSelf(actor);
   const input = parseInput(punchSchema, raw ?? {});
-  const { emp, today, day, att } = await dayContext(employeeId, now);
+  const { emp, workDate: today, day, att } = await dayContext(employeeId, now);
   if (!emp.isActive) throw Errors.forbidden("Data karyawan Anda nonaktif.");
   if (day.status === "DI_LUAR_MASA_KERJA") throw Errors.validation("Hari ini di luar masa kerja Anda.");
   if (att) throw Errors.conflict(`Anda sudah check-in hari ini pukul ${formatClock(att.checkInAt, env().APP_TIMEZONE)}.`);
-  if (day.status === "IZIN" || day.status === "SAKIT" || day.status === "CUTI") {
+  if (fullDayLeave(day)) {
     throw Errors.validation(`Anda memiliki ${day.status.toLowerCase()} yang disetujui hari ini, sehingga tidak dapat check-in. Hubungi HR bila ingin membatalkannya.`);
   }
   const geo = geoOrThrow(geoPolicyOf(await getSettings()), input.location);
@@ -124,13 +164,14 @@ export async function checkIn(actor: Actor, raw: unknown, now: Date = new Date()
     }
     throw e;
   }
-  return getTodayState(actor, now);
+  // Tampilkan hasil untuk tanggal kerja yang baru saja dicatat (bukan tanggal kalender hari ini).
+  return getTodayState(actor, now, { workDate: today });
 }
 
 export async function checkOut(actor: Actor, raw: unknown, now: Date = new Date()): Promise<TodayState> {
   const employeeId = requireSelf(actor);
   const input = parseInput(punchSchema, raw ?? {});
-  const { emp, att } = await dayContext(employeeId, now);
+  const { emp, att, workDate } = await dayContext(employeeId, now);
   if (!emp.isActive) throw Errors.forbidden("Data karyawan Anda nonaktif.");
   if (!att) throw Errors.validation("Anda belum check-in hari ini.");
   if (att.checkOutAt) throw Errors.conflict(`Anda sudah check-out hari ini pukul ${formatClock(att.checkOutAt, env().APP_TIMEZONE)}.`);
@@ -151,7 +192,8 @@ export async function checkOut(actor: Actor, raw: unknown, now: Date = new Date(
       summary: `Check-out ${formatClock(outAt, env().APP_TIMEZONE)}${geo.distance !== null ? ` (${geo.distance} m dari titik lokasi)` : ""}`,
     });
   });
-  return getTodayState(actor, now);
+  // Shift malam: check-out dini hari menutup shift kemarin — kembalikan state shift itu (bukan hari baru yang kosong).
+  return getTodayState(actor, now, { workDate });
 }
 
 // ─────────────────────────── Riwayat ───────────────────────────
@@ -186,6 +228,11 @@ export const correctionSchema = z.object({
   action: z.enum(["set", "remove"]),
   checkIn: hhmm.nullable().optional(),
   checkOut: hhmm.nullable().optional(),
+  /**
+   * Check-out jatuh pada hari kalender BERIKUTNYA (shift malam). Bila tidak diisi: otomatis ya untuk jadwal
+   * lintas tengah malam bila jam check-out ≤ jam check-in.
+   */
+  checkOutNextDay: z.boolean().optional(),
   checkInNote: optionalText(200, "Catatan"),
   reason: requiredText(5, 300, "Alasan koreksi"),
 });
@@ -211,6 +258,15 @@ export async function correctAttendance(actor: Actor, raw: unknown): Promise<Cor
   const today = todayIso(tz);
   if (input.date > today) throw Errors.validation("Tanggal koreksi tidak boleh di masa depan.", { date: "Tanggal di masa depan" });
 
+  // Jadwal pada tanggal itu menentukan apakah jam check-out yang lebih awal berarti "keesokan harinya" (shift malam).
+  const empRow = await prisma.employee.findUnique({ where: { id: input.employeeId } });
+  let overnightDay = false;
+  if (empRow) {
+    const ctx = await loadRangeContext(input.date, input.date, { employeeIds: [empRow.id] });
+    const sched = resolveSchedule({ date: input.date, employeeId: empRow.id, divisionId: empRow.divisionId, assignments: ctx.assignments, schedules: ctx.schedules, defaultSchedule: ctx.defaultSchedule });
+    overnightDay = !!sched && isOvernight(sched);
+  }
+
   return transaction(async (tx) => {
     const emp = await tx.employee.findUnique({ where: { id: input.employeeId } });
     if (!emp) throw Errors.notFound("Karyawan");
@@ -229,7 +285,10 @@ export async function correctAttendance(actor: Actor, raw: unknown): Promise<Cor
       let outAt: Date | null = null;
       if (input.checkOut) {
         outAt = zonedInstant(input.date, input.checkOut, tz);
+        const nextDay = input.checkOutNextDay ?? (overnightDay && outAt <= inAt);
+        if (nextDay) outAt = zonedInstant(addDays(input.date, 1), input.checkOut, tz);
         if (outAt <= inAt) throw Errors.validation("Jam check-out harus setelah jam check-in.", { checkOut: "Harus setelah check-in" });
+        if (outAt.getTime() - inAt.getTime() > 24 * 3_600_000) throw Errors.validation("Durasi kerja satu catatan tidak boleh lebih dari 24 jam.", { checkOut: "Lebih dari 24 jam" });
       }
       // Hari ini: jam koreksi tidak boleh melampaui waktu server saat ini.
       if (inAt.getTime() > Date.now() || (outAt && outAt.getTime() > Date.now())) {

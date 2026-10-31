@@ -78,6 +78,12 @@ export function formatDuration(minutes: number): string {
   return r === 0 ? `${h} j` : `${h} j ${r} m`;
 }
 
+/** Jumlah hari yang boleh berpecahan 0,5: 3 → "3", 2.5 → "2,5". */
+export function formatDays(n: number): string {
+  const r = Math.round(n * 100) / 100;
+  return Number.isInteger(r) ? String(r) : String(r).replace(".", ",");
+}
+
 /** 450 → "7,50" jam (desimal, koma Indonesia) untuk ekspor & kolom ringkas. */
 export function formatHours(minutes: number): string {
   return (Math.round((minutes / 60) * 100) / 100).toFixed(2).replace(".", ",");

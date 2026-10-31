@@ -6,7 +6,7 @@ import { isoToDate } from "@/server/json";
 import type { Role } from "@/lib/permissions";
 
 const TABLES = [
-  "audit_logs", "notifications", "payslips", "payroll_item_lines", "payroll_items", "payroll_runs", "salary_components",
+  "audit_logs", "notification_deliveries", "notifications", "overtime_requests", "location_checks", "two_factor_recovery_codes", "login_challenges", "password_reset_tokens", "payslips", "payroll_item_lines", "payroll_items", "payroll_runs", "salary_components",
   "leave_balance_entries", "leave_requests", "attendance_corrections", "attendances", "calendar_days", "schedule_assignments", "work_schedules",
   "employees", "divisions", "stored_files", "sessions", "rate_limit_buckets", "company_settings", "users",
 ];

@@ -3,7 +3,7 @@ import { pdfSafe } from "./ReportPdf";
 import type { PayslipLine, PayslipSnapshot } from "@/lib/payslip";
 import { formatRupiah } from "@/lib/money";
 import { terbilang } from "@/lib/terbilang";
-import { formatDateLong, formatDateRange, formatDuration } from "@/lib/format";
+import { formatDateLong, formatDateRange, formatDuration, formatDays } from "@/lib/format";
 import { EMPLOYMENT_LABEL } from "@/lib/labels";
 
 Font.registerHyphenationCallback((word) => [word]);
@@ -127,13 +127,13 @@ function SlipPage({ item }: { item: PayslipPdfItem }) {
           <Text style={s.sectionTitle}>RINGKASAN KEHADIRAN ({formatDateRange(d.attendanceBasis.start, d.attendanceBasis.end)})</Text>
           <View style={s.attGrid}>
             {[
-              ["Hari kerja terjadwal", `${a.scheduledDays}`],
-              ["Hadir", `${a.presentDays}`],
+              ["Hari kerja terjadwal", `${formatDays(a.scheduledDays)}`],
+              ["Hadir", `${formatDays(a.presentDays)}`],
               ["Terlambat", `${a.lateCount}x (${formatDuration(a.lateMinutes)})`],
-              ["Tidak hadir", `${a.absentDays}`],
-              ["Izin", `${a.izinDays}`],
-              ["Sakit", `${a.sakitDays}`],
-              ["Cuti", `${a.cutiDays}`],
+              ["Tidak hadir", `${formatDays(a.absentDays)}`],
+              ["Izin", `${formatDays(a.izinDays)}`],
+              ["Sakit", `${formatDays(a.sakitDays)}`],
+              ["Cuti", `${formatDays(a.cutiDays)}`],
               ["Jam kerja tercatat", formatDuration(a.workedMinutes)],
             ].map(([k, v]) => (
               <View key={k} style={s.attCell}><Text style={s.attLabel}>{k}</Text><Text style={s.attVal}>{v}</Text></View>

@@ -10,13 +10,13 @@ import { useToast } from "@/components/ui/toast";
 import { api, ApiClientError, errorMessage } from "@/lib/api-client";
 import { formatDateLong } from "@/lib/format";
 
-export interface CorrectionTarget { employeeId: string; name: string; employeeNo: string; date: string; checkIn: string | null; checkOut: string | null; hasRecord: boolean }
+export interface CorrectionTarget { employeeId: string; name: string; employeeNo: string; date: string; checkIn: string | null; checkOut: string | null; hasRecord: boolean; checkOutNextDay?: boolean }
 
 export function CorrectionButton({ target }: { target: CorrectionTarget }) {
   const router = useRouter();
   const toast = useToast();
   const [open, setOpen] = useState(false);
-  const [f, setF] = useState({ checkIn: target.checkIn ?? "08:00", checkOut: target.checkOut ?? "", note: "", reason: "" });
+  const [f, setF] = useState({ checkIn: target.checkIn ?? "08:00", checkOut: target.checkOut ?? "", note: "", reason: "", nextDay: !!target.checkOutNextDay });
   const [mode, setMode] = useState<"set" | "remove">("set");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -26,7 +26,7 @@ export function CorrectionButton({ target }: { target: CorrectionTarget }) {
     setBusy(true); setError(null); setFe({});
     try {
       const body = mode === "remove" ? { employeeId: target.employeeId, date: target.date, action: "remove", reason: f.reason }
-        : { employeeId: target.employeeId, date: target.date, action: "set", checkIn: f.checkIn, checkOut: f.checkOut || null, checkInNote: f.note, reason: f.reason };
+        : { employeeId: target.employeeId, date: target.date, action: "set", checkIn: f.checkIn, checkOut: f.checkOut || null, checkInNote: f.note, reason: f.reason, ...(f.nextDay ? { checkOutNextDay: true } : {}) };
       const r = await api<{ payrollNotices: string[] }>("/api/attendance/correct", { body });
       toast.success(mode === "remove" ? "Catatan absensi dihapus." : "Koreksi absensi disimpan.");
       r.payrollNotices.forEach((n) => toast.error(n));
@@ -50,6 +50,7 @@ export function CorrectionButton({ target }: { target: CorrectionTarget }) {
             <div className="grid gap-4 sm:grid-cols-2">
               <TextField label="Jam check-in (WIB)" type="time" required value={f.checkIn} onChange={(e) => setF({ ...f, checkIn: e.target.value })} error={fe.checkIn} />
               <TextField label="Jam check-out (WIB)" type="time" value={f.checkOut} onChange={(e) => setF({ ...f, checkOut: e.target.value })} error={fe.checkOut} hint="Kosongkan bila memang belum check-out" />
+              <label className="flex items-center gap-2 text-sm sm:col-span-2"><input type="checkbox" checked={f.nextDay} onChange={(e) => setF({ ...f, nextDay: e.target.checked })} />Check-out jatuh di hari berikutnya (shift lintas tengah malam)</label>
               <div className="sm:col-span-2"><TextField label="Catatan absensi (opsional)" value={f.note} onChange={(e) => setF({ ...f, note: e.target.value })} /></div>
             </div>
           )}

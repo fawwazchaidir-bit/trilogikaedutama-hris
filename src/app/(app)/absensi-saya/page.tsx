@@ -10,7 +10,7 @@ import { Table, TableWrap, Td, Th } from "@/components/ui/table";
 import { Tile } from "@/components/ui/stat";
 import { RecapExplanation } from "@/components/recap-explanation";
 import { flattenSearchParams, type SearchParams } from "@/lib/query-string";
-import { dotTime, formatClock, formatDateCompact, formatDateLong, formatDuration, monthLabel } from "@/lib/format";
+import { dotTime, formatClock, formatDateCompact, formatDateLong, formatDuration, monthLabel, formatDays } from "@/lib/format";
 import { addDays } from "@/lib/time";
 import { cn } from "@/lib/cn";
 
@@ -38,11 +38,11 @@ export default async function MyAttendancePage({ searchParams }: { searchParams:
                 <Link aria-label="Bulan berikutnya" href={`/absensi-saya?month=${shiftMonth(ym, 1)}`} className="rounded-md border border-line p-1.5 hover:bg-canvas"><ChevronRight className="size-4" /></Link>
               </div>} />
             <div className="grid grid-cols-2 gap-3 p-5 sm:grid-cols-4">
-              <Tile label="Hari kerja terjadwal" value={t.scheduledDays} />
-              <Tile label="Hadir" value={t.presentDays} tone="green" />
+              <Tile label="Hari kerja terjadwal" value={formatDays(t.scheduledDays)} />
+              <Tile label="Hadir" value={formatDays(t.presentDays)} tone="green" />
               <Tile label="Terlambat" value={t.lateCount} hint={t.lateCount ? `${t.lateMinutes} menit` : undefined} tone={t.lateCount ? "amber" : undefined} />
-              <Tile label="Tidak hadir" value={t.absentDays} tone={t.absentDays ? "red" : undefined} />
-              <Tile label="Izin" value={t.izinDays} /><Tile label="Sakit" value={t.sakitDays} /><Tile label="Cuti" value={t.cutiDays} />
+              <Tile label="Tidak hadir" value={formatDays(t.absentDays)} tone={t.absentDays ? "red" : undefined} />
+              <Tile label="Izin" value={formatDays(t.izinDays)} /><Tile label="Sakit" value={formatDays(t.sakitDays)} /><Tile label="Cuti" value={formatDays(t.cutiDays)} />
               <Tile label="Jam kerja tercatat" value={formatDuration(t.workedMinutes)} hint={t.incompleteCount ? `${t.incompleteCount} absensi belum lengkap` : undefined} />
             </div>
           </Card>

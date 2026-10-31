@@ -1,6 +1,6 @@
 /**
  * Mesin status absensi — FUNGSI MURNI (tanpa database) sehingga dapat diuji menyeluruh dan dipakai ulang oleh
- * layar absensi, rekap, dashboard, dan penggajian. Status harian TIDAK disimpan; selalu diturunkan dari:
+ * layar absensi, rekap, dashboard, laporan, dan penggajian. Status harian TIDAK disimpan; selalu diturunkan dari:
  *   jadwal kerja yang berlaku  +  kalender (libur / hari kerja khusus)  +  pengajuan disetujui  +  catatan absensi.
  *
  * Urutan prioritas penentuan status satu hari (lihat `deriveDay`):
@@ -8,21 +8,35 @@
  *   2. Ada check-in → Hadir / Terlambat (kehadiran nyata menang atas pengajuan).
  *   3. Bukan hari terjadwal (libur nasional / libur mingguan) → Libur.
  *   4. Ada pengajuan DISETUJUI yang mencakup tanggal itu → Izin / Sakit / Cuti.
- *   5. Hari terjadwal tanpa check-in: lampau → Tidak hadir; hari ini → Belum absen sampai batas jam tidak hadir,
- *      setelahnya Tidak hadir; mendatang → Mendatang.
+ *   5. Hari terjadwal tanpa check-in: lewat batas "tidak hadir" → Tidak hadir; sebelum batas → Belum absen
+ *      (atau Mendatang bila harinya belum tiba).
+ *
+ * Shift lintas tengah malam: jam pulang < jam masuk berarti shift berakhir keesokan harinya. Shift SELALU milik
+ * tanggal ia DIMULAI (shift Senin 22:00 → Selasa 06:00 adalah "hari Senin"). Semua perbandingan waktu memakai
+ * instan absolut (bukan menit-dalam-hari) sehingga check-in/out setelah tengah malam tetap benar.
+ *
+ * Setengah hari: pengajuan izin/sakit/cuti satu hari dapat berbagian PAGI atau SIANG. Hari itu menghitung 0,5 hari
+ * pengajuan + 0,5 hari kerja (hadir bila check-in; tidak hadir bila lewat batas tanpa check-in). Batas pagi/siang =
+ * titik tengah shift.
  */
-import { eachDate, isoWeekday, localMinutes, localTime, rangesOverlap, timeToMinutes, todayIso, zonedInstant } from "./time";
+import { addDays, eachDate, isoWeekday, localDate, localTime, rangesOverlap, startOfLocalDay, todayIso, zonedInstant } from "./time";
 import { formatDuration } from "./format";
 
 export type DayStatus =
   | "HADIR" | "TERLAMBAT" | "IZIN" | "SAKIT" | "CUTI" | "TIDAK_HADIR" | "LIBUR" | "BELUM_ABSEN" | "MENDATANG" | "DI_LUAR_MASA_KERJA";
 
 export type LeaveKind = "IZIN" | "SAKIT" | "CUTI";
+export type DayPart = "FULL" | "MORNING" | "AFTERNOON";
+
+export const DAY_PART_LABEL: Record<DayPart, string> = { FULL: "Sehari penuh", MORNING: "Setengah hari (pagi)", AFTERNOON: "Setengah hari (siang)" };
+
+/** Setelah jam pulang shift malam, check-out masih diterima sebagai penutup shift itu selama sekian menit. */
+export const OVERNIGHT_CHECKOUT_GRACE_MINUTES = 360;
 
 export interface ScheduleLite {
   id: string;
   name: string;
-  /** ISO 1 = Senin … 7 = Minggu. */
+  /** ISO 1 = Senin … 7 = Minggu (hari shift DIMULAI). */
   workDays: number[];
   startTime: string;
   endTime: string;
@@ -37,6 +51,47 @@ export interface AssignmentLite {
   employeeId: string | null;
   startDate: string;
   endDate: string | null;
+}
+
+// ─────────────────────────── Shift & jendela waktu ───────────────────────────
+
+/** Shift berakhir keesokan harinya (jam pulang lebih awal dari jam masuk). */
+export function isOvernight(s: Pick<ScheduleLite, "startTime" | "endTime">): boolean {
+  return s.endTime < s.startTime;
+}
+
+export interface ShiftWindow {
+  /** Jam masuk terjadwal (instan). */
+  start: Date;
+  /** Jam pulang terjadwal (instan; hari berikutnya untuk shift malam). */
+  end: Date;
+  /** Titik tengah shift = batas pagi/siang untuk cuti setengah hari. */
+  mid: Date;
+  /** Batas "tidak hadir" (instan). */
+  cutoff: Date;
+  /** Sesudah instan ini, check-out yang hilang dihitung "absensi belum lengkap". */
+  closeAt: Date;
+  overnight: boolean;
+}
+
+/** Jendela waktu satu shift yang DIMULAI pada `date` (YYYY-MM-DD). */
+export function shiftWindow(date: string, s: ScheduleLite, timeZone: string): ShiftWindow {
+  const overnight = isOvernight(s);
+  const start = zonedInstant(date, s.startTime, timeZone);
+  const end = zonedInstant(overnight ? addDays(date, 1) : date, s.endTime, timeZone);
+  const midMs = Math.round((start.getTime() + end.getTime()) / 2 / 60_000) * 60_000;
+  // Batas "tidak hadir" shift malam yang lebih awal dari jam masuk berarti dini hari keesokan harinya.
+  const cutoffNextDay = overnight && s.absentCutoffTime < s.startTime;
+  const cutoff = zonedInstant(cutoffNextDay ? addDays(date, 1) : date, s.absentCutoffTime, timeZone);
+  return { start, end, mid: new Date(midMs), cutoff, closeAt: dayCloseAt(date, s, timeZone), overnight };
+}
+
+/** Kapan "hari kerja" `date` dianggap selesai (untuk menilai check-out yang hilang). */
+export function dayCloseAt(date: string, schedule: ScheduleLite | null, timeZone: string): Date {
+  if (schedule && isOvernight(schedule)) {
+    return new Date(zonedInstant(addDays(date, 1), schedule.endTime, timeZone).getTime() + OVERNIGHT_CHECKOUT_GRACE_MINUTES * 60_000);
+  }
+  return startOfLocalDay(addDays(date, 1), timeZone);
 }
 
 // ─────────────────────────── Penentuan jadwal ───────────────────────────
@@ -80,11 +135,24 @@ export interface DayInput {
   end: string | null;
   schedule: ScheduleLite | null;
   calendar: { kind: "HOLIDAY" | "SPECIAL_WORKDAY"; name: string } | null;
-  leave: { type: LeaveKind; requestId: string } | null;
+  leave: { type: LeaveKind; requestId: string; dayPart?: DayPart } | null;
   attendance: { checkInAt: Date; checkOutAt: Date | null } | null;
   /** true: menit terlambat dihitung setelah toleransi; false (default): dari jam masuk. */
   lateAfterTolerance?: boolean;
 }
+
+/** Pembagian "1 hari kerja terjadwal" ke kategori; jumlahnya 1 untuk hari terjadwal, 0 untuk hari lain. */
+export interface DayFractions {
+  present: number;
+  izin: number;
+  sakit: number;
+  cuti: number;
+  absent: number;
+  pending: number;
+}
+
+const zeroFractions = (): DayFractions => ({ present: 0, izin: 0, sakit: 0, cuti: 0, absent: 0, pending: 0 });
+const LEAVE_KEY = { IZIN: "izin", SAKIT: "sakit", CUTI: "cuti" } as const;
 
 export interface DayResult {
   date: string;
@@ -96,21 +164,32 @@ export interface DayResult {
   scheduleName: string | null;
   scheduleStart: string | null;
   scheduleEnd: string | null;
+  /** Shift berakhir keesokan harinya (jam pulang tampil "+1 hari"). */
+  endsNextDay: boolean;
+  /** Instan mulai & selesai shift terjadwal (ISO) — dasar penentuan "shift sedang berjalan". */
+  shiftStartAt: string | null;
+  shiftEndAt: string | null;
   checkInAt: string | null;
   checkOutAt: string | null;
   checkInTime: string | null;
   checkOutTime: string | null;
+  /** Check-in/out terjadi pada hari kalender setelah tanggal shift (shift malam). */
+  checkInNextDay: boolean;
+  checkOutNextDay: boolean;
   late: boolean;
   lateMinutes: number;
   workedMinutes: number;
   /** Ada check-in tetapi belum check-out. */
   missingCheckout: boolean;
-  /** Belum check-out DAN harinya sudah lewat → dihitung "absensi belum lengkap". */
+  /** Belum check-out DAN harinya (shift) sudah selesai → dihitung "absensi belum lengkap". */
   incomplete: boolean;
   /** Menit melewati jam pulang terjadwal (dasar lembur otomatis). */
   afterEndMinutes: number;
   leaveType: LeaveKind | null;
   leaveRequestId: string | null;
+  /** Bagian hari pengajuan yang berlaku (null bila tidak ada pengajuan yang dihitung). */
+  dayPart: DayPart | null;
+  fractions: DayFractions;
   /** Penjelasan perhitungan satu baris untuk ditampilkan kepada pengguna. */
   explain: string;
 }
@@ -130,16 +209,21 @@ export const STATUS_LABEL: Record<DayStatus, string> = {
 
 const LEAVE_LABEL: Record<LeaveKind, string> = { IZIN: "Izin", SAKIT: "Sakit", CUTI: "Cuti" };
 
+function partText(part: DayPart): string {
+  return part === "MORNING" ? "setengah hari pagi" : part === "AFTERNOON" ? "setengah hari siang" : "";
+}
+
 export function deriveDay(input: DayInput): DayResult {
   const { date, now, timeZone, schedule, calendar, leave, attendance } = input;
   const today = todayIso(timeZone, now);
+  const nowMs = now.getTime();
 
   const base: DayResult = {
     date, status: "LIBUR", scheduled: false, offReason: null,
-    scheduleName: schedule?.name ?? null, scheduleStart: null, scheduleEnd: null,
-    checkInAt: null, checkOutAt: null, checkInTime: null, checkOutTime: null,
+    scheduleName: schedule?.name ?? null, scheduleStart: null, scheduleEnd: null, endsNextDay: false, shiftStartAt: null, shiftEndAt: null,
+    checkInAt: null, checkOutAt: null, checkInTime: null, checkOutTime: null, checkInNextDay: false, checkOutNextDay: false,
     late: false, lateMinutes: 0, workedMinutes: 0, missingCheckout: false, incomplete: false, afterEndMinutes: 0,
-    leaveType: null, leaveRequestId: null, explain: "",
+    leaveType: null, leaveRequestId: null, dayPart: null, fractions: zeroFractions(), explain: "",
   };
 
   // 1. Di luar masa kerja
@@ -161,13 +245,21 @@ export function deriveDay(input: DayInput): DayResult {
   } else {
     offReason = "Libur mingguan";
   }
-  if (scheduled && schedule) {
+  const win = scheduled && schedule ? shiftWindow(date, schedule, timeZone) : null;
+  if (win && schedule) {
     base.scheduled = true;
     base.scheduleStart = schedule.startTime;
     base.scheduleEnd = schedule.endTime;
+    base.endsNextDay = win.overnight;
+    base.shiftStartAt = win.start.toISOString();
+    base.shiftEndAt = win.end.toISOString();
   } else {
     base.offReason = offReason;
   }
+
+  // Pengajuan yang dihitung hanya pada hari terjadwal. `half` = setengah hari.
+  const part: DayPart = leave?.dayPart ?? "FULL";
+  const half = !!win && !!leave && part !== "FULL";
 
   // 2. Ada check-in → hadir (atau terlambat)
   if (attendance) {
@@ -177,61 +269,82 @@ export function deriveDay(input: DayInput): DayResult {
       ...base,
       checkInAt: inAt.toISOString(),
       checkInTime: localTime(inAt, timeZone),
+      checkInNextDay: localDate(inAt, timeZone) > date,
       checkOutAt: outAt ? outAt.toISOString() : null,
       checkOutTime: outAt ? localTime(outAt, timeZone) : null,
+      checkOutNextDay: outAt ? localDate(outAt, timeZone) > date : false,
       workedMinutes: outAt ? Math.max(0, Math.floor((outAt.getTime() - inAt.getTime()) / 60_000)) : 0,
       missingCheckout: !outAt,
     };
-    r.incomplete = !outAt && date < today;
-    if (scheduled && schedule) {
-      const start = timeToMinutes(schedule.startTime);
-      const limit = start + schedule.lateToleranceMinutes;
-      const inMin = localMinutes(inAt, timeZone);
-      const isLate = inMin > limit;
+    r.incomplete = !outAt && nowMs >= dayCloseAt(date, schedule, timeZone).getTime();
+    if (win && schedule) {
+      const effStart = half && part === "MORNING" ? win.mid : win.start;
+      const tol = schedule.lateToleranceMinutes;
+      // Selisih menit penuh terhadap jam masuk efektif (negatif = sebelum jam masuk).
+      const offset = Math.floor((inAt.getTime() - effStart.getTime()) / 60_000);
+      const isLate = offset > tol;
       r.late = isLate;
-      r.lateMinutes = isLate ? (input.lateAfterTolerance ? inMin - limit : inMin - start) : 0;
+      r.lateMinutes = isLate ? (input.lateAfterTolerance ? offset - tol : offset) : 0;
       r.status = isLate ? "TERLAMBAT" : "HADIR";
-      if (outAt) {
-        const endInstant = zonedInstant(date, schedule.endTime, timeZone);
-        r.afterEndMinutes = Math.max(0, Math.floor((outAt.getTime() - endInstant.getTime()) / 60_000));
-      }
-      const limitTxt = `${schedule.startTime} + toleransi ${schedule.lateToleranceMinutes} mnt = ${minutesText(limit)}`;
+      if (outAt) r.afterEndMinutes = Math.max(0, Math.floor((outAt.getTime() - win.end.getTime()) / 60_000));
+      const startTxt = localTime(effStart, timeZone);
+      const limitTxt = `${startTxt} + toleransi ${tol} mnt = ${localTime(new Date(effStart.getTime() + tol * 60_000), timeZone)}`;
+      const inTxt = `${r.checkInTime}${r.checkInNextDay ? " (+1 hari)" : ""}`;
       r.explain = isLate
-        ? `Check-in ${r.checkInTime} melewati batas ${limitTxt}; terlambat ${formatDuration(r.lateMinutes)} ${input.lateAfterTolerance ? "setelah toleransi" : `dari jam masuk ${schedule.startTime}`}`
-        : `Check-in ${r.checkInTime} ≤ batas ${limitTxt}`;
+        ? `Check-in ${inTxt} melewati batas ${limitTxt}; terlambat ${formatDuration(r.lateMinutes)} ${input.lateAfterTolerance ? "setelah toleransi" : `dari jam masuk ${startTxt}`}`
+        : `Check-in ${inTxt} ≤ batas ${limitTxt}`;
+      r.fractions = { ...zeroFractions(), present: half ? 0.5 : 1 };
+      if (half && leave) {
+        r.leaveType = leave.type;
+        r.leaveRequestId = leave.requestId;
+        r.dayPart = part;
+        r.fractions[LEAVE_KEY[leave.type]] = 0.5;
+        r.explain += `; ${LEAVE_LABEL[leave.type]} ${partText(part)} disetujui (dihitung 0,5 hari hadir + 0,5 hari ${LEAVE_LABEL[leave.type].toLowerCase()})`;
+      }
     } else {
       r.status = "HADIR";
       r.explain = `Hadir pada ${offReason?.toLowerCase() ?? "hari non-kerja"} (tidak dihitung sebagai hari kerja terjadwal)`;
     }
-    if (r.missingCheckout) r.explain += date < today ? "; belum check-out (absensi belum lengkap)" : "; belum check-out";
+    if (r.missingCheckout) r.explain += r.incomplete ? "; belum check-out (absensi belum lengkap)" : "; belum check-out";
     return r;
   }
 
   // 3. Bukan hari terjadwal → libur
-  if (!scheduled) {
+  if (!win || !schedule) {
     return { ...base, status: "LIBUR", explain: offReason ?? "Libur" };
   }
 
+  // Batas "tidak hadir" efektif: cuti pagi memulai kerja di tengah shift, jadi batasnya baru di akhir shift.
+  const cutoffMs = (half && part === "MORNING" ? win.end : win.cutoff).getTime();
+  const future = date > today;
+  const pastCutoff = !future && nowMs >= cutoffMs;
+  const cutoffTxt = localTime(half && part === "MORNING" ? win.end : win.cutoff, timeZone);
+
   // 4. Pengajuan disetujui
   if (leave) {
+    const key = LEAVE_KEY[leave.type];
+    const fractions = zeroFractions();
+    if (!half) {
+      fractions[key] = 1;
+      return { ...base, status: leave.type, leaveType: leave.type, leaveRequestId: leave.requestId, dayPart: "FULL", fractions, explain: `${LEAVE_LABEL[leave.type]} disetujui` };
+    }
+    fractions[key] = 0.5;
+    if (pastCutoff) fractions.absent = 0.5; else fractions.pending = 0.5;
     return {
-      ...base, status: leave.type, leaveType: leave.type, leaveRequestId: leave.requestId,
-      explain: `${LEAVE_LABEL[leave.type]} disetujui`,
+      ...base, status: leave.type, leaveType: leave.type, leaveRequestId: leave.requestId, dayPart: part, fractions,
+      explain: `${LEAVE_LABEL[leave.type]} ${partText(part)} disetujui (0,5 hari); ${pastCutoff ? `setengah hari lainnya tidak ada check-in sampai batas ${cutoffTxt} → tidak hadir 0,5 hari` : `setengah hari lainnya menunggu check-in (batas ${cutoffTxt})`}`,
     };
   }
 
   // 5. Terjadwal tanpa check-in
-  if (date < today) return { ...base, status: "TIDAK_HADIR", explain: "Tidak ada check-in pada hari kerja terjadwal" };
-  if (date > today) return { ...base, status: "MENDATANG", explain: "Hari kerja terjadwal yang belum berlalu" };
-  const cutoff = schedule!.absentCutoffTime;
-  if (localMinutes(now, timeZone) >= timeToMinutes(cutoff)) {
-    return { ...base, status: "TIDAK_HADIR", explain: `Belum check-in sampai batas ${cutoff}` };
+  if (future) return { ...base, status: "MENDATANG", fractions: { ...zeroFractions(), pending: 1 }, explain: "Hari kerja terjadwal yang belum berlalu" };
+  if (pastCutoff) {
+    return {
+      ...base, status: "TIDAK_HADIR", fractions: { ...zeroFractions(), absent: 1 },
+      explain: date < today && !win.overnight ? "Tidak ada check-in pada hari kerja terjadwal" : `Belum check-in sampai batas ${cutoffTxt}`,
+    };
   }
-  return { ...base, status: "BELUM_ABSEN", explain: `Belum check-in (batas tidak hadir ${cutoff})` };
-}
-
-function minutesText(min: number): string {
-  return `${String(Math.floor(min / 60)).padStart(2, "0")}:${String(min % 60).padStart(2, "0")}`;
+  return { ...base, status: "BELUM_ABSEN", fractions: { ...zeroFractions(), pending: 1 }, explain: `Belum check-in (batas tidak hadir ${cutoffTxt})` };
 }
 
 // ─────────────────────────── Rekap ───────────────────────────
@@ -239,9 +352,12 @@ function minutesText(min: number): string {
 export interface RecapTotals {
   /** Hari kerja terjadwal pada rentang (di luar libur, libur mingguan, dan di luar masa kerja). */
   scheduledDays: number;
-  /** Hari hadir pada hari terjadwal = tepat waktu + terlambat. */
+  /** Hari hadir pada hari terjadwal = tepat waktu + terlambat (pecahan 0,5 untuk cuti setengah hari). */
   presentDays: number;
   onTimeDays: number;
+  /** Hari hadir yang terlambat (pecahan seperti presentDays). */
+  lateDays: number;
+  /** Jumlah kejadian terlambat (bilangan bulat; satu hari terlambat = satu kejadian). */
   lateCount: number;
   lateMinutes: number;
   izinDays: number;
@@ -250,7 +366,7 @@ export interface RecapTotals {
   absentDays: number;
   /** Hari terjadwal yang belum dapat dinilai: belum absen (hari ini) + mendatang. */
   pendingDays: number;
-  /** Absensi belum lengkap: ada check-in, tidak ada check-out, hari sudah lewat. */
+  /** Absensi belum lengkap: ada check-in, tidak ada check-out, shift sudah selesai. */
   incompleteCount: number;
   /** Total menit kerja tercatat (check-out − check-in) pada semua hari ber-absensi lengkap. */
   workedMinutes: number;
@@ -262,7 +378,7 @@ export interface RecapTotals {
 
 export function emptyTotals(): RecapTotals {
   return {
-    scheduledDays: 0, presentDays: 0, onTimeDays: 0, lateCount: 0, lateMinutes: 0, izinDays: 0, sakitDays: 0, cutiDays: 0,
+    scheduledDays: 0, presentDays: 0, onTimeDays: 0, lateDays: 0, lateCount: 0, lateMinutes: 0, izinDays: 0, sakitDays: 0, cutiDays: 0,
     absentDays: 0, pendingDays: 0, incompleteCount: 0, workedMinutes: 0, offDayAttendance: 0, offDays: 0,
   };
 }
@@ -279,17 +395,15 @@ export function summarizeDays(days: DayResult[]): RecapTotals {
       continue;
     }
     t.scheduledDays++;
-    switch (d.status) {
-      case "HADIR": t.presentDays++; t.onTimeDays++; break;
-      case "TERLAMBAT": t.presentDays++; t.lateCount++; t.lateMinutes += d.lateMinutes; break;
-      case "IZIN": t.izinDays++; break;
-      case "SAKIT": t.sakitDays++; break;
-      case "CUTI": t.cutiDays++; break;
-      case "TIDAK_HADIR": t.absentDays++; break;
-      case "BELUM_ABSEN":
-      case "MENDATANG": t.pendingDays++; break;
-      default: break;
-    }
+    const f = d.fractions;
+    t.presentDays += f.present;
+    if (d.status === "HADIR") t.onTimeDays += f.present;
+    else if (d.status === "TERLAMBAT") { t.lateDays += f.present; t.lateCount++; t.lateMinutes += d.lateMinutes; }
+    t.izinDays += f.izin;
+    t.sakitDays += f.sakit;
+    t.cutiDays += f.cuti;
+    t.absentDays += f.absent;
+    t.pendingDays += f.pending;
   }
   return t;
 }
@@ -297,7 +411,22 @@ export function summarizeDays(days: DayResult[]): RecapTotals {
 /** Identitas yang harus selalu benar: terjadwal = hadir + izin + sakit + cuti + tidak hadir + belum dinilai. */
 export function totalsAreConsistent(t: RecapTotals): boolean {
   return t.scheduledDays === t.presentDays + t.izinDays + t.sakitDays + t.cutiDays + t.absentDays + t.pendingDays
-    && t.presentDays === t.onTimeDays + t.lateCount;
+    && t.presentDays === t.onTimeDays + t.lateDays;
+}
+
+/**
+ * Baris hari yang mewakili "saat ini" untuk karyawan: tanggal hari ini, kecuali shift malam kemarin masih berjalan
+ * (belum lewat jam pulangnya) — pada saat itu shift kemarinlah yang relevan untuk dashboard.
+ */
+export function currentDayRow(days: DayResult[], now: Date, timeZone: string): DayResult | undefined {
+  const today = todayIso(timeZone, now);
+  const yesterday = addDays(today, -1);
+  const y = days.find((d) => d.date === yesterday);
+  if (y && y.endsNextDay && y.shiftEndAt && now.getTime() < Date.parse(y.shiftEndAt) + OVERNIGHT_CHECKOUT_GRACE_MINUTES * 60_000) {
+    const open = y.missingCheckout && now.getTime() < Date.parse(y.shiftEndAt);
+    if (open || y.status === "BELUM_ABSEN") return y;
+  }
+  return days.find((d) => d.date === today);
 }
 
 // ─────────────────────────── Perakitan rentang hari satu karyawan ───────────────────────────
@@ -316,6 +445,7 @@ export interface LeaveLite {
   startDate: string;
   endDate: string;
   status: "PENDING" | "APPROVED" | "REJECTED" | "CANCELLED";
+  dayPart?: DayPart;
 }
 
 export interface AttendanceLite {
@@ -357,7 +487,7 @@ export function buildEmployeeDays(emp: EmployeeLite, ctx: RangeContext): DayResu
     return deriveDay({
       date, now: ctx.now, timeZone: ctx.timeZone, join: emp.joinDate, end: emp.endDate, schedule,
       calendar: ctx.calendar.get(date) ?? null,
-      leave: l ? { type: l.type, requestId: l.id } : null,
+      leave: l ? { type: l.type, requestId: l.id, dayPart: l.dayPart ?? "FULL" } : null,
       attendance: a ? { checkInAt: a.checkInAt, checkOutAt: a.checkOutAt } : null,
       lateAfterTolerance: ctx.lateAfterTolerance,
     });

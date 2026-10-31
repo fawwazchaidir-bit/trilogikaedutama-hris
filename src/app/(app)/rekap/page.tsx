@@ -15,7 +15,7 @@ import { FilterBar, FilterField, filterInput } from "@/components/filter-bar";
 import { ExportLinks } from "@/components/export-links";
 import { RecapExplanation } from "@/components/recap-explanation";
 import { buildQuery, flattenSearchParams, type SearchParams } from "@/lib/query-string";
-import { dotTime, formatDuration, formatHours } from "@/lib/format";
+import { dotTime, formatDuration, formatHours, formatDays } from "@/lib/format";
 import { STATUS_LABEL } from "@/lib/attendance";
 import { todayIso } from "@/lib/time";
 
@@ -57,10 +57,10 @@ export default async function RecapPage({ searchParams }: { searchParams: Search
 
       {view !== "harian" && (
         <section className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-4 xl:grid-cols-6" aria-label="Total">
-          <Tile label="Hari kerja terjadwal" value={s.scheduledDays} /><Tile label="Hadir" value={s.presentDays} tone="green" />
+          <Tile label="Hari kerja terjadwal" value={formatDays(s.scheduledDays)} /><Tile label="Hadir" value={formatDays(s.presentDays)} tone="green" />
           <Tile label="Terlambat" value={`${s.lateCount}x`} hint={`${s.lateMinutes} menit`} tone={s.lateCount ? "amber" : undefined} />
-          <Tile label="Izin / Sakit / Cuti" value={`${s.izinDays} / ${s.sakitDays} / ${s.cutiDays}`} />
-          <Tile label="Tidak hadir" value={s.absentDays} tone={s.absentDays ? "red" : undefined} />
+          <Tile label="Izin / Sakit / Cuti" value={`${formatDays(s.izinDays)} / ${formatDays(s.sakitDays)} / ${formatDays(s.cutiDays)}`} />
+          <Tile label="Tidak hadir" value={formatDays(s.absentDays)} tone={s.absentDays ? "red" : undefined} />
           <Tile label="Belum lengkap" value={s.incompleteCount} tone={s.incompleteCount ? "amber" : undefined} />
         </section>
       )}
@@ -79,9 +79,9 @@ export default async function RecapPage({ searchParams }: { searchParams: Search
             <thead><tr><Th>No. Induk</Th><Th>Nama</Th><Th>Divisi</Th><Th align="right">Hari kerja</Th><Th align="right">Hadir</Th><Th align="right">Terlambat</Th><Th align="right">Mnt telat</Th><Th align="right">Izin</Th><Th align="right">Sakit</Th><Th align="right">Cuti</Th><Th align="right">Tdk hadir</Th><Th align="right">Belum lengkap</Th><Th align="right">Jam kerja</Th></tr></thead>
             <tbody>{res.page.items.map((r) => { const t = r.totals; return (
               <tr key={r.employeeId}><Td mono>{r.employeeNo}</Td><Td className="font-medium"><Link className="text-brand-700 hover:underline" href={`/rekap/${r.employeeId}${detailQuery()}`}>{r.name}</Link></Td><Td>{r.division ?? "—"}</Td>
-                <Td align="right">{t.scheduledDays}</Td><Td align="right">{t.presentDays}</Td><Td align="right">{t.lateCount}</Td><Td align="right">{t.lateMinutes}</Td><Td align="right">{t.izinDays}</Td><Td align="right">{t.sakitDays}</Td><Td align="right">{t.cutiDays}</Td>
-                <Td align="right" className={t.absentDays ? "font-semibold text-brand-700" : ""}>{t.absentDays}</Td><Td align="right" className={t.incompleteCount ? "font-semibold text-amber-700" : ""}>{t.incompleteCount}</Td><Td align="right">{formatHours(t.workedMinutes)} j</Td></tr>); })}
-              <tr className="bg-canvas/70 font-semibold"><Td>TOTAL</Td><Td /><Td /><Td align="right">{s.scheduledDays}</Td><Td align="right">{s.presentDays}</Td><Td align="right">{s.lateCount}</Td><Td align="right">{s.lateMinutes}</Td><Td align="right">{s.izinDays}</Td><Td align="right">{s.sakitDays}</Td><Td align="right">{s.cutiDays}</Td><Td align="right">{s.absentDays}</Td><Td align="right">{s.incompleteCount}</Td><Td align="right">{formatHours(s.workedMinutes)} j</Td></tr></tbody>
+                <Td align="right">{formatDays(t.scheduledDays)}</Td><Td align="right">{formatDays(t.presentDays)}</Td><Td align="right">{t.lateCount}</Td><Td align="right">{t.lateMinutes}</Td><Td align="right">{formatDays(t.izinDays)}</Td><Td align="right">{formatDays(t.sakitDays)}</Td><Td align="right">{formatDays(t.cutiDays)}</Td>
+                <Td align="right" className={t.absentDays ? "font-semibold text-brand-700" : ""}>{formatDays(t.absentDays)}</Td><Td align="right" className={t.incompleteCount ? "font-semibold text-amber-700" : ""}>{t.incompleteCount}</Td><Td align="right">{formatHours(t.workedMinutes)} j</Td></tr>); })}
+              <tr className="bg-canvas/70 font-semibold"><Td>TOTAL</Td><Td /><Td /><Td align="right">{formatDays(s.scheduledDays)}</Td><Td align="right">{formatDays(s.presentDays)}</Td><Td align="right">{s.lateCount}</Td><Td align="right">{s.lateMinutes}</Td><Td align="right">{formatDays(s.izinDays)}</Td><Td align="right">{formatDays(s.sakitDays)}</Td><Td align="right">{formatDays(s.cutiDays)}</Td><Td align="right">{formatDays(s.absentDays)}</Td><Td align="right">{s.incompleteCount}</Td><Td align="right">{formatHours(s.workedMinutes)} j</Td></tr></tbody>
           </Table></TableWrap>
         )}
         <Pagination page={res.page.page} pageCount={res.page.pageCount} total={res.page.total} hrefFor={(p) => `/rekap${buildQuery({ ...filters, page: p })}`} />

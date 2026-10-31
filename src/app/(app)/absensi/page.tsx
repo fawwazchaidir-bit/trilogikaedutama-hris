@@ -14,7 +14,7 @@ import { Tile } from "@/components/ui/stat";
 import { FilterBar, FilterField, filterInput } from "@/components/filter-bar";
 import { CorrectionButton } from "@/components/attendance-admin";
 import { buildQuery, flattenSearchParams, type SearchParams } from "@/lib/query-string";
-import { dotTime, formatClock, formatDateLong, formatDateTime, formatDuration } from "@/lib/format";
+import { dotTime, formatClock, formatDateLong, formatDateTime, formatDuration, formatDays } from "@/lib/format";
 import { STATUS_LABEL } from "@/lib/attendance";
 import { addDays, todayIso } from "@/lib/time";
 
@@ -50,7 +50,7 @@ export default async function AttendanceMonitorPage({ searchParams }: { searchPa
       </FilterBar>
       <p className="mb-3 text-sm text-muted">{formatDateLong(date)} · {recap.page.total} karyawan</p>
       <section className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-4" aria-label="Ringkasan">
-        <Tile label="Terjadwal" value={s.scheduledDays} /><Tile label="Hadir" value={s.presentDays} tone="green" /><Tile label="Terlambat" value={s.lateCount} tone={s.lateCount ? "amber" : undefined} /><Tile label="Tidak hadir" value={s.absentDays} tone={s.absentDays ? "red" : undefined} />
+        <Tile label="Terjadwal" value={formatDays(s.scheduledDays)} /><Tile label="Hadir" value={formatDays(s.presentDays)} tone="green" /><Tile label="Terlambat" value={s.lateCount} tone={s.lateCount ? "amber" : undefined} /><Tile label="Tidak hadir" value={formatDays(s.absentDays)} tone={s.absentDays ? "red" : undefined} />
       </section>
       <Card>
         {recap.page.items.length === 0 ? <EmptyState title="Tidak ada data" description="Ubah tanggal atau filter." /> : (

@@ -12,7 +12,7 @@ import { Table, TableWrap, Td, Th } from "@/components/ui/table";
 import { Tile } from "@/components/ui/stat";
 import { RecapExplanation } from "@/components/recap-explanation";
 import { flattenSearchParams, type SearchParams } from "@/lib/query-string";
-import { dotTime, formatDateCompact, formatDuration, formatHours } from "@/lib/format";
+import { dotTime, formatDateCompact, formatDuration, formatHours, formatDays } from "@/lib/format";
 import { can } from "@/lib/permissions";
 import { cn } from "@/lib/cn";
 
@@ -33,8 +33,8 @@ export default async function RecapDetailPage({ params, searchParams }: { params
       <Link href={admin ? "/rekap" : "/absensi-saya"} className="inline-flex items-center gap-1 text-sm text-muted hover:text-ink"><ArrowLeft className="size-4" />Kembali</Link>
       <PageHeader title={d.employee.name} description={`${d.employee.employeeNo} · ${d.employee.position}${d.employee.division ? ` · ${d.employee.division}` : ""} · ${d.label}`} />
       <section className="grid grid-cols-2 gap-3 sm:grid-cols-4 xl:grid-cols-8" aria-label="Ringkasan">
-        <Tile label="Hari kerja" value={t.scheduledDays} /><Tile label="Hadir" value={t.presentDays} tone="green" /><Tile label="Terlambat" value={`${t.lateCount}x`} hint={`${t.lateMinutes} mnt`} tone={t.lateCount ? "amber" : undefined} />
-        <Tile label="Tidak hadir" value={t.absentDays} tone={t.absentDays ? "red" : undefined} /><Tile label="Izin" value={t.izinDays} /><Tile label="Sakit" value={t.sakitDays} /><Tile label="Cuti" value={t.cutiDays} />
+        <Tile label="Hari kerja" value={formatDays(t.scheduledDays)} /><Tile label="Hadir" value={formatDays(t.presentDays)} tone="green" /><Tile label="Terlambat" value={`${t.lateCount}x`} hint={`${t.lateMinutes} mnt`} tone={t.lateCount ? "amber" : undefined} />
+        <Tile label="Tidak hadir" value={formatDays(t.absentDays)} tone={t.absentDays ? "red" : undefined} /><Tile label="Izin" value={formatDays(t.izinDays)} /><Tile label="Sakit" value={formatDays(t.sakitDays)} /><Tile label="Cuti" value={formatDays(t.cutiDays)} />
         <Tile label="Jam kerja" value={`${formatHours(t.workedMinutes)} j`} hint={t.incompleteCount ? `${t.incompleteCount} belum lengkap` : undefined} />
       </section>
       <Card>

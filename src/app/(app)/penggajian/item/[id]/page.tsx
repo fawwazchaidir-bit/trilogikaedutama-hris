@@ -13,7 +13,7 @@ import { Table, TableWrap, Td, Th } from "@/components/ui/table";
 import { Tile } from "@/components/ui/stat";
 import { AdjustmentForm, RemoveAdjustmentButton, SlipNoteForm } from "@/components/payroll-forms";
 import { RecapExplanation } from "@/components/recap-explanation";
-import { dotTime, formatDateCompact, formatDateRange, formatDuration } from "@/lib/format";
+import { dotTime, formatDateCompact, formatDateRange, formatDuration, formatDays } from "@/lib/format";
 import { formatRupiah } from "@/lib/money";
 import { cn } from "@/lib/cn";
 
@@ -67,8 +67,8 @@ export default async function PayrollItemPage({ params }: { params: Promise<{ id
       <Card>
         <CardHeader title="Sumber data absensi" description={`Rekap saat dihitung — ${formatDateRange(d.attendance.from, d.attendance.to)}. Dipakai untuk komponen per hari hadir dan aturan potongan.`} />
         <div className="grid grid-cols-2 gap-3 p-5 sm:grid-cols-4 xl:grid-cols-8">
-          <Tile label="Hari kerja" value={t.scheduledDays} /><Tile label="Hadir" value={t.presentDays} tone="green" /><Tile label="Terlambat" value={`${t.lateCount}x`} hint={`${t.lateMinutes} mnt`} /><Tile label="Tidak hadir" value={t.absentDays} tone={t.absentDays ? "red" : undefined} />
-          <Tile label="Izin" value={t.izinDays} /><Tile label="Sakit" value={t.sakitDays} /><Tile label="Cuti" value={t.cutiDays} /><Tile label="Belum lengkap" value={t.incompleteCount} tone={t.incompleteCount ? "amber" : undefined} />
+          <Tile label="Hari kerja" value={formatDays(t.scheduledDays)} /><Tile label="Hadir" value={formatDays(t.presentDays)} tone="green" /><Tile label="Terlambat" value={`${t.lateCount}x`} hint={`${t.lateMinutes} mnt`} /><Tile label="Tidak hadir" value={formatDays(t.absentDays)} tone={t.absentDays ? "red" : undefined} />
+          <Tile label="Izin" value={formatDays(t.izinDays)} /><Tile label="Sakit" value={formatDays(t.sakitDays)} /><Tile label="Cuti" value={formatDays(t.cutiDays)} /><Tile label="Belum lengkap" value={t.incompleteCount} tone={t.incompleteCount ? "amber" : undefined} />
         </div>
         <details className="border-t border-line">
           <summary className="cursor-pointer px-5 py-3 text-sm font-medium text-ink-soft">Lihat rincian harian (kondisi saat ini)</summary>

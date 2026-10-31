@@ -8,7 +8,7 @@ import { currentPayrollSummary, type RunDto } from "./payroll";
 import { getTodayState, type TodayState } from "./attendance";
 import { listLeaves, listMyLeaves, pendingLeaveCount, type LeaveDto } from "./leave";
 import { listMyPayslips, type PayslipDto } from "./payslips";
-import { summarizeDays, type RecapTotals } from "@/lib/attendance";
+import { currentDayRow, summarizeDays, type RecapTotals } from "@/lib/attendance";
 import { addDays, todayIso } from "@/lib/time";
 
 export interface AdminDashboard {
@@ -46,7 +46,8 @@ export async function getAdminDashboard(actor: Actor, now: Date = new Date()): P
   let incomplete = 0;
   for (const e of employees) {
     const { days } = computeEmployeePeriod(employeeLite(e), ctx);
-    const t = days.find((d) => d.date === today);
+    // Shift malam kemarin yang masih berjalan lebih relevan daripada baris hari ini yang shift-nya belum mulai.
+    const t = currentDayRow(days, now, tz);
     if (t) {
       if (t.status === "HADIR") present++;
       else if (t.status === "TERLAMBAT") { present++; late++; }
