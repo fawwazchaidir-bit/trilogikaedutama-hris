@@ -113,7 +113,7 @@ test.describe("lembur dengan persetujuan", () => {
 
 test.describe("cuti setengah hari", () => {
   test("pengajuan setengah hari (pagi) tercatat 0,5 hari dan disetujui HR", async ({ page }) => {
-    const date = workdayPlus(10);
+    const date = workdayPlus(25); // jauh dari pengajuan demo Ayu (hari kerja ke-6/7 dari hari ini) agar tidak bertabrakan
     await login(page, USERS.ayu);
     await page.goto("/pengajuan-saya");
     const form = page.getByRole("form", { name: "Form pengajuan" });

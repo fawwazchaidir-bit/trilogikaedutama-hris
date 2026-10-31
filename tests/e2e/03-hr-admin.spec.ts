@@ -294,9 +294,9 @@ test.describe("Pengaturan & akun", () => {
     await form.getByLabel("Potongan keterlambatan").selectOption("PER_MINUTE");
     await form.getByLabel("Nominal per menit").fill("1000");
     await form.getByRole("button", { name: "Simpan aturan" }).click();
-    await expect(page.getByText(/Konfirmasi ulang diperlukan/)).toBeVisible();
+    await expect(page.getByText(/Konfirmasi ulang diperlukan/).first()).toBeVisible(); // toast sebelumnya bisa masih tampil bersamaan
     await form.getByRole("button", { name: "Saya sudah memverifikasi aturan ini" }).click();
-    await expect(page.getByText("Aturan penggajian dikonfirmasi.")).toBeVisible();
+    await expect(page.getByText("Aturan penggajian dikonfirmasi.").first()).toBeVisible();
   });
 
   test("HR membuat akun Karyawan; Super Admin membuat akun admin", async ({ page }) => {
