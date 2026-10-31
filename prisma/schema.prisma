@@ -120,6 +120,8 @@ enum LineSource {
   RULE_LATE
   RULE_ABSENCE
   RULE_OVERTIME
+  /// BPJS / PPh 21 yang dihitung otomatis dari konfigurasi statutori.
+  RULE_STATUTORY
   ADJUSTMENT
 }
 
@@ -153,6 +155,72 @@ enum OvertimeMode {
   MANUAL
   /// Dihitung dari menit setelah jam pulang × tarif per jam (wajib diverifikasi HR).
   AUTO
+  /// Hanya lembur yang DISETUJUI lewat pengajuan (dan terbukti ada di absensi) yang dibayar.
+  APPROVED
+}
+
+enum OvertimeRateMode {
+  /// Tarif tetap per jam (Rupiah).
+  FIXED_PER_HOUR
+  /// Gaji pokok ÷ pembagi (mis. 173) = tarif dasar per jam.
+  SALARY_DIVISOR
+}
+
+/// Bagian hari untuk izin/sakit/cuti setengah hari. FULL = seluruh hari kerja.
+enum LeaveDayPart {
+  FULL
+  MORNING
+  AFTERNOON
+}
+
+/// Status PTKP (kode pajak) untuk PPh 21.
+enum TaxStatus {
+  TK0
+  TK1
+  TK2
+  TK3
+  K0
+  K1
+  K2
+  K3
+}
+
+enum DeliveryChannel {
+  EMAIL
+  WHATSAPP
+}
+
+enum DeliveryStatus {
+  PENDING
+  SENT
+  FAILED
+  SKIPPED
+}
+
+enum PunchKind {
+  CHECK_IN
+  CHECK_OUT
+}
+
+enum LocationPolicyMode {
+  /// Tidak ada penilaian risiko lokasi.
+  OFF
+  /// Risiko tinggi tetap diterima tetapi ditandai & masuk antrean tinjauan HR (default).
+  FLAG
+  /// Risiko tinggi DITOLAK (dan dicatat).
+  BLOCK
+}
+
+enum LocationDecision {
+  ACCEPTED
+  FLAGGED
+  BLOCKED
+}
+
+enum LocationReviewStatus {
+  OPEN
+  CLEARED
+  CONFIRMED
 }
 
 // ───────────────────────────── Pengguna & sesi ─────────────────────────────
@@ -168,13 +236,31 @@ model User {
   isDemo             Boolean   @default(false)
   mustChangePassword Boolean   @default(false)
   lastLoginAt        DateTime?
-  createdAt          DateTime  @default(now())
-  updatedAt          DateTime  @updatedAt
 
-  sessions      Session[]
-  employee      Employee?
-  notifications Notification[]
-  auditLogs     AuditLog[]
+  // Autentikasi dua langkah (TOTP). Rahasia dienkripsi AES-256-GCM (DATA_ENCRYPTION_KEY).
+  twoFactorEnabled   Boolean   @default(false)
+  twoFactorSecretEnc String?
+  twoFactorEnabledAt DateTime?
+  /// Langkah waktu TOTP terakhir yang diterima — mencegah kode yang sama dipakai dua kali (replay).
+  twoFactorLastStep  Int?
+
+  // Preferensi saluran notifikasi di luar aplikasi.
+  notifyEmail    Boolean @default(true)
+  notifyWhatsapp Boolean @default(false)
+  /// Nomor WhatsApp format internasional tanpa "+" (mis. 628123456789).
+  whatsappNumber String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  sessions        Session[]
+  employee        Employee?
+  notifications   Notification[]
+  auditLogs       AuditLog[]
+  recoveryCodes   TwoFactorRecoveryCode[]
+  loginChallenges LoginChallenge[]
+  passwordResets  PasswordResetToken[]
+  deliveries      NotificationDelivery[]
 
   @@map("users")
 }
@@ -205,6 +291,54 @@ model RateLimitBucket {
   blockedUntil DateTime?
 
   @@map("rate_limit_buckets")
+}
+
+/// Kode pemulihan 2FA sekali pakai. Hanya hash-nya yang disimpan.
+model TwoFactorRecoveryCode {
+  id        String    @id @default(uuid()) @db.Uuid
+  userId    String    @db.Uuid
+  codeHash  String
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, codeHash])
+  @@map("two_factor_recovery_codes")
+}
+
+/// Tantangan 2FA setelah password benar: sekali pakai, singkat, dibatasi percobaan. Hanya hash token yang disimpan.
+model LoginChallenge {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @db.Uuid
+  tokenHash String   @unique
+  attempts  Int      @default(0)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  ip        String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("login_challenges")
+}
+
+/// Token "lupa password". Sekali pakai, kedaluwarsa singkat, hanya SHA-256-nya yang disimpan.
+model PasswordResetToken {
+  id        String    @id @default(uuid()) @db.Uuid
+  userId    String    @db.Uuid
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+  requestIp String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("password_reset_tokens")
 }
 
 // ───────────────────────────── Data karyawan ─────────────────────────────
@@ -244,20 +378,29 @@ model Employee {
   bankAccountHolder String?
   isActive          Boolean          @default(true)
   notes             String?
-  createdAt         DateTime         @default(now())
-  updatedAt         DateTime         @updatedAt
 
-  user         User?                  @relation(fields: [userId], references: [id], onDelete: Restrict)
-  division     Division?              @relation(fields: [divisionId], references: [id], onDelete: Restrict)
-  photo        StoredFile?            @relation("EmployeePhoto", fields: [photoFileId], references: [id], onDelete: Restrict)
-  attendances  Attendance[]
-  corrections  AttendanceCorrection[]
-  leaves       LeaveRequest[]
-  balance      LeaveBalanceEntry[]
-  components   SalaryComponent[]
-  assignments  ScheduleAssignment[]
-  payrollItems PayrollItem[]
-  payslips     Payslip[]
+  // Atribut statutori (BPJS & PPh 21). Hanya dipakai bila perhitungan otomatis diaktifkan di Pengaturan.
+  taxStatus              TaxStatus @default(TK0)
+  hasNpwp                Boolean   @default(true)
+  bpjsHealthEnrolled     Boolean   @default(true)
+  bpjsEmploymentEnrolled Boolean   @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user           User?                  @relation(fields: [userId], references: [id], onDelete: Restrict)
+  division       Division?              @relation(fields: [divisionId], references: [id], onDelete: Restrict)
+  photo          StoredFile?            @relation("EmployeePhoto", fields: [photoFileId], references: [id], onDelete: Restrict)
+  attendances    Attendance[]
+  corrections    AttendanceCorrection[]
+  leaves         LeaveRequest[]
+  balance        LeaveBalanceEntry[]
+  components     SalaryComponent[]
+  assignments    ScheduleAssignment[]
+  payrollItems   PayrollItem[]
+  payslips       Payslip[]
+  overtimes      OvertimeRequest[]
+  locationChecks LocationCheck[]
 
   @@index([divisionId])
   @@index([isActive])
@@ -347,7 +490,8 @@ model Attendance {
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
 
-  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  employee       Employee        @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  locationChecks LocationCheck[]
 
   @@unique([employeeId, date])
   @@index([date])
@@ -383,8 +527,10 @@ model LeaveRequest {
   reason           String
   attachmentFileId String?       @db.Uuid
   status           RequestStatus @default(PENDING)
-  /// Jumlah hari kerja terjadwal yang tercakup — dihitung ulang saat disetujui, lalu dibekukan.
-  workingDays      Int?
+  /// FULL = seluruh hari. MORNING/AFTERNOON = setengah hari (hanya untuk pengajuan satu hari).
+  dayPart          LeaveDayPart  @default(FULL)
+  /// Jumlah hari kerja terjadwal yang tercakup (kelipatan 0,5) — dihitung ulang saat disetujui, lalu dibekukan.
+  workingDays      Float?
   reviewedById     String?       @db.Uuid
   reviewedAt       DateTime?
   reviewNote       String?
@@ -409,7 +555,8 @@ model LeaveBalanceEntry {
   employeeId  String          @db.Uuid
   year        Int
   kind        LeaveLedgerKind
-  days        Int
+  /// Hari (kelipatan 0,5 — cuti setengah hari memakai 0,5).
+  days        Float
   requestId   String?         @db.Uuid
   note        String?
   createdById String          @db.Uuid
@@ -441,6 +588,10 @@ model SalaryComponent {
   effectiveTo   DateTime?           @db.Date
   description   String?
   isActive      Boolean             @default(true)
+  /// Pendapatan ini masuk penghasilan bruto untuk PPh 21 (hanya berarti bagi komponen pendapatan).
+  taxable       Boolean             @default(true)
+  /// Pendapatan ini masuk dasar upah BPJS (gaji pokok + tunjangan tetap).
+  inBpjsBase    Boolean             @default(false)
   createdById   String              @db.Uuid
   createdAt     DateTime            @default(now())
   updatedAt     DateTime            @updatedAt
@@ -513,6 +664,8 @@ model PayrollItem {
   attendanceSummary Json
   /// Hash rekap harian sumber — dipakai mendeteksi koreksi absensi setelah penghitungan.
   sourceHash        String
+  /// Rincian BPJS (porsi karyawan & perusahaan) dan PPh 21 yang dihitung otomatis (null bila tidak aktif).
+  statutory         Json?
   warnings          Json?
   slipNote          String?
   createdAt         DateTime         @default(now())
@@ -599,17 +752,25 @@ model CompanySettings {
 
   // Kebijakan absensi (perlu dikonfirmasi oleh Super Admin)
   /// Menit keterlambatan dihitung setelah toleransi (true) atau dari jam masuk (false, default).
-  lateMinutesAfterTolerance   Boolean   @default(false)
-  locationEnabled             Boolean   @default(false)
-  locationName                String?
-  locationLat                 Float?
-  locationLng                 Float?
-  locationRadiusMeters        Int       @default(100)
+  lateMinutesAfterTolerance    Boolean            @default(false)
+  locationEnabled              Boolean            @default(false)
+  locationName                 String?
+  locationLat                  Float?
+  locationLng                  Float?
+  locationRadiusMeters         Int                @default(100)
   /// Akurasi GPS terburuk yang diterima (meter). Lebih buruk dari ini → ditolak dengan pesan jelas.
-  locationMaxAccuracyMeters   Int       @default(150)
+  locationMaxAccuracyMeters    Int                @default(150)
   /// Berapa hari ke belakang pengajuan izin/sakit boleh diajukan.
-  requestBackdateDays         Int       @default(7)
-  attendancePolicyConfirmedAt DateTime?
+  requestBackdateDays          Int                @default(7)
+  attendancePolicyConfirmedAt  DateTime?
+  /// Penilaian risiko lokasi palsu (lihat docs/SECURITY.md).
+  locationSpoofMode            LocationPolicyMode @default(FLAG)
+  /// Jaringan kantor (IPv4/IPv6 atau CIDR). Dipakai sebagai sinyal tambahan; hanya bermakna bila TRUST_PROXY benar.
+  officeNetworks               String[]           @default([])
+  /// Wajibkan check-in/out dari jaringan kantor (mis. untuk karyawan non-lapangan).
+  locationRequireOfficeNetwork Boolean            @default(false)
+  /// Admin & Super Admin wajib mengaktifkan 2FA.
+  twoFactorRequiredForAdmins   Boolean            @default(false)
 
   // Kebijakan cuti
   annualLeaveQuota          Int     @default(12)
@@ -628,6 +789,15 @@ model CompanySettings {
   overtimeRatePerHour       BigInt               @default(0)
   overtimeMinMinutes        Int                  @default(60)
   overtimeMaxMinutesPerDay  Int                  @default(240)
+  overtimeRateMode          OvertimeRateMode     @default(FIXED_PER_HOUR)
+  overtimeSalaryDivisor     Int                  @default(173)
+  /// Pengali jam lembur pertama / berikutnya (basis point; 10000 = 1×, 15000 = 1,5×).
+  overtimeFirstHourBp       Int                  @default(10000)
+  overtimeNextHoursBp       Int                  @default(10000)
+  /// Lembur disetujui hanya dibayar sebesar menit yang terbukti di absensi (check-out setelah jam pulang).
+  overtimeRequireAttendance Boolean              @default(true)
+  /// Konfigurasi BPJS & PPh 21 otomatis (JSON; null = nonaktif). Divalidasi di server; lihat src/lib/statutory.ts.
+  statutoryConfig           Json?
   payrollRulesConfirmedAt   DateTime?
   payrollRulesConfirmedById String?              @db.Uuid
 
@@ -666,11 +836,100 @@ model Notification {
   createdAt DateTime  @default(now())
   readAt    DateTime?
 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user       User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  deliveries NotificationDelivery[]
 
   @@index([userId, readAt])
   @@index([userId, createdAt])
   @@map("notifications")
+}
+
+/// Outbox pengiriman email/WhatsApp. Baris dibuat dalam transaksi yang sama dengan peristiwanya (tidak ada notifikasi
+/// "hilang" bila server mati), lalu dikirim oleh worker dengan percobaan ulang bertahap.
+model NotificationDelivery {
+  id             BigInt          @id @default(autoincrement())
+  notificationId BigInt?
+  userId         String?         @db.Uuid
+  channel        DeliveryChannel
+  toAddress      String
+  subject        String?
+  body           String
+  status         DeliveryStatus  @default(PENDING)
+  attempts       Int             @default(0)
+  nextAttemptAt  DateTime        @default(now())
+  lastError      String?
+  sentAt         DateTime?
+  createdAt      DateTime        @default(now())
+
+  notification Notification? @relation(fields: [notificationId], references: [id], onDelete: Cascade)
+  user         User?         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([status, nextAttemptAt])
+  @@index([userId])
+  @@map("notification_deliveries")
+}
+
+/// Pengajuan lembur: ada alur persetujuan; hanya lembur disetujui yang dapat dibayar (mode "APPROVED").
+model OvertimeRequest {
+  id              String        @id @default(uuid()) @db.Uuid
+  employeeId      String        @db.Uuid
+  /// Tanggal kerja (tanggal mulai lembur).
+  date            DateTime      @db.Date
+  /// Jam mulai lembur "HH:mm" (waktu lokal).
+  startTime       String
+  /// Durasi yang diajukan (menit); boleh melewati tengah malam.
+  minutes         Int
+  reason          String
+  status          RequestStatus @default(PENDING)
+  /// Menit yang disetujui (≤ diajukan; pimpinan/HR boleh menyetujui lebih sedikit).
+  approvedMinutes Int?
+  reviewedById    String?       @db.Uuid
+  reviewedAt      DateTime?
+  reviewNote      String?
+  cancelledAt     DateTime?
+  cancelReason    String?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+
+  @@index([employeeId, date])
+  @@index([status, createdAt])
+  @@index([date])
+  @@map("overtime_requests")
+}
+
+/// Catatan penilaian lokasi untuk setiap check-in/out saat absensi berbasis lokasi aktif (termasuk yang ditolak).
+model LocationCheck {
+  id           BigInt                @id @default(autoincrement())
+  employeeId   String                @db.Uuid
+  attendanceId String?               @db.Uuid
+  kind         PunchKind
+  /// Tanggal kerja (lokal).
+  date         DateTime              @db.Date
+  lat          Float?
+  lng          Float?
+  accuracy     Float?
+  distance     Int?
+  decision     LocationDecision
+  riskScore    Int                   @default(0)
+  flags        String[]              @default([])
+  details      Json?
+  ip           String?
+  deviceHash   String?
+  reviewStatus LocationReviewStatus?
+  reviewedById String?               @db.Uuid
+  reviewedAt   DateTime?
+  reviewNote   String?
+  createdAt    DateTime              @default(now())
+
+  employee   Employee    @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  attendance Attendance? @relation(fields: [attendanceId], references: [id], onDelete: SetNull)
+
+  @@index([employeeId, createdAt])
+  @@index([decision, reviewStatus])
+  @@index([createdAt])
+  @@map("location_checks")
 }
 
 model AuditLog {
