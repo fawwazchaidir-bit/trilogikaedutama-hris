@@ -45,9 +45,10 @@ export function UsersManager({ items, selfId, roles, freeEmployees }: { items: U
                 <select aria-label={`Peran ${u.name}`} value={u.role} onChange={(e) => void patch(u, { role: e.target.value }, "Peran diubah. Pengguna perlu login ulang.")} className="h-8 rounded-md border border-line bg-white px-2 text-sm">
                   {(Object.keys(ROLE_LABELS) as Role[]).filter((r) => r !== "EMPLOYEE" || u.employeeId).map((r) => <option key={r} value={r}>{ROLE_LABELS[r]}</option>)}</select>) : ROLE_LABELS[u.role]}</Td>
               <Td>{u.employeeNo ?? "—"}</Td><Td>{u.lastLoginAt ? formatDateTime(u.lastLoginAt) : "Belum pernah"}</Td>
-              <Td>{u.isActive ? <Badge tone="green">Aktif</Badge> : <Badge>Nonaktif</Badge>}{u.mustChangePassword && <Badge tone="amber" className="ml-1">Wajib ganti password</Badge>}</Td>
+              <Td>{u.isActive ? <Badge tone="green">Aktif</Badge> : <Badge>Nonaktif</Badge>}{u.mustChangePassword && <Badge tone="amber" className="ml-1">Wajib ganti password</Badge>}{u.twoFactorEnabled && <Badge tone="blue" className="ml-1">2FA</Badge>}</Td>
               <Td align="right"><div className="flex justify-end gap-2">
                 <Button size="sm" onClick={() => { setError(null); setFe({}); setReset({ id: u.id, name: u.name, password: "" }); }}>Reset password</Button>
+                {superAdmin && u.twoFactorEnabled && u.id !== selfId && <Button size="sm" onClick={() => { if (window.confirm(`Atur ulang 2FA untuk ${u.name}? Semua sesinya diakhiri dan 2FA harus diaktifkan kembali.`)) void api(`/api/users/${u.id}/reset-2fa`, { body: {} }).then(() => { toast.success("2FA diatur ulang."); router.refresh(); }).catch((e) => toast.error(errorMessage(e))); }}>Reset 2FA</Button>}
                 {u.id !== selfId && (u.isActive ? <Button size="sm" variant="danger" onClick={() => void patch(u, { isActive: false }, "Akun dinonaktifkan.")}>Nonaktifkan</Button> : <Button size="sm" onClick={() => void patch(u, { isActive: true }, "Akun diaktifkan.")}>Aktifkan</Button>)}
               </div></Td>
             </tr>

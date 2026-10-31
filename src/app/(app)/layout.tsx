@@ -7,7 +7,7 @@ import { can, visibleNav } from "@/lib/permissions";
 import { AppShell } from "@/components/app-shell";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
-  const user = await requirePageUser();
+  const user = await requirePageUser({ allowSetup: true });
   const [brand, unread] = await Promise.all([getBrand(), unreadCount(user)]);
   const nav = visibleNav(user.role, !!user.employeeId).map(({ href, label, group }) => ({ href, label, group }));
   const [pending, pendingOt] = await Promise.all([

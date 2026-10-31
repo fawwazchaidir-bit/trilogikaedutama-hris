@@ -35,9 +35,25 @@ export async function createSession(userId: string, ip: string | null, userAgent
   return { token, expiresAt };
 }
 
+/**
+ * Kebijakan "2FA wajib untuk admin" dibaca pada tiap permintaan; di-cache singkat agar tidak menambah query tiap request.
+ * Perubahan pengaturan menghapus cache proses ini (instance lain mengikuti dalam ≤ 15 detik).
+ */
+let policyCache: { at: number; adminsRequire2fa: boolean } | null = null;
+export function invalidateSecurityPolicyCache(): void { policyCache = null; }
+async function adminsRequireTwoFactor(): Promise<boolean> {
+  if (policyCache && Date.now() - policyCache.at < 15_000) return policyCache.adminsRequire2fa;
+  const s = await prisma.companySettings.findUnique({ where: { id: 1 }, select: { twoFactorRequiredForAdmins: true } });
+  policyCache = { at: Date.now(), adminsRequire2fa: !!s?.twoFactorRequiredForAdmins };
+  return policyCache.adminsRequire2fa;
+}
+
 export interface SessionUser extends Actor {
   sessionId: string;
   mustChangePassword: boolean;
+  twoFactorEnabled: boolean;
+  /** Kebijakan mewajibkan 2FA untuk peran ini tetapi belum diaktifkan → hanya halaman/API pengaturan 2FA yang boleh dipakai. */
+  mustSetupTwoFactor: boolean;
   /** Akun demonstrasi (hanya untuk pengujian) → antarmuka menampilkan banner peringatan. */
   isDemo: boolean;
 }
@@ -67,6 +83,8 @@ export async function validateSession(token: string | undefined | null): Promise
     role: session.user.role,
     employeeId: session.user.employee?.id ?? null,
     mustChangePassword: session.user.mustChangePassword,
+    twoFactorEnabled: session.user.twoFactorEnabled,
+    mustSetupTwoFactor: session.user.role !== "EMPLOYEE" && !session.user.twoFactorEnabled && (await adminsRequireTwoFactor()),
     isDemo: session.user.isDemo,
   };
 }

@@ -4,6 +4,7 @@ import { hashPassword } from "@/server/auth/password";
 import { encryptField } from "@/server/crypto";
 import { isoToDate } from "@/server/json";
 import type { Role } from "@/lib/permissions";
+import { invalidateSecurityPolicyCache } from "@/server/auth/session";
 
 const TABLES = [
   "audit_logs", "notification_deliveries", "notifications", "overtime_requests", "location_checks", "two_factor_recovery_codes", "login_challenges", "password_reset_tokens", "payslips", "payroll_item_lines", "payroll_items", "payroll_runs", "salary_components",
@@ -13,6 +14,7 @@ const TABLES = [
 
 /** TRUNCATE tidak memicu trigger baris (append-only), sehingga aman untuk reset test. */
 export async function resetDb(): Promise<void> {
+  invalidateSecurityPolicyCache();
   await prisma.$executeRawUnsafe(`TRUNCATE TABLE ${TABLES.map((t) => `"${t}"`).join(", ")} RESTART IDENTITY CASCADE`);
 }
 

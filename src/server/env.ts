@@ -4,6 +4,8 @@ import { z } from "zod";
 const bool = z.enum(["true", "false"]).transform((v) => v === "true");
 const int = (def: number, min = 1, max = 1_000_000) =>
   z.coerce.number().int().min(min).max(max).default(def);
+/** String opsional: nilai kosong ("") di .env dianggap tidak diatur. */
+const opt = <T extends z.ZodTypeAny>(inner: T) => z.preprocess((v) => (v === "" ? undefined : v), inner.optional());
 
 const schema = z.object({
   DATABASE_URL: z.string().min(1, "DATABASE_URL wajib diisi"),
@@ -18,6 +20,31 @@ const schema = z.object({
   SESSION_IDLE_HOURS: int(8, 1, 720),
   SESSION_ABSOLUTE_DAYS: int(7, 1, 90),
   MAX_UPLOAD_MB: int(3, 1, 20),
+
+  // ── Notifikasi di luar aplikasi (opsional) ───────────────────────────
+  /** Email (SMTP). Tanpa SMTP_HOST, fitur email (notifikasi & lupa password) nonaktif. */
+  SMTP_HOST: opt(z.string()),
+  SMTP_PORT: int(587, 1, 65535),
+  /** true = TLS langsung (port 465); false = STARTTLS bila server mendukung (port 587). */
+  SMTP_SECURE: bool.default(false),
+  SMTP_USER: opt(z.string()),
+  SMTP_PASS: opt(z.string()),
+  MAIL_FROM: opt(z.string()),
+  /** WhatsApp: pilih penyedia. fonnte = gateway Fonnte; cloud_api = WhatsApp Business Cloud API (Meta); webhook = POST JSON ke URL Anda. */
+  WHATSAPP_PROVIDER: opt(z.enum(["fonnte", "cloud_api", "webhook"])),
+  WHATSAPP_TOKEN: opt(z.string()),
+  /** fonnte: default https://api.fonnte.com/send · webhook: URL tujuan · cloud_api: default https://graph.facebook.com/v21.0 */
+  WHATSAPP_API_URL: opt(z.string().url()),
+  WHATSAPP_PHONE_NUMBER_ID: opt(z.string()),
+  /** cloud_api: nama template pesan (disetujui Meta) dengan SATU variabel isi {{1}}. Kosong = kirim teks biasa (hanya terkirim dalam jendela 24 jam). */
+  WHATSAPP_TEMPLATE_NAME: opt(z.string()),
+  WHATSAPP_TEMPLATE_LANG: z.string().default("id"),
+  /** Rahasia untuk memicu pengiriman antrean lewat HTTP (POST /api/internal/deliveries, header Authorization: Bearer). Kosong = endpoint nonaktif. */
+  CRON_SECRET: opt(z.string().min(16, "CRON_SECRET minimal 16 karakter")),
+  /** Jalankan pekerja pengiriman di dalam proses aplikasi (default true). Matikan bila memakai pemicu eksternal. */
+  DELIVERY_WORKER: bool.default(true),
+  /** Masa berlaku tautan "lupa password" (menit). */
+  PASSWORD_RESET_MINUTES: int(30, 5, 1440),
   /** Kunci AES-256 (32 byte, base64) untuk enkripsi nomor rekening. Buat: `openssl rand -base64 32`. */
   DATA_ENCRYPTION_KEY: z.string().refine((v) => {
     try { return Buffer.from(v, "base64").length === 32; } catch { return false; }
@@ -39,6 +66,16 @@ export function env(): Env {
     cached = parsed.data;
   }
   return cached;
+}
+
+export const emailConfigured = (): boolean => !!env().SMTP_HOST && !!env().MAIL_FROM;
+
+export function whatsappConfigured(): boolean {
+  const e = env();
+  if (!e.WHATSAPP_PROVIDER) return false;
+  if (e.WHATSAPP_PROVIDER === "webhook") return !!e.WHATSAPP_API_URL;
+  if (e.WHATSAPP_PROVIDER === "cloud_api") return !!e.WHATSAPP_TOKEN && !!e.WHATSAPP_PHONE_NUMBER_ID;
+  return !!e.WHATSAPP_TOKEN; // fonnte
 }
 
 export function isSecureDeployment(): boolean {

@@ -5,6 +5,7 @@ import { prisma, transaction } from "../db";
 import { Errors } from "../errors";
 import { parseInput } from "../validate";
 import { assertCan, type Actor } from "../actor";
+import { invalidateSecurityPolicyCache } from "../auth/session";
 import { diffFields, writeAudit } from "../audit";
 import { optionalEmail, optionalPhone, optionalText, requiredText } from "@/lib/validation/common";
 import type { PayrollRules } from "@/lib/payroll";
@@ -69,6 +70,7 @@ export interface SettingsDto {
   leave: { annualLeaveQuota: number; allowNegativeLeaveBalance: boolean };
   payroll: FullPayrollRules & { confirmedAt: string | null };
   statutory: StatutoryConfig;
+  security: { twoFactorRequiredForAdmins: boolean };
 }
 
 /** Konfigurasi BPJS/PPh 21 tersimpan; bila belum ada / rusak → nilai bawaan (nonaktif). */
@@ -92,6 +94,7 @@ export async function getSettingsDto(actor: Actor): Promise<SettingsDto> {
     leave: { annualLeaveQuota: s.annualLeaveQuota, allowNegativeLeaveBalance: s.allowNegativeLeaveBalance },
     payroll: { ...payrollRulesOf(s), confirmedAt: s.payrollRulesConfirmedAt?.toISOString() ?? null },
     statutory: statutoryConfigOf(s),
+    security: { twoFactorRequiredForAdmins: s.twoFactorRequiredForAdmins },
   };
 }
 
@@ -244,6 +247,25 @@ export async function updateStatutoryConfig(actor: Actor, raw: unknown): Promise
     });
   });
   return input;
+}
+
+const securitySchema = z.object({ twoFactorRequiredForAdmins: z.boolean() });
+
+/** Kebijakan keamanan akun (Super Admin): mewajibkan 2FA bagi Admin/HR & Super Admin. */
+export async function updateSecurityPolicy(actor: Actor, raw: unknown): Promise<void> {
+  assertCan(actor, "settings:manage");
+  const input = parseInput(securitySchema, raw);
+  await transaction(async (tx) => {
+    const before = await tx.companySettings.findUniqueOrThrow({ where: { id: 1 }, select: { twoFactorRequiredForAdmins: true } });
+    await tx.companySettings.update({ where: { id: 1 }, data: { twoFactorRequiredForAdmins: input.twoFactorRequiredForAdmins } });
+    if (before.twoFactorRequiredForAdmins !== input.twoFactorRequiredForAdmins) {
+      await writeAudit(tx, actor, {
+        action: "settings.security_policy_update", entityType: "CompanySettings", entityId: "1",
+        summary: `2FA ${input.twoFactorRequiredForAdmins ? "diwajibkan" : "tidak lagi diwajibkan"} untuk admin`, before, after: input,
+      });
+    }
+  });
+  invalidateSecurityPolicyCache();
 }
 
 export async function confirmPayrollRules(actor: Actor): Promise<void> {

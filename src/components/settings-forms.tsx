@@ -227,3 +227,46 @@ export function StatutoryForm({ s, canEdit }: { s: SettingsDto; canEdit: boolean
     </Card>
   );
 }
+
+// ─────────────────────────── Keamanan akun & pengiriman notifikasi ───────────────────────────
+
+export function SecurityForm({ s, canEdit }: { s: SettingsDto; canEdit: boolean }) {
+  const f = useForm();
+  const [required, setRequired] = useState(s.security.twoFactorRequiredForAdmins);
+  return (
+    <Card>
+      <CardHeader title="Keamanan akun" description="Kebijakan autentikasi untuk seluruh pengguna." actions={s.security.twoFactorRequiredForAdmins ? <Badge tone="green">2FA wajib untuk admin</Badge> : <Badge>2FA opsional</Badge>} />
+      <form className="space-y-4 p-5" aria-label="Form keamanan akun" onSubmit={(e) => { e.preventDefault(); void f.run(() => api("/api/settings/security", { method: "PUT", body: { twoFactorRequiredForAdmins: required } }), "Kebijakan keamanan disimpan."); }}>
+        {f.error && <Notice tone="danger">{f.error}</Notice>}
+        {check("Wajibkan autentikasi dua langkah (2FA) untuk Admin/HR dan Super Admin", required, setRequired, !canEdit || f.busy, "Admin yang belum mengaktifkan 2FA diarahkan ke halaman Keamanan & Notifikasi dan tidak dapat memakai fitur lain sampai selesai. 2FA yang sudah aktif tidak dapat dimatikan sendiri. Pastikan setiap Super Admin menyimpan kode pemulihan.")}
+        {canEdit && <Button type="submit" variant="primary" loading={f.busy}>Simpan</Button>}
+      </form>
+    </Card>
+  );
+}
+
+export function DeliveriesCard({ stats }: { stats: import("@/server/services/delivery-admin").DeliveryStats }) {
+  const f = useForm();
+  const c = stats.counts;
+  const act = (action: "run" | "retry", ok: string) => f.run(() => api("/api/settings/deliveries", { body: { action } }), ok);
+  return (
+    <Card>
+      <CardHeader title="Pengiriman email & WhatsApp" description="Notifikasi dikirim lewat antrean (dicoba ulang otomatis). Konfigurasi SMTP/WhatsApp ada di environment server (lihat docs/DEPLOYMENT.md)."
+        actions={<div className="flex gap-2"><Badge tone={stats.email ? "green" : "gray"}>Email {stats.email ? "siap" : "belum dikonfigurasi"}</Badge><Badge tone={stats.whatsapp ? "green" : "gray"}>WhatsApp {stats.whatsapp ? "siap" : "belum dikonfigurasi"}</Badge></div>} />
+      <div className="space-y-4 p-5 text-sm">
+        {f.error && <Notice tone="danger">{f.error}</Notice>}
+        <dl className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+          {([["Menunggu", c.pending], ["Terkirim (30 hari)", c.sent], ["Gagal", c.failed], ["Dilewati", c.skipped]] as const).map(([k, v]) => <div key={k} className="rounded-md border border-line bg-canvas/60 p-3"><dt className="text-xs text-muted">{k}</dt><dd className="text-lg font-semibold">{v}</dd></div>)}
+        </dl>
+        {stats.recentFailures.length > 0 && (
+          <div><p className="mb-1 font-medium">Kegagalan terakhir</p>
+            <ul className="space-y-1 text-xs text-muted">{stats.recentFailures.map((r) => <li key={r.id}><span className="font-medium text-ink">{r.channel === "EMAIL" ? "Email" : "WhatsApp"} → {r.to}</span> · {r.attempts}× · {r.lastError ?? "—"}</li>)}</ul></div>
+        )}
+        <div className="flex flex-wrap gap-2">
+          <Button loading={f.busy} onClick={() => void act("run", "Antrean diproses.")}>Proses antrean sekarang</Button>
+          <Button disabled={f.busy || c.failed === 0} onClick={() => void act("retry", "Pengiriman gagal diantrekan ulang.")}>Antre ulang yang gagal</Button>
+        </div>
+      </div>
+    </Card>
+  );
+}

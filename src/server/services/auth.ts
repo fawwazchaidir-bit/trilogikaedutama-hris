@@ -1,5 +1,9 @@
 import "server-only";
+import { randomBytes } from "node:crypto";
+import { z } from "zod";
 import { prisma, transaction } from "../db";
+import { parseInput } from "../validate";
+import type { Role } from "@/lib/permissions";
 import { env } from "../env";
 import { Errors } from "../errors";
 import { writeAudit } from "../audit";
@@ -7,7 +11,8 @@ import type { Actor } from "../actor";
 import type { RequestMeta } from "../request-context";
 import { dummyHash, hashPassword, needsRehash, validatePasswordStrength, verifyPassword } from "../auth/password";
 import { blockedSeconds, hashKey, recordFailure, resetBucket } from "../auth/rate-limit";
-import { createSession, purgeOldSessions, revokeAllSessions, revokeSessionByToken } from "../auth/session";
+import { createSession, hashToken, purgeOldSessions, revokeAllSessions, revokeSessionByToken } from "../auth/session";
+import { assertTwoFactorNotBlocked, recordTwoFactorFailure, twoFactorBucketKey, verifySecondFactor } from "./two-factor";
 
 const GENERIC_FAIL = "Email atau password salah.";
 
@@ -24,7 +29,19 @@ function limits() {
   };
 }
 
-export async function login(input: { email: string; password: string }, meta: RequestMeta) {
+export interface LoginUser { id: string; email: string; name: string; role: string; mustChangePassword: boolean }
+export type LoginOutcome =
+  | { requiresTwoFactor: false; token: string; expiresAt: Date; user: LoginUser }
+  | { requiresTwoFactor: true; challenge: string; challengeExpiresAt: Date };
+
+/** Tantangan 2FA berlaku singkat dan dibatasi percobaannya. */
+const CHALLENGE_MINUTES = 5;
+const CHALLENGE_MAX_ATTEMPTS = 5;
+
+/**
+ * Langkah 1 login: email + password. Bila akun memakai 2FA, mengembalikan tantangan (tanpa sesi); selain itu sesi langsung dibuat.
+ */
+export async function startLogin(input: { email: string; password: string }, meta: RequestMeta): Promise<LoginOutcome> {
   const email = normalizeEmail(input.email);
   const cfg = limits();
   const emailKey = `login:email:${hashKey(email)}`;
@@ -56,6 +73,30 @@ export async function login(input: { email: string; password: string }, meta: Re
     throw Errors.unauthenticated(GENERIC_FAIL);
   }
 
+  if (user.twoFactorEnabled) {
+    // Password benar, tetapi sesi BELUM dibuat: perlu kode 2FA. Hash tantangan saja yang disimpan.
+    const challenge = randomBytes(32).toString("base64url");
+    const challengeExpiresAt = new Date(Date.now() + CHALLENGE_MINUTES * 60_000);
+    await prisma.$transaction([
+      prisma.loginChallenge.deleteMany({ where: { OR: [{ userId: user.id, createdAt: { lt: new Date(Date.now() - CHALLENGE_MINUTES * 60_000) } }, { expiresAt: { lt: new Date() } }] } }),
+      prisma.loginChallenge.create({ data: { userId: user.id, tokenHash: hashToken(challenge), expiresAt: challengeExpiresAt, ip: meta.ip } }),
+    ]);
+    return { requiresTwoFactor: true, challenge, challengeExpiresAt };
+  }
+  return finishLogin(user, input.password, meta, emailKey);
+}
+
+/** Dipakai pemanggil yang tidak menangani 2FA (mis. tes lama): gagal tegas bila akun memakai 2FA. */
+export async function login(input: { email: string; password: string }, meta: RequestMeta): Promise<{ token: string; expiresAt: Date; user: LoginUser }> {
+  const r = await startLogin(input, meta);
+  if (r.requiresTwoFactor) throw Errors.conflict("Akun ini memakai autentikasi dua langkah; selesaikan verifikasi kode.");
+  return r;
+}
+
+async function finishLogin(
+  user: { id: string; email: string; name: string; role: Role; passwordHash: string; mustChangePassword: boolean },
+  plainPassword: string | null, meta: RequestMeta, emailKey: string, via?: string,
+): Promise<Extract<LoginOutcome, { requiresTwoFactor: false }>> {
   await resetBucket(emailKey);
   const { token, expiresAt } = await createSession(user.id, meta.ip, meta.userAgent);
   await transaction(async (tx) => {
@@ -64,20 +105,57 @@ export async function login(input: { email: string; password: string }, meta: Re
       data: {
         lastLoginAt: new Date(),
         // Naikkan parameter hash secara transparan bila kebijakan berubah.
-        ...(needsRehash(user.passwordHash) ? { passwordHash: await hashPassword(input.password) } : {}),
+        ...(plainPassword !== null && needsRehash(user.passwordHash) ? { passwordHash: await hashPassword(plainPassword) } : {}),
       },
     });
     await writeAudit(tx, { userId: user.id, email: user.email, name: user.name, role: user.role, employeeId: null, ...meta }, {
-      action: "auth.login", entityType: "User", entityId: user.id, summary: "Masuk",
+      action: "auth.login", entityType: "User", entityId: user.id, summary: via ? `Masuk (${via})` : "Masuk",
     });
   });
   void purgeOldSessions().catch(() => undefined);
-
   return {
-    token,
-    expiresAt,
+    requiresTwoFactor: false, token, expiresAt,
     user: { id: user.id, email: user.email, name: user.name, role: user.role, mustChangePassword: user.mustChangePassword },
   };
+}
+
+const challengeSchema = z.object({ challenge: z.string().min(20).max(200), code: z.string().trim().min(6, "Masukkan kode verifikasi").max(20) });
+
+/**
+ * Langkah 2 login: tantangan + kode TOTP/pemulihan. Tantangan sekali pakai & maksimal 5 percobaan; gagal berulang memicu
+ * penguncian per pengguna (bucket yang sama dengan tindakan keamanan akun).
+ */
+export async function completeLogin(raw: unknown, meta: RequestMeta): Promise<Extract<LoginOutcome, { requiresTwoFactor: false }>> {
+  const input = parseInput(challengeSchema, raw);
+  const ch = await prisma.loginChallenge.findUnique({ where: { tokenHash: hashToken(input.challenge) }, include: { user: true } });
+  if (!ch || ch.expiresAt.getTime() <= Date.now() || !ch.user.isActive) {
+    throw Errors.unauthenticated("Verifikasi kedaluwarsa. Masuk kembali dengan email dan password.");
+  }
+  await assertTwoFactorNotBlocked(ch.userId);
+  if (ch.attempts >= CHALLENGE_MAX_ATTEMPTS) {
+    await prisma.loginChallenge.deleteMany({ where: { id: ch.id } });
+    throw Errors.unauthenticated("Terlalu banyak kode salah. Masuk kembali dengan email dan password.");
+  }
+  const v = await verifySecondFactor(ch.userId, input.code);
+  if (!v.ok) {
+    await Promise.all([
+      prisma.loginChallenge.update({ where: { id: ch.id }, data: { attempts: { increment: 1 } } }),
+      recordTwoFactorFailure(ch.userId),
+    ]);
+    await writeAudit(prisma, null, { action: "auth.2fa_failed", entityType: "User", entityId: ch.userId, summary: "Kode 2FA salah saat masuk", after: { ip: meta.ip } });
+    throw Errors.unauthenticated("Kode verifikasi salah atau sudah dipakai.");
+  }
+  // Tantangan sekali pakai: hapus secara atomik; bila sudah terhapus oleh permintaan lain, tolak.
+  const gone = await prisma.loginChallenge.deleteMany({ where: { id: ch.id } });
+  if (gone.count === 0) throw Errors.unauthenticated("Verifikasi sudah dipakai. Masuk kembali.");
+  await resetBucket(twoFactorBucketKey(ch.userId));
+  const emailKey = `login:email:${hashKey(ch.user.email)}`;
+  const out = await finishLogin(ch.user, null, meta, emailKey, v.method === "recovery" ? "2FA, kode pemulihan" : "2FA");
+  if (v.method === "recovery") {
+    const left = await prisma.twoFactorRecoveryCode.count({ where: { userId: ch.userId, usedAt: null } });
+    await writeAudit(prisma, null, { action: "auth.2fa_recovery_used", entityType: "User", entityId: ch.userId, summary: `Kode pemulihan 2FA dipakai (sisa ${left})` });
+  }
+  return out;
 }
 
 export async function logout(token: string | undefined, actor: Actor | null): Promise<void> {

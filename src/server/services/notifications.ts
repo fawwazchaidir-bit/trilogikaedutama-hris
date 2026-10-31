@@ -2,6 +2,7 @@ import "server-only";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "../db";
 import type { Actor } from "../actor";
+import { queueDeliveries } from "../notify/deliveries";
 
 export interface NotificationDto {
   id: string;
@@ -15,7 +16,10 @@ export interface NotificationDto {
 
 type Db = Prisma.TransactionClient | typeof prisma;
 
-/** Buat notifikasi dalam aplikasi untuk banyak pengguna (dipanggil dalam transaksi yang sama dengan peristiwanya). */
+/**
+ * Buat notifikasi dalam aplikasi untuk banyak pengguna (dipanggil dalam transaksi yang sama dengan peristiwanya) dan
+ * antrekan pengiriman email/WhatsApp (outbox) bagi pengguna yang memilihnya. Notifikasi dalam aplikasi SELALU dibuat.
+ */
 export async function notifyUsers(
   db: Db,
   userIds: string[],
@@ -23,9 +27,11 @@ export async function notifyUsers(
 ): Promise<void> {
   const ids = [...new Set(userIds)];
   if (ids.length === 0) return;
-  await db.notification.createMany({
+  const rows = await db.notification.createManyAndReturn({
     data: ids.map((userId) => ({ userId, type: n.type, title: n.title, body: n.body ?? null, href: n.href ?? null })),
+    select: { id: true, userId: true, title: true, body: true, href: true },
   });
+  await queueDeliveries(db, rows);
 }
 
 /** Semua pengguna aktif yang berhak meninjau pengajuan (HR & Super Admin), kecuali `exceptUserId`. */
