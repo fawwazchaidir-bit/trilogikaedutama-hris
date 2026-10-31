@@ -32,11 +32,12 @@ export function PhotoCapture({ value, onChange, required, disabled }: { value: B
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const [live, setLive] = useState(false);
+  const [ready, setReady] = useState(false); // video sudah punya gambar → tombol "Ambil foto" aktif
   const [facing, setFacing] = useState<"user" | "environment">("user");
   const [error, setError] = useState<string | null>(null);
   const canStream = typeof navigator !== "undefined" && !!navigator.mediaDevices?.getUserMedia;
 
-  const stop = useCallback(() => { streamRef.current?.getTracks().forEach((t) => t.stop()); streamRef.current = null; setLive(false); }, []);
+  const stop = useCallback(() => { streamRef.current?.getTracks().forEach((t) => t.stop()); streamRef.current = null; setLive(false); setReady(false); }, []);
   useEffect(() => () => stop(), [stop]);
   const preview = useMemo(() => (value ? URL.createObjectURL(value) : null), [value]);
   useEffect(() => () => { if (preview) URL.revokeObjectURL(preview); }, [preview]);
@@ -75,9 +76,9 @@ export function PhotoCapture({ value, onChange, required, disabled }: { value: B
       {error && <p role="alert" className="text-xs font-medium text-brand-700">{error}</p>}
       {live && (
         <div className="space-y-2">
-          <video ref={videoRef} playsInline muted autoPlay className="aspect-[4/3] w-full max-w-sm rounded-md border border-line bg-black object-cover" aria-label="Pratinjau kamera" />
+          <video ref={videoRef} playsInline muted autoPlay onLoadedData={() => setReady(true)} className="aspect-[4/3] w-full max-w-sm rounded-md border border-line bg-black object-cover" aria-label="Pratinjau kamera" />
           <div className="flex flex-wrap gap-2">
-            <Button variant="primary" size="sm" onClick={snap} disabled={disabled}><Camera className="size-4" />Ambil foto</Button>
+            <Button variant="primary" size="sm" onClick={snap} disabled={disabled || !ready}><Camera className="size-4" />Ambil foto</Button>
             <Button size="sm" onClick={() => void open(facing === "user" ? "environment" : "user")} disabled={disabled}><SwitchCamera className="size-4" />Ganti kamera</Button>
             <Button size="sm" onClick={stop}>Tutup</Button>
           </div>
