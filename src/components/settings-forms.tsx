@@ -81,7 +81,7 @@ export function PolicyForm({ s, canEdit }: { s: SettingsDto; canEdit: boolean })
     lateMinutesAfterTolerance: a.lateMinutesAfterTolerance, locationEnabled: a.locationEnabled, locationName: a.locationName ?? "", locationLat: a.locationLat === null ? "" : String(a.locationLat),
     locationLng: a.locationLng === null ? "" : String(a.locationLng), locationRadiusMeters: String(a.locationRadiusMeters), locationMaxAccuracyMeters: String(a.locationMaxAccuracyMeters),
     requestBackdateDays: String(a.requestBackdateDays), annualLeaveQuota: String(s.leave.annualLeaveQuota), allowNegativeLeaveBalance: s.leave.allowNegativeLeaveBalance,
-    locationSpoofMode: a.locationSpoofMode, officeNetworks: a.officeNetworks.join("\n"), locationRequireOfficeNetwork: a.locationRequireOfficeNetwork,
+    locationSpoofMode: a.locationSpoofMode, photoMode: a.photoMode, photoRequireLocation: a.photoRequireLocation,
   });
   const set = <K extends keyof typeof v>(k: K, x: (typeof v)[K]) => setV((p) => ({ ...p, [k]: x }));
   const d = !canEdit || f.busy;
@@ -89,7 +89,7 @@ export function PolicyForm({ s, canEdit }: { s: SettingsDto; canEdit: boolean })
   return (
     <Card>
       <CardHeader title="Kebijakan absensi & cuti" description="Berlaku untuk seluruh karyawan. Hanya Super Admin yang dapat mengubah." actions={a.confirmedAt ? <Badge tone="green">Dikonfirmasi {formatDateTime(a.confirmedAt)}</Badge> : <Badge tone="amber">Nilai awal — perlu dikonfirmasi</Badge>} />
-      <form className="grid gap-4 p-5 sm:grid-cols-2" aria-label="Form kebijakan" onSubmit={(e) => { e.preventDefault(); void f.run(() => api("/api/settings/attendance", { method: "PUT", body: { lateMinutesAfterTolerance: v.lateMinutesAfterTolerance, locationEnabled: v.locationEnabled, locationName: v.locationName, locationLat: num(v.locationLat), locationLng: num(v.locationLng), locationRadiusMeters: Number(v.locationRadiusMeters), locationMaxAccuracyMeters: Number(v.locationMaxAccuracyMeters), requestBackdateDays: Number(v.requestBackdateDays), annualLeaveQuota: Number(v.annualLeaveQuota), allowNegativeLeaveBalance: v.allowNegativeLeaveBalance, locationSpoofMode: v.locationSpoofMode, officeNetworks: v.officeNetworks.split(/[\n,;]+/).map((x) => x.trim()).filter(Boolean), locationRequireOfficeNetwork: v.locationRequireOfficeNetwork } }), "Kebijakan disimpan dan dikonfirmasi."); }}>
+      <form className="grid gap-4 p-5 sm:grid-cols-2" aria-label="Form kebijakan" onSubmit={(e) => { e.preventDefault(); void f.run(() => api("/api/settings/attendance", { method: "PUT", body: { lateMinutesAfterTolerance: v.lateMinutesAfterTolerance, locationEnabled: v.locationEnabled, locationName: v.locationName, locationLat: num(v.locationLat), locationLng: num(v.locationLng), locationRadiusMeters: Number(v.locationRadiusMeters), locationMaxAccuracyMeters: Number(v.locationMaxAccuracyMeters), requestBackdateDays: Number(v.requestBackdateDays), annualLeaveQuota: Number(v.annualLeaveQuota), allowNegativeLeaveBalance: v.allowNegativeLeaveBalance, locationSpoofMode: v.locationSpoofMode, attendancePhotoMode: v.photoMode, attendancePhotoRequireLocation: v.photoRequireLocation } }), "Kebijakan disimpan dan dikonfirmasi."); }}>
         {f.error && <div className="sm:col-span-2"><Notice tone="danger">{f.error}</Notice></div>}
         <div className="sm:col-span-2">{check("Hitung menit keterlambatan setelah toleransi", v.lateMinutesAfterTolerance, (x) => set("lateMinutesAfterTolerance", x), d, "Nonaktif (default): menit terlambat dihitung dari jam masuk, mis. masuk 08.21 dengan jam 08.00 = 21 menit. Aktif: dihitung dari batas toleransi.")}</div>
         <TextField label="Kuota cuti tahunan (hari)" type="number" min={0} max={366} disabled={d} value={v.annualLeaveQuota} onChange={(e) => set("annualLeaveQuota", e.target.value)} error={f.fe.annualLeaveQuota} hint="Contoh 12. Sesuaikan dengan kebijakan perusahaan & ketentuan yang berlaku." />
@@ -97,7 +97,7 @@ export function PolicyForm({ s, canEdit }: { s: SettingsDto; canEdit: boolean })
         <div className="sm:col-span-2">{check("Izinkan saldo cuti menjadi negatif", v.allowNegativeLeaveBalance, (x) => set("allowNegativeLeaveBalance", x), d)}</div>
         <fieldset className="grid gap-4 rounded-md border border-line p-4 sm:col-span-2 sm:grid-cols-2">
           <legend className="px-1 text-sm font-medium text-ink-soft">Absensi berbasis lokasi (opsional)</legend>
-          <div className="sm:col-span-2">{check("Aktifkan absensi berbasis lokasi", v.locationEnabled, (x) => set("locationEnabled", x), d, "Karyawan diminta izin lokasi satu kali saat check-in/out. Lokasi perangkat hanya alat bantu dan tidak menjamin pencegahan manipulasi sepenuhnya; tidak ada pelacakan terus-menerus dan tidak ada selfie.")}</div>
+          <div className="sm:col-span-2">{check("Aktifkan absensi berbasis lokasi", v.locationEnabled, (x) => set("locationEnabled", x), d, "Karyawan diminta izin lokasi satu kali saat check-in/out. Lokasi perangkat hanya alat bantu dan tidak menjamin pencegahan manipulasi sepenuhnya; tidak ada pelacakan terus-menerus.")}</div>
           <TextField label="Nama lokasi" disabled={d} value={v.locationName} onChange={(e) => set("locationName", e.target.value)} error={f.fe.locationName} placeholder="mis. Kantor Pusat" />
           <TextField label="Radius diizinkan (meter)" type="number" min={10} disabled={d} value={v.locationRadiusMeters} onChange={(e) => set("locationRadiusMeters", e.target.value)} error={f.fe.locationRadiusMeters} />
           <TextField label="Lintang (latitude)" inputMode="decimal" disabled={d} value={v.locationLat} onChange={(e) => set("locationLat", e.target.value)} error={f.fe.locationLat} placeholder="-7.795600" />
@@ -106,16 +106,24 @@ export function PolicyForm({ s, canEdit }: { s: SettingsDto; canEdit: boolean })
           <p className="self-end text-xs text-muted">Cara mengambil koordinat: buka Google Maps, klik lama pada titik kantor, salin angka lintang &amp; bujur.</p>
           <div className="space-y-3 border-t border-line pt-4 sm:col-span-2">
             <p className="text-sm font-medium text-ink-soft">Pencegahan lokasi palsu</p>
-            <Notice tone="info">Aplikasi web <strong>tidak dapat menjamin</strong> koordinat berasal dari GPS asli. Sistem menilai beberapa sinyal sekaligus (kesegaran pembacaan, akurasi/presisi tidak wajar, titik persis di pusat kantor, koordinat identik berulang, perpindahan mustahil, perangkat baru/dipakai bergantian, jaringan kantor) dan menandai atau menolak yang berisiko tinggi. Hasilnya indikator untuk ditinjau HR, bukan bukti kecurangan.</Notice>
+            <Notice tone="info">Aplikasi web <strong>tidak dapat menjamin</strong> koordinat berasal dari GPS asli. Sistem menilai beberapa sinyal sekaligus (kesegaran pembacaan, akurasi/presisi tidak wajar, titik persis di pusat kantor, koordinat identik berulang, perpindahan mustahil, perangkat baru/dipakai bergantian) dan menandai atau menolak yang berisiko tinggi. Hasilnya indikator untuk ditinjau HR, bukan bukti kecurangan. Bukti utama kehadiran adalah <strong>foto absensi</strong> di bawah.</Notice>
             <SelectField label="Penanganan risiko tinggi" disabled={d} value={v.locationSpoofMode} onChange={(e) => set("locationSpoofMode", e.target.value as typeof v.locationSpoofMode)}>
               <option value="FLAG">Tandai saja — tetap diterima, masuk antrean Tinjauan Lokasi (disarankan awal)</option>
               <option value="BLOCK">Tolak yang berisiko sangat tinggi, tandai yang sedang</option>
               <option value="OFF">Matikan penilaian risiko (hanya radius &amp; akurasi)</option>
             </SelectField>
-            <TextAreaField label="Jaringan kantor (opsional; satu per baris)" rows={3} disabled={d || !a.trustProxy} value={v.officeNetworks} onChange={(e) => set("officeNetworks", e.target.value)} error={f.fe.officeNetworks}
-              placeholder={"203.0.113.0/24\n198.51.100.7"} hint={a.trustProxy ? "Alamat IP publik/CIDR Wi-Fi kantor. Absen dari jaringan ini menurunkan skor risiko — sinyal yang tidak bergantung pada GPS." : "Butuh TRUST_PROXY=true di server (aplikasi di belakang proxy tepercaya) agar alamat IP pengguna dapat dipercaya."} />
-            {check("Wajibkan absen dari jaringan kantor", v.locationRequireOfficeNetwork, (x) => set("locationRequireOfficeNetwork", x), d || !a.trustProxy, "Paling kuat untuk karyawan non-lapangan: absen ditolak bila tidak dari jaringan kantor. Jangan aktifkan untuk karyawan yang bekerja di lapangan/WFH.")}
           </div>
+        </fieldset>
+        <fieldset className="grid gap-4 rounded-md border border-line p-4 sm:col-span-2 sm:grid-cols-2">
+          <legend className="px-1 text-sm font-medium text-ink-soft">Foto absensi bercap lokasi &amp; waktu (disarankan untuk dinas luar)</legend>
+          <div className="sm:col-span-2"><Notice tone="info">Karyawan memotret langsung dari aplikasi saat check-in/out. <strong>Server</strong> mencetak waktu server, koordinat, nama, dan jenis absen pada foto — bukan perangkat — lalu menyimpannya sebagai bukti yang tidak dapat diubah. Tidak bergantung pada Wi-Fi/jaringan kantor sehingga cocok untuk dinas luar. Foto adalah <strong>bukti untuk ditinjau manusia</strong>, bukan jaminan keaslian.</Notice></div>
+          <SelectField label="Foto absensi" disabled={d} value={v.photoMode} onChange={(e) => set("photoMode", e.target.value as typeof v.photoMode)}>
+            <option value="OFF">Tidak memakai foto</option>
+            <option value="OPTIONAL">Opsional — boleh melampirkan foto</option>
+            <option value="REQUIRED">Wajib pada check-in &amp; check-out (disarankan)</option>
+          </SelectField>
+          <div className="self-end">{check("Foto wajib disertai lokasi (izin GPS)", v.photoRequireLocation, (x) => set("photoRequireLocation", x), d || v.photoMode === "OFF", "Bila aktif, absen ditolak jika lokasi tidak terbaca sehingga cap foto selalu memuat koordinat.")}</div>
+          {v.photoMode !== "OFF" && v.locationEnabled && <div className="sm:col-span-2"><Notice tone="warn">Radius lokasi di atas <strong>menolak</strong> absen di luar kantor — termasuk dinas luar. Bila ada karyawan dinas luar, matikan &quot;Aktifkan absensi berbasis lokasi&quot; dan andalkan foto bercap.</Notice></div>}
         </fieldset>
         {canEdit && <div className="sm:col-span-2"><Button type="submit" variant="primary" loading={f.busy}>Simpan & konfirmasi</Button></div>}
       </form>

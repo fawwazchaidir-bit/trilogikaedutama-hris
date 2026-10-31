@@ -10,7 +10,7 @@ Kode: 400 permintaan salah · 401 belum masuk · 403 tidak berizin · 404 tidak 
 | Akun | `GET,POST /users` `PATCH /users/:id` `POST /users/:id/password` `POST /users/:id/reset-2fa` |
 | Karyawan | `GET,POST /employees` `GET,PUT /employees/:id` `POST /employees/:id/{deactivate,reactivate,reveal-bank,photo}` `GET /employees/options` `GET /employees/export` `POST /employees/import` (+`/template`) `GET,POST /divisions` `PATCH /divisions/:id` |
 | Jadwal | `GET,POST /schedules` `PUT /schedules/:id` `GET,POST /schedule-assignments` `DELETE /schedule-assignments/:id` `GET,POST /calendar` `DELETE /calendar/:id` |
-| Absensi | `GET /attendance/today` `POST /attendance/check-in` `POST /attendance/check-out` (body: `note`, `location{lat,lng,accuracy,timestamp,clientNow,mocked?}`) `POST /attendance/correct` (`checkOutNextDay` untuk shift malam) `GET /attendance/corrections` |
+| Absensi | `GET /attendance/today` `POST /attendance/check-in` `POST /attendance/check-out` (JSON: `note`, `location{lat,lng,accuracy,timestamp,clientNow,mocked?}`; dengan foto absensi: `multipart/form-data` berisi `payload` = JSON itu dan `photo` = berkas kamera — waktu & lokasi dicetak server, bidang waktu dari klien diabaikan; foto dibuka lewat `GET /files/{id}`) `POST /attendance/correct` (`checkOutNextDay` untuk shift malam) `GET /attendance/corrections` |
 | Lokasi | `GET /location?status=OPEN\|CLEARED\|CONFIRMED\|ALL` `POST /location/:id/review` |
 | Rekap | `GET /recap` `GET /recap/detail` `GET /recap/export?format=csv\|xlsx\|pdf` |
 | Pengajuan | `GET,POST /leaves` (`dayPart`: `FULL`\|`MORNING`\|`AFTERNOON`) `GET /leaves/mine` `POST /leaves/:id/{review,cancel}` `POST /leaves/attachment` `GET,POST /leave-balance` `POST /leave-balance/grant-quota` |

@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { assessRisk, blockedMessage, BLOCK_AT, decide, FLAG_AT, type RiskFacts } from "@/lib/location-risk";
-import { clientIpFromForwardedFor, ipInNetworks, isValidNetwork, parseNetwork } from "@/lib/ip";
+import { clientIpFromForwardedFor } from "@/lib/ip";
 
 const NOW = 1_760_000_000_000;
 /** Pembacaan GPS yang tampak sah: presisi tinggi, baru, jam perangkat sinkron. */
 const clean = (over: Partial<RiskFacts> = {}): RiskFacts => ({
   reading: { lat: -7.795612345, lng: 110.369587654, accuracy: 8.4, timestamp: NOW - 1500, clientNow: NOW + 200 },
-  serverNowMs: NOW, distanceToCenter: 35, prev: null, sharedCoordsWithOther: false, sharedDeviceWithOther: false, deviceKnown: null, network: "NOT_CONFIGURED", ...over,
+  serverNowMs: NOW, distanceToCenter: 35, prev: null, sharedCoordsWithOther: false, sharedDeviceWithOther: false, deviceKnown: null, ...over,
 });
 
 describe("assessRisk — pembacaan GPS sah tidak ditandai", () => {
@@ -71,18 +71,11 @@ describe("assessRisk — sinyal aplikasi lokasi palsu", () => {
   });
 });
 
-describe("jaringan kantor & keputusan", () => {
-  it("dari jaringan kantor menurunkan skor (-30) tetapi tidak di bawah 0; di luar jaringan menambah 25", () => {
-    expect(assessRisk(clean({ network: "INSIDE" })).score).toBe(0);
-    const weak = assessRisk(clean({ network: "INSIDE", reading: { ...clean().reading, accuracy: 0 } }));
-    expect(weak.score).toBe(0); // 30 − 30
-    expect(assessRisk(clean({ network: "OUTSIDE" })).score).toBe(25);
-  });
-  it("jaringan kantor mengimbangi satu sinyal lemah, tetapi tidak menghapus beberapa sinyal kuat", () => {
-    const lowPrec = { ...clean().reading, lat: -7.7956, lng: 110.3695 };
-    expect(assessRisk(clean({ reading: lowPrec, network: "INSIDE" })).score).toBe(0);
-    const strong = assessRisk(clean({ reading: { ...lowPrec, accuracy: 0 }, distanceToCenter: 0, network: "INSIDE" }));
-    expect(strong.score).toBeGreaterThanOrEqual(FLAG_AT);
+describe("keputusan", () => {
+  it("tidak ada sinyal jaringan/IP: skor hanya berasal dari sinyal lokasi & perangkat (dinas luar tidak dirugikan)", () => {
+    const flags = assessRisk(clean()).flags as string[];
+    expect(flags.some((f) => f.includes("NETWORK"))).toBe(false);
+    expect(assessRisk(clean()).score).toBe(0);
   });
   it("decide: OFF selalu terima; FLAG tidak pernah menolak; BLOCK menolak ≥ 70 dan menandai 50–69", () => {
     expect(decide("OFF", 100)).toBe("ACCEPTED");
@@ -93,40 +86,10 @@ describe("jaringan kantor & keputusan", () => {
     expect(decide("BLOCK", FLAG_AT - 1)).toBe("ACCEPTED");
   });
   it("pesan penolakan memuat alasan tetapi tidak memuat angka skor/ambang", () => {
-    const m = blockedMessage(["MOCK_REPORTED", "ACCURACY_PERFECT", "INSIDE_OFFICE_NETWORK"]);
+    const m = blockedMessage(["MOCK_REPORTED", "ACCURACY_PERFECT", "OUTSIDE_RADIUS"]);
     expect(m).toContain("lokasi tiruan");
     expect(m).not.toMatch(/\b(100|70|50)\b/);
     expect(m).not.toContain("menurunkan risiko");
-  });
-});
-
-describe("pencocokan IP / CIDR", () => {
-  it("IPv4 tunggal & CIDR", () => {
-    expect(ipInNetworks("203.0.113.7", ["203.0.113.0/24"])).toBe(true);
-    expect(ipInNetworks("203.0.114.7", ["203.0.113.0/24"])).toBe(false);
-    expect(ipInNetworks("198.51.100.9", ["198.51.100.9"])).toBe(true);
-    expect(ipInNetworks("198.51.100.10", ["198.51.100.9"])).toBe(false);
-    expect(ipInNetworks("10.1.2.3", ["10.0.0.0/8"])).toBe(true);
-    expect(ipInNetworks("1.2.3.4", ["0.0.0.0/0"])).toBe(true);
-  });
-  it("batas prefix tepat (/31, /32)", () => {
-    expect(ipInNetworks("192.0.2.1", ["192.0.2.0/31"])).toBe(true);
-    expect(ipInNetworks("192.0.2.2", ["192.0.2.0/31"])).toBe(false);
-    expect(ipInNetworks("192.0.2.2", ["192.0.2.2/32"])).toBe(true);
-  });
-  it("IPv6 & IPv4-mapped", () => {
-    expect(ipInNetworks("2001:db8::1", ["2001:db8::/32"])).toBe(true);
-    expect(ipInNetworks("2001:db9::1", ["2001:db8::/32"])).toBe(false);
-    expect(ipInNetworks("::ffff:203.0.113.7", ["203.0.113.0/24"])).toBe(true);
-    expect(ipInNetworks("203.0.113.7", ["::ffff:203.0.113.0/120"])).toBe(true);
-    expect(ipInNetworks("[2001:db8:0:0:0:0:0:5]", ["2001:db8::5"])).toBe(true);
-  });
-  it("masukan tak valid ditolak dengan aman (tidak pernah cocok, tidak melempar)", () => {
-    expect(ipInNetworks(null, ["10.0.0.0/8"])).toBe(false);
-    expect(ipInNetworks("bukan-ip", ["10.0.0.0/8"])).toBe(false);
-    expect(ipInNetworks("10.0.0.1", ["sampah", "10.0.0.0/99", ""])).toBe(false);
-    for (const bad of ["", "1.2.3", "1.2.3.4.5", "256.1.1.1", "1.2.3.4/33", "::1/129", "1.2.3.4/", "1.2.3.4/8/8", "01.2.3.4", "gggg::1"]) expect(isValidNetwork(bad), bad).toBe(false);
-    expect(parseNetwork("203.0.113.77/24")!.prefix).toBe(24);
   });
 });
 

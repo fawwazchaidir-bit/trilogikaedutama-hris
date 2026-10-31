@@ -3,17 +3,17 @@
  *
  * PENTING (jujur): aplikasi web TIDAK dapat memverifikasi bahwa koordinat benar-benar berasal dari GPS. Siapa pun yang
  * mengendalikan perangkat/permintaan dapat mengirim koordinat apa pun. Karena itu pendekatannya BERLAPIS: beberapa sinyal
- * independen yang masing-masing lemah, ditambah satu sinyal yang tidak bergantung pada GPS (jaringan kantor), lalu hasilnya
- * ditandai untuk tinjauan HR atau — bila diatur — ditolak. Skor adalah INDIKATOR, bukan bukti kecurangan.
+ * independen yang masing-masing lemah, lalu hasilnya ditandai untuk tinjauan HR atau — bila diatur — ditolak. Bukti utama
+ * kehadiran adalah FOTO ABSENSI bercap lokasi & waktu server (lihat services/attendance-photo.ts) yang ditinjau manusia.
+ * Skor adalah INDIKATOR, bukan bukti kecurangan. Tidak ada syarat jaringan Wi-Fi/IP kantor: karyawan dinas luar tidak berada di sana.
  */
 import type { GeoReading } from "./geo";
 
 export type RiskFlag =
   | "MOCK_REPORTED" | "STALE_READING" | "FUTURE_READING" | "CLOCK_SKEW" | "MISSING_TELEMETRY" | "ACCURACY_PERFECT" | "COORDS_LOW_PRECISION"
   | "EXACT_CENTER" | "REPEAT_COORDS" | "SHARED_COORDS" | "IMPOSSIBLE_TRAVEL" | "NEW_DEVICE" | "SHARED_DEVICE"
-  | "OUTSIDE_OFFICE_NETWORK" | "INSIDE_OFFICE_NETWORK"
-  // Penolakan non-risiko (geofence / jaringan wajib) — dicatat agar pola percobaan terlihat.
-  | "OUTSIDE_RADIUS" | "LOW_ACCURACY" | "NO_LOCATION" | "INVALID_LOCATION" | "NETWORK_REQUIRED";
+  // Penolakan non-risiko (geofence) — dicatat agar pola percobaan terlihat.
+  | "OUTSIDE_RADIUS" | "LOW_ACCURACY" | "NO_LOCATION" | "INVALID_LOCATION";
 
 export const RISK_FLAG_LABEL: Record<RiskFlag, string> = {
   MOCK_REPORTED: "Perangkat melaporkan lokasi tiruan",
@@ -29,20 +29,17 @@ export const RISK_FLAG_LABEL: Record<RiskFlag, string> = {
   IMPOSSIBLE_TRAVEL: "Perpindahan mustahil dari lokasi sebelumnya",
   NEW_DEVICE: "Perangkat/browser berbeda dari yang biasa dipakai",
   SHARED_DEVICE: "Perangkat yang sama dipakai karyawan lain (titip absen?)",
-  OUTSIDE_OFFICE_NETWORK: "Bukan dari jaringan kantor",
-  INSIDE_OFFICE_NETWORK: "Dari jaringan kantor (menurunkan risiko)",
   OUTSIDE_RADIUS: "Di luar radius absensi",
   LOW_ACCURACY: "Akurasi GPS di bawah syarat",
   NO_LOCATION: "Tanpa data lokasi",
   INVALID_LOCATION: "Data lokasi tidak valid",
-  NETWORK_REQUIRED: "Wajib dari jaringan kantor",
 };
 
-/** Bobot tiap sinyal. INSIDE_OFFICE_NETWORK negatif: koneksi dari jaringan kantor lebih sulit dipalsukan daripada GPS. */
+/** Bobot tiap sinyal. */
 export const RISK_WEIGHT: Partial<Record<RiskFlag, number>> = {
   MOCK_REPORTED: 100, IMPOSSIBLE_TRAVEL: 60, SHARED_COORDS: 50, SHARED_DEVICE: 45, EXACT_CENTER: 40, STALE_READING: 40, FUTURE_READING: 40,
-  REPEAT_COORDS: 35, ACCURACY_PERFECT: 30, COORDS_LOW_PRECISION: 25, OUTSIDE_OFFICE_NETWORK: 25, NEW_DEVICE: 20, MISSING_TELEMETRY: 20,
-  CLOCK_SKEW: 15, INSIDE_OFFICE_NETWORK: -30,
+  REPEAT_COORDS: 35, ACCURACY_PERFECT: 30, COORDS_LOW_PRECISION: 25, NEW_DEVICE: 20, MISSING_TELEMETRY: 20,
+  CLOCK_SKEW: 15,
 };
 
 /** Skor ≥ ini → ditandai (FLAG) untuk tinjauan; ≥ BLOCK_AT → ditolak pada mode BLOCK. */
@@ -78,7 +75,6 @@ export interface RiskFacts {
   sharedDeviceWithOther: boolean;
   /** true = perangkat dikenal; false = perangkat baru padahal karyawan sudah punya riwayat; null = belum ada riwayat. */
   deviceKnown: boolean | null;
-  network: "INSIDE" | "OUTSIDE" | "UNKNOWN" | "NOT_CONFIGURED";
 }
 
 const decimals = (n: number) => (String(n).split(".")[1] ?? "").replace(/e.*$/i, "").length;
@@ -129,8 +125,6 @@ export function assessRisk(f: RiskFacts): RiskAssessment {
   if (gpsGrade && f.sharedCoordsWithOther) add("SHARED_COORDS");
   if (f.sharedDeviceWithOther) add("SHARED_DEVICE");
   if (f.deviceKnown === false) add("NEW_DEVICE");
-  if (f.network === "OUTSIDE") add("OUTSIDE_OFFICE_NETWORK");
-  else if (f.network === "INSIDE") add("INSIDE_OFFICE_NETWORK");
 
   const raw = flags.reduce((s, fl) => s + (RISK_WEIGHT[fl] ?? 0), 0);
   return { score: Math.max(0, Math.min(100, raw)), flags, details };

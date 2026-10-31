@@ -11,6 +11,7 @@ import { dateToIso, isoToDate } from "../json";
 import { computeEmployeePeriod, employeeLite, loadRangeContext } from "./context";
 import { geoPolicyOf, getSettings } from "./settings";
 import { evaluatePunchLocation, locationSchema, persistLocationCheck, type PunchContext } from "./location";
+import { persistPunchPhoto, photoPolicyOf, preparePunchPhoto, type PhotoPolicy } from "./attendance-photo";
 import { isOvernight, OVERNIGHT_CHECKOUT_GRACE_MINUTES, resolveSchedule, shiftWindow, type DayResult, type ScheduleLite } from "@/lib/attendance";
 import { formatClock } from "@/lib/format";
 import { hhmm, isoDate, optionalText, requiredText, uuid } from "@/lib/validation/common";
@@ -43,6 +44,8 @@ export interface TodayState {
   /** Alasan tombol tidak aktif (ditampilkan ke karyawan). */
   blockedReason: string | null;
   geo: { enabled: boolean; name: string | null; radiusMeters: number; maxAccuracyMeters: number };
+  /** Foto absensi bercap: mode (OFF/OPTIONAL/REQUIRED) dan apakah lokasi wajib menyertai foto. */
+  photo: PhotoPolicy;
   hasDefaultSchedule: boolean;
 }
 
@@ -114,6 +117,7 @@ export async function getTodayState(actor: Actor, now: Date = new Date(), opts: 
     checkInNote: att?.checkInNote ?? null, checkOutNote: att?.checkOutNote ?? null,
     canCheckIn, canCheckOut, blockedReason,
     geo: { enabled: geo.enabled, name: geo.name, radiusMeters: geo.radiusMeters, maxAccuracyMeters: geo.maxAccuracyMeters },
+    photo: photoPolicyOf(settings),
     hasDefaultSchedule: schedule !== null,
   };
 }
@@ -130,6 +134,7 @@ export async function checkIn(actor: Actor, raw: unknown, now: Date = new Date()
     throw Errors.validation(`Anda memiliki ${day.status.toLowerCase()} yang disetujui hari ini, sehingga tidak dapat check-in. Hubungi HR bila ingin membatalkannya.`);
   }
   const geo = await evaluatePunchLocation({ employeeId, employeeName: emp.fullName, kind: "CHECK_IN", workDate: today, now, location: input.location, ctx });
+  const photo = await preparePunchPhoto({ policy: photoPolicyOf(await getSettings()), raw: ctx.photo, kind: "CHECK_IN", at: now, location: input.location, employee: { fullName: emp.fullName, employeeNo: emp.employeeNo } });
   try {
     await transaction(async (tx) => {
       const a = await tx.attendance.create({
@@ -139,9 +144,10 @@ export async function checkIn(actor: Actor, raw: unknown, now: Date = new Date()
         },
       });
       await persistLocationCheck(tx, geo, { employeeId, employeeName: emp.fullName, attendanceId: a.id, kind: "CHECK_IN", workDate: today });
+      if (photo) await persistPunchPhoto(tx, actor, photo, { attendanceId: a.id, employeeId });
       await writeAudit(tx, actor, {
         action: "attendance.check_in", entityType: "Attendance", entityId: a.id,
-        summary: `Check-in ${formatClock(now, env().APP_TIMEZONE)}${geo.distance !== null ? ` (${geo.distance} m dari titik lokasi)` : ""}${geo.check?.decision === "FLAGGED" ? ` — lokasi ditandai (skor ${geo.check.riskScore})` : ""}`,
+        summary: `Check-in ${formatClock(now, env().APP_TIMEZONE)}${geo.distance !== null ? ` (${geo.distance} m dari titik lokasi)` : ""}${geo.check?.decision === "FLAGGED" ? ` — lokasi ditandai (skor ${geo.check.riskScore})` : ""}${photo ? " — dengan foto" : ""}`,
       });
     });
   } catch (e) {
@@ -165,6 +171,7 @@ export async function checkOut(actor: Actor, raw: unknown, now: Date = new Date(
   const geo = await evaluatePunchLocation({ employeeId, employeeName: emp.fullName, kind: "CHECK_OUT", workDate, now, location: input.location, ctx });
   // Jaga agar check-out selalu setelah check-in (CHECK constraint) walau jam server bergeser.
   const outAt = now.getTime() > att.checkInAt.getTime() ? now : new Date(att.checkInAt.getTime() + 1000);
+  const photo = await preparePunchPhoto({ policy: photoPolicyOf(await getSettings()), raw: ctx.photo, kind: "CHECK_OUT", at: outAt, location: input.location, employee: { fullName: emp.fullName, employeeNo: emp.employeeNo } });
   await transaction(async (tx) => {
     const r = await tx.attendance.updateMany({
       where: { id: att.id, checkOutAt: null },
@@ -175,9 +182,10 @@ export async function checkOut(actor: Actor, raw: unknown, now: Date = new Date(
     });
     if (r.count === 0) throw Errors.conflict("Anda sudah check-out hari ini.");
     await persistLocationCheck(tx, geo, { employeeId, employeeName: emp.fullName, attendanceId: att.id, kind: "CHECK_OUT", workDate });
+    if (photo) await persistPunchPhoto(tx, actor, photo, { attendanceId: att.id, employeeId });
     await writeAudit(tx, actor, {
       action: "attendance.check_out", entityType: "Attendance", entityId: att.id,
-      summary: `Check-out ${formatClock(outAt, env().APP_TIMEZONE)}${geo.distance !== null ? ` (${geo.distance} m dari titik lokasi)` : ""}${geo.check?.decision === "FLAGGED" ? ` — lokasi ditandai (skor ${geo.check.riskScore})` : ""}`,
+      summary: `Check-out ${formatClock(outAt, env().APP_TIMEZONE)}${geo.distance !== null ? ` (${geo.distance} m dari titik lokasi)` : ""}${geo.check?.decision === "FLAGGED" ? ` — lokasi ditandai (skor ${geo.check.riskScore})` : ""}${photo ? " — dengan foto" : ""}`,
     });
   });
   // Shift malam: check-out dini hari menutup shift kemarin — kembalikan state shift itu (bukan hari baru yang kosong).

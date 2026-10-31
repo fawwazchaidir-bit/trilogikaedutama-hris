@@ -6,8 +6,8 @@ const isProd = process.env.NODE_ENV === "production";
  * Security headers applied to every response.
  * CSP: Next.js needs inline scripts for hydration, so 'unsafe-inline' is kept for scripts/styles;
  * everything else (frames, objects, base-uri, form targets) is locked down.
- * Permissions-Policy: geolocation=(self) diperlukan HANYA untuk fitur absensi berbasis lokasi (opsional);
- * kamera & mikrofon tetap dimatikan (aplikasi tidak memakai selfie).
+ * Permissions-Policy: geolocation=(self) untuk absensi berbasis lokasi/foto bercap lokasi dan camera=(self) untuk foto
+ * absensi (opsional; izin tetap diminta browser per pengguna); mikrofon tetap dimatikan.
  */
 const csp = [
   "default-src 'self'",
@@ -28,7 +28,8 @@ const nextConfig: NextConfig = {
   output: process.env.NEXT_OUTPUT === "standalone" ? "standalone" : undefined,
   poweredByHeader: false,
   reactStrictMode: true,
-  serverExternalPackages: ["@react-pdf/renderer", "@prisma/client", "exceljs"],
+  // opentype.js dimuat sebagai paket eksternal (CJS) — build ESM-nya tidak punya ekspor default dan dianalisis ketat oleh Turbopack.
+  serverExternalPackages: ["@react-pdf/renderer", "@prisma/client", "exceljs", "opentype.js"],
   async headers() {
     return [
       {
@@ -38,7 +39,7 @@ const nextConfig: NextConfig = {
           { key: "X-Content-Type-Options", value: "nosniff" },
           { key: "X-Frame-Options", value: "SAMEORIGIN" },
           { key: "Referrer-Policy", value: "same-origin" },
-          { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=(self)" },
+          { key: "Permissions-Policy", value: "camera=(self), microphone=(), geolocation=(self)" },
           ...(isProd ? [{ key: "Strict-Transport-Security", value: "max-age=31536000; includeSubDomains" }] : []),
         ],
       },

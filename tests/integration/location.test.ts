@@ -20,7 +20,7 @@ const policy = (over: Record<string, unknown> = {}) => ({
 const loc = (over: Record<string, unknown> = {}) => ({ lat: -7.7957314, lng: 110.3696221, accuracy: 8.4, timestamp: Date.now() - 1200, clientNow: Date.now(), ...over });
 const ctxOf = (deviceToken: string | null = null, ip: string | null = null) => ({ ip, deviceToken });
 const checks = (employeeId?: string) => prisma.locationCheck.findMany({ where: employeeId ? { employeeId } : {}, orderBy: { id: "asc" } });
-const E1 = () => fx.empIds[0], E2 = () => fx.empIds[1];
+const E1 = () => fx.empIds[0], E2 = () => fx.empIds[1], E3 = () => fx.empIds[2];
 
 beforeEach(async () => {
   await resetDb();
@@ -157,40 +157,24 @@ describe("mode TOLAK", () => {
   });
 });
 
-describe("jaringan kantor", () => {
-  const setNets = (nets: string[], require = false) => prisma.companySettings.update({ where: { id: 1 }, data: { officeNetworks: nets, locationRequireOfficeNetwork: require } });
-
-  it("dari jaringan kantor menurunkan skor (mengimbangi sinyal lemah); di luar jaringan menambah risiko", async () => {
-    await setNets(["203.0.113.0/24"]);
-    await checkIn(fx.emp1, { location: loc({ lat: -7.7956, lng: 110.3696 }) }, new Date(), ctxOf(null, "203.0.113.50")); // 4 desimal (+25) − 30 → 0
-    const inside = (await checks(E1()))[0]!;
-    expect(inside.flags).toEqual(expect.arrayContaining(["COORDS_LOW_PRECISION", "INSIDE_OFFICE_NETWORK"]));
-    expect(inside.riskScore).toBe(0);
-    await checkIn(fx.emp2, { location: loc() }, new Date(), ctxOf(null, "198.51.100.9"));
-    const outside = (await checks(E2()))[0]!;
-    expect(outside.flags).toContain("OUTSIDE_OFFICE_NETWORK");
-    expect(outside.riskScore).toBe(25);
-    expect(inside.ip).toBe("203.0.113.50");
+describe("alamat IP tidak menentukan absensi (dinas luar)", () => {
+  it("IP apa pun (kantor, luar, tak diketahui) menghasilkan penilaian yang sama; IP hanya dicatat sebagai informasi", async () => {
+    await checkIn(fx.emp1, { location: loc() }, new Date(), ctxOf(null, "203.0.113.50"));
+    await checkIn(fx.emp2, { location: loc({ lat: -7.7957, lng: 110.3694 }) }, new Date(), ctxOf(null, "198.51.100.9"));
+    await checkIn(fx.emp3, { location: loc({ lat: -7.7955, lng: 110.3696 }) }, new Date(), ctxOf(null, null));
+    for (const e of [E1(), E2(), E3()]) {
+      const c = (await checks(e))[0]!;
+      expect(c.decision).toBe("ACCEPTED");
+      expect((c.flags as string[]).some((f) => f.includes("NETWORK"))).toBe(false);
+    }
+    expect((await checks(E1()))[0]!.ip).toBe("203.0.113.50");
   });
 
-  it("jaringan kantor WAJIB: di luar jaringan ditolak (dicatat, tidak masuk antrean); IP tidak diketahui → pesan khusus; di dalam → diterima", async () => {
-    await setNets(["203.0.113.0/24", "2001:db8::/32"], true);
-    const out = await fail(checkIn(fx.emp1, { location: loc() }, new Date(), ctxOf(null, "198.51.100.9")));
-    expect(out?.message).toContain("jaringan kantor");
-    const noIp = await fail(checkIn(fx.emp1, { location: loc() }, new Date(), ctxOf(null, null)));
-    expect(noIp?.message).toContain("tidak dapat ditentukan");
-    const rows = await checks(E1());
-    expect(rows.map((r) => [r.decision, r.flags[0], r.reviewStatus])).toEqual([["BLOCKED", "NETWORK_REQUIRED", null], ["BLOCKED", "NETWORK_REQUIRED", null]]);
-    expect(await openLocationReviewCount()).toBe(0);
-    expect(await fail(checkIn(fx.emp1, { location: loc() }, new Date(), ctxOf(null, "2001:db8:1::7")))).toBeNull();
-  });
-
-  it("pengaturan: jaringan tak valid ditolak; mewajibkan tanpa jaringan ditolak; butuh TRUST_PROXY", async () => {
-    expect((await fail(updateAttendancePolicy(fx.superAdmin, policy({ officeNetworks: ["bukan-ip"] }))))?.fieldErrors?.["officeNetworks.0"]).toContain("tidak valid");
-    expect((await fail(updateAttendancePolicy(fx.superAdmin, policy({ officeNetworks: [], locationRequireOfficeNetwork: true }))))?.fieldErrors?.officeNetworks).toContain("minimal satu");
-    // TRUST_PROXY=false pada lingkungan uji → daftar jaringan ditolak dengan alasan jelas
-    expect((await fail(updateAttendancePolicy(fx.superAdmin, policy({ officeNetworks: ["203.0.113.0/24"] }))))?.fieldErrors?.officeNetworks).toContain("TRUST_PROXY");
-    expect(await fail(updateAttendancePolicy(fx.superAdmin, policy({ officeNetworks: [] })))).toBeNull();
+  it("pengaturan jaringan kantor sudah tidak ada: kolom dihapus dari kebijakan & basis data", async () => {
+    const cols = await prisma.$queryRaw<{ column_name: string }[]>`SELECT column_name FROM information_schema.columns WHERE table_name = 'company_settings' AND column_name IN ('officeNetworks', 'locationRequireOfficeNetwork')`;
+    expect(cols).toHaveLength(0);
+    // Masukan lama yang masih mengirim officeNetworks diabaikan (bidang tak dikenal tidak disimpan), bukan menjadi galat 500.
+    expect(await fail(updateAttendancePolicy(fx.superAdmin, policy({ officeNetworks: ["203.0.113.0/24"] } as never)))).toBeNull();
   });
 });
 

@@ -11,8 +11,6 @@ import { optionalEmail, optionalPhone, optionalText, requiredText } from "@/lib/
 import type { PayrollRules } from "@/lib/payroll";
 import { defaultStatutoryConfig, type StatutoryConfig } from "@/lib/statutory";
 import { statutoryConfigSchema } from "@/lib/validation/statutory";
-import { isValidNetwork } from "@/lib/ip";
-import { env } from "../env";
 import type { GeoPolicy } from "@/lib/geo";
 
 /** Baris pengaturan tunggal; dibuat dengan nilai awal AMAN bila belum ada (mis. database baru tanpa seed). */
@@ -68,7 +66,7 @@ export interface SettingsDto {
   attendance: {
     lateMinutesAfterTolerance: boolean; locationEnabled: boolean; locationName: string | null; locationLat: number | null; locationLng: number | null;
     locationRadiusMeters: number; locationMaxAccuracyMeters: number; requestBackdateDays: number; confirmedAt: string | null;
-    locationSpoofMode: "OFF" | "FLAG" | "BLOCK"; officeNetworks: string[]; locationRequireOfficeNetwork: boolean; trustProxy: boolean;
+    locationSpoofMode: "OFF" | "FLAG" | "BLOCK"; photoMode: "OFF" | "OPTIONAL" | "REQUIRED"; photoRequireLocation: boolean;
   };
   leave: { annualLeaveQuota: number; allowNegativeLeaveBalance: boolean };
   payroll: FullPayrollRules & { confirmedAt: string | null };
@@ -93,7 +91,7 @@ export async function getSettingsDto(actor: Actor): Promise<SettingsDto> {
       locationLat: s.locationLat, locationLng: s.locationLng, locationRadiusMeters: s.locationRadiusMeters,
       locationMaxAccuracyMeters: s.locationMaxAccuracyMeters, requestBackdateDays: s.requestBackdateDays,
       confirmedAt: s.attendancePolicyConfirmedAt?.toISOString() ?? null,
-      locationSpoofMode: s.locationSpoofMode, officeNetworks: s.officeNetworks, locationRequireOfficeNetwork: s.locationRequireOfficeNetwork, trustProxy: env().TRUST_PROXY,
+      locationSpoofMode: s.locationSpoofMode, photoMode: s.attendancePhotoMode, photoRequireLocation: s.attendancePhotoRequireLocation,
     },
     leave: { annualLeaveQuota: s.annualLeaveQuota, allowNegativeLeaveBalance: s.allowNegativeLeaveBalance },
     payroll: { ...payrollRulesOf(s), confirmedAt: s.payrollRulesConfirmedAt?.toISOString() ?? null },
@@ -154,32 +152,22 @@ export const attendancePolicySchema = z.object({
   allowNegativeLeaveBalance: z.boolean(),
   // Integritas lokasi (opsional agar pemanggil lama tetap valid; tidak diisi = tidak diubah).
   locationSpoofMode: z.enum(["OFF", "FLAG", "BLOCK"]).optional(),
-  /** Alamat IP / CIDR jaringan kantor, satu per elemen. */
-  officeNetworks: z.array(z.string().trim().min(1).max(60)).max(30, "Maksimal 30 jaringan").optional(),
-  locationRequireOfficeNetwork: z.boolean().optional(),
+  /** Foto absensi bercap lokasi & waktu server: OFF = tanpa foto, OPTIONAL = boleh, REQUIRED = wajib pada check-in & check-out. */
+  attendancePhotoMode: z.enum(["OFF", "OPTIONAL", "REQUIRED"]).optional(),
+  /** Foto harus disertai koordinat (izin lokasi) agar dapat dicap lokasinya. */
+  attendancePhotoRequireLocation: z.boolean().optional(),
 }).superRefine((v, ctx) => {
   if (v.locationEnabled && (v.locationLat === null || v.locationLng === null)) {
     ctx.addIssue({ code: "custom", path: ["locationLat"], message: "Isi titik lokasi (lintang & bujur) sebelum mengaktifkan absensi berbasis lokasi" });
-  }
-  v.officeNetworks?.forEach((n, i) => {
-    if (!isValidNetwork(n)) ctx.addIssue({ code: "custom", path: ["officeNetworks", i], message: `Jaringan kantor tidak valid: "${n}" (contoh: 203.0.113.0/24 atau 198.51.100.7)` });
-  });
-  if (v.locationRequireOfficeNetwork && !(v.officeNetworks?.length)) {
-    ctx.addIssue({ code: "custom", path: ["officeNetworks"], message: "Isi minimal satu jaringan kantor sebelum mewajibkan absensi dari jaringan kantor" });
   }
 });
 
 export async function updateAttendancePolicy(actor: Actor, raw: unknown): Promise<void> {
   assertCan(actor, "settings:manage");
   const input = parseInput(attendancePolicySchema, raw);
-  const nets = [...new Set(input.officeNetworks ?? [])];
-  // IP klien hanya dapat dipercaya di belakang proxy tepercaya; tanpa itu, daftar jaringan akan menolak/menerima semua orang.
-  if (input.officeNetworks !== undefined && nets.length > 0 && !env().TRUST_PROXY) {
-    throw Errors.validation("Jaringan kantor hanya dapat dipakai bila TRUST_PROXY=true (aplikasi di belakang proxy tepercaya yang meneruskan alamat IP asli). Atur TRUST_PROXY di environment server terlebih dulu.", { officeNetworks: "Butuh TRUST_PROXY=true" });
-  }
   await transaction(async (tx) => {
     const before = await tx.companySettings.findUniqueOrThrow({ where: { id: 1 } });
-    await tx.companySettings.update({ where: { id: 1 }, data: { ...input, ...(input.officeNetworks !== undefined ? { officeNetworks: nets } : {}), attendancePolicyConfirmedAt: new Date() } });
+    await tx.companySettings.update({ where: { id: 1 }, data: { ...input, attendancePolicyConfirmedAt: new Date() } });
     const d = diffFields(before as unknown as Record<string, unknown>, input as Record<string, unknown>);
     await writeAudit(tx, actor, { action: "settings.attendance_policy_update", entityType: "CompanySettings", entityId: "1", summary: "Kebijakan absensi/cuti diubah", before: d.before, after: d.after });
   });

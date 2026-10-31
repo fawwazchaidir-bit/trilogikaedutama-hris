@@ -8,7 +8,7 @@
 | `DATA_ENCRYPTION_KEY` | ya | 32 byte base64 untuk enkripsi nomor rekening: `openssl rand -base64 32`. **Simpan terpisah dari database & cadangan.** Hilang = nomor rekening tak terbaca; **mengganti nilainya** membuat data lama gagal didekripsi (belum ada rotasi otomatis). |
 | `APP_URL` | ya | URL publik. Produksi wajib `https://` (cookie `Secure`/`__Host-`, pemeriksaan Origin). |
 | `APP_TIMEZONE` | tidak | Default `Asia/Jakarta`. Semua "hari ini", jam masuk/pulang, dan batas tidak hadir mengacu ke sini. |
-| `TRUST_PROXY` | tidak | `true` **hanya** bila di belakang reverse proxy tepercaya (agar rate limit per-IP dan "jaringan kantor" memakai `X-Forwarded-For`). |
+| `TRUST_PROXY` | tidak | `true` **hanya** bila di belakang reverse proxy tepercaya (agar rate limit per-IP memakai alamat klien dari `X-Forwarded-For`). |
 | `TRUST_PROXY_HOPS` | tidak | Jumlah proxy tepercaya di depan aplikasi (default `1`; Cloudflare → Nginx = `2`). Alamat klien diambil dari `X-Forwarded-For` sebanyak ini dari **kanan** — entri paling kiri dapat dikirim klien sendiri sehingga tidak pernah dipercaya. |
 | `LOGIN_MAX_ATTEMPTS` `LOGIN_WINDOW_MINUTES` `LOGIN_LOCKOUT_MINUTES` | tidak | Default 5 / 15 / 15. |
 | `SESSION_IDLE_HOURS` `SESSION_ABSOLUTE_DAYS` | tidak | Default 8 jam tak aktif / 7 hari. |
@@ -52,8 +52,8 @@ Aplikasi hanya mendengarkan loopback; pasang Caddy/Nginx dengan TLS. Contoh Cadd
 
 Catatan: **WhatsApp Cloud API** hanya mengirim teks bebas dalam jendela 24 jam sejak pesan terakhir pengguna; untuk notifikasi proaktif buat template (satu variabel isi `{{1}}`) di Meta, tunggu disetujui, lalu isi `WHATSAPP_TEMPLATE_NAME`. **Fonnte**: sambungkan perangkat WhatsApp di dashboard Fonnte dan isi tokennya. Integrasi dengan penyedia sungguhan belum diuji di lingkungan pengembangan.
 
-## Jaringan kantor (pencegahan lokasi palsu)
-Butuh `TRUST_PROXY=true` dan proxy yang meneruskan alamat klien asli lewat `X-Forwarded-For` (Caddy/Nginx; atur `TRUST_PROXY_HOPS` sesuai jumlah proxy). Aplikasi mengambil entri yang **ditambahkan** proxy (dari kanan), sehingga header palsu dari klien tidak dapat dipakai berpura-pura berada di jaringan kantor — tetapi port aplikasi tidak boleh dapat dijangkau langsung dari internet (hanya lewat proxy). Isi alamat IP publik/CIDR Wi-Fi kantor di Pengaturan → Kebijakan. IP yang diteruskan dari proxy adalah yang dicatat dan dicocokkan.
+## Foto absensi (bukti dinas luar)
+Tidak butuh konfigurasi jaringan. Aplikasi memakai **sharp** (pengolah gambar native; ikut terpasang lewat `npm ci`, memerlukan Linux glibc seperti image `node:22-bookworm-slim`, bukan Alpine) dan font cap di `public/fonts/` (DejaVu Sans Mono Bold, lisensi bebas — ikut disalin ke image oleh `COPY public`). Cap digambar sebagai path vektor, jadi **tidak perlu menginstal font di server**. Kamera & lokasi di browser hanya bekerja lewat **HTTPS**. Foto disimpan di basis data (tabel `stored_files`, ±100–400 KB per foto): perhitungkan pertumbuhan penyimpanan & cadangan (±2 foto/karyawan/hari) dan tentukan retensi (lihat KEPUTUSAN-BISNIS).
 
 ## Cadangan & pemulihan
 

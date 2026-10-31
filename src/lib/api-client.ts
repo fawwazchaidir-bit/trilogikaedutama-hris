@@ -16,14 +16,15 @@ export class ApiClientError extends Error {
 
 export async function api<T = unknown>(
   url: string,
-  opts: { method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE"; body?: unknown } = {},
+  opts: { method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE"; body?: unknown; /** multipart/form-data (mis. foto); `Content-Type` diatur browser. */ form?: FormData } = {},
 ): Promise<T> {
   let res: Response;
   try {
+    const hasBody = opts.form !== undefined || opts.body !== undefined;
     res = await fetch(url, {
-      method: opts.method ?? (opts.body === undefined ? "GET" : "POST"),
-      headers: opts.body === undefined ? undefined : { "Content-Type": "application/json" },
-      body: opts.body === undefined ? undefined : JSON.stringify(opts.body),
+      method: opts.method ?? (hasBody ? "POST" : "GET"),
+      headers: opts.form !== undefined || opts.body === undefined ? undefined : { "Content-Type": "application/json" },
+      body: opts.form ?? (opts.body === undefined ? undefined : JSON.stringify(opts.body)),
       credentials: "same-origin",
     });
   } catch {

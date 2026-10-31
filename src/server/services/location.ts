@@ -7,13 +7,12 @@ import { Errors } from "../errors";
 import { parseInput } from "../validate";
 import { assertCan, type Actor } from "../actor";
 import { writeAudit } from "../audit";
-import { env } from "../env";
 import { dateToIso, isoToDate } from "../json";
 import { getSettings, geoPolicyOf } from "./settings";
 import { notifyUsers } from "./notifications";
+import { photoUrlsFor } from "./attendance-photo";
 import { distanceMeters, evaluateGeofence, isValidReading } from "@/lib/geo";
 import { assessRisk, blockedMessage, decide, RISK_FLAG_LABEL, type RiskFlag, type RiskReading } from "@/lib/location-risk";
-import { ipInNetworks } from "@/lib/ip";
 import { formatDateShort } from "@/lib/format";
 import { uuid } from "@/lib/validation/common";
 import type { Paged } from "@/lib/types";
@@ -31,8 +30,13 @@ export const locationSchema = z.object({
 
 export type ParsedLocation = z.infer<typeof locationSchema>;
 
-/** Konteks permintaan untuk penilaian: IP (hanya bermakna bila TRUST_PROXY) dan token perangkat dari cookie server. */
-export interface PunchContext { ip: string | null; deviceToken: string | null }
+/** Konteks permintaan untuk penilaian: IP (hanya dicatat; bermakna bila TRUST_PROXY) dan token perangkat dari cookie server. */
+export interface PunchContext {
+  ip: string | null;
+  deviceToken: string | null;
+  /** Foto mentah dari kamera (belum dicap); dicap & dinormalisasi oleh server (lihat attendance-photo.ts). */
+  photo?: Uint8Array | null;
+}
 
 export interface PendingCheck {
   decision: "ACCEPTED" | "FLAGGED";
@@ -81,7 +85,7 @@ async function recordBlocked(b: BlockedRecord, employeeName: string): Promise<vo
 }
 
 /**
- * Evaluasi lokasi satu punch. Urutan: (1) geofence & akurasi, (2) wajib jaringan kantor, (3) penilaian risiko berlapis.
+ * Evaluasi lokasi satu punch. Urutan: (1) geofence & akurasi, (2) penilaian risiko berlapis.
  * Penolakan DICATAT (`location_checks`, keputusan BLOCKED) lalu dilempar sebagai galat validasi. Bila diterima, hasilnya
  * dikembalikan untuk disimpan DALAM transaksi punch (`persistLocationCheck`).
  * Fitur lokasi nonaktif → tidak ada koordinat/penilaian yang disimpan (privasi).
@@ -108,16 +112,7 @@ export async function evaluatePunchLocation(args: {
   }
   const distance = verdict.distance;
 
-  // 2. Wajib dari jaringan kantor (sinyal yang tidak bergantung pada GPS).
-  const nets = settings.officeNetworks;
-  if (settings.locationRequireOfficeNetwork && nets.length > 0 && !ipInNetworks(ctx.ip, nets)) {
-    await recordBlocked({ ...base, reading, distance, flags: ["NETWORK_REQUIRED"], riskScore: 0, details: { ipKnown: !!ctx.ip }, needsReview: false }, employeeName);
-    throw Errors.validation(ctx.ip
-      ? "Absensi hanya dapat dilakukan dari jaringan kantor. Hubungkan perangkat ke Wi-Fi kantor lalu coba lagi."
-      : "Alamat jaringan Anda tidak dapat ditentukan, sehingga syarat jaringan kantor tidak dapat diperiksa. Hubungi Admin/HR.");
-  }
-
-  // 3. Penilaian risiko berlapis.
+  // 2. Penilaian risiko berlapis.
   const mode = settings.locationSpoofMode;
   if (mode === "OFF" || !reading) return { reading, distance, check: null };
 
@@ -139,7 +134,6 @@ export async function evaluatePunchLocation(args: {
     sharedCoordsWithOther: !!sharedCoords,
     sharedDeviceWithOther: !!sharedDevice,
     deviceKnown: !deviceHash || deviceCount === 0 ? null : !!deviceSeen,
-    network: nets.length === 0 ? "NOT_CONFIGURED" as const : !ctx.ip ? "UNKNOWN" as const : ipInNetworks(ctx.ip, nets) ? "INSIDE" as const : "OUTSIDE" as const,
   };
   const risk = assessRisk(facts);
   const decision = decide(mode, risk.score);
@@ -191,6 +185,8 @@ export interface LocationCheckDto {
   distance: number | null;
   accuracy: number | null;
   mapUrl: string | null;
+  /** Foto absensi bercap untuk punch ini (bila ada) — bukti utama saat meninjau. */
+  photoUrl: string | null;
   reviewStatus: "OPEN" | "CLEARED" | "CONFIRMED" | null;
   reviewedBy: string | null;
   reviewedAt: string | null;
@@ -219,6 +215,7 @@ export async function listLocationChecks(actor: Actor, raw: unknown = {}): Promi
     prisma.locationCheck.count({ where }),
     prisma.locationCheck.findMany({ where, include, orderBy: { id: "desc" }, skip: (page - 1) * pageSize, take: pageSize }),
   ]);
+  const photos = await photoUrlsFor(rows.map((r) => ({ attendanceId: r.attendanceId, kind: r.kind })));
   const ids = [...new Set(rows.map((r) => r.reviewedById).filter((x): x is string => !!x))];
   const users = ids.length ? await prisma.user.findMany({ where: { id: { in: ids } }, select: { id: true, name: true } }) : [];
   const name = new Map(users.map((u) => [u.id, u.name]));
@@ -227,6 +224,7 @@ export async function listLocationChecks(actor: Actor, raw: unknown = {}): Promi
       id: r.id.toString(), employeeId: r.employeeId, employeeName: r.employee.fullName, employeeNo: r.employee.employeeNo, kind: r.kind, date: dateToIso(r.date),
       decision: r.decision, riskScore: r.riskScore, flags: r.flags.map((c) => ({ code: c as RiskFlag, label: RISK_FLAG_LABEL[c as RiskFlag] ?? c })), distance: r.distance, accuracy: r.accuracy,
       mapUrl: r.lat !== null && r.lng !== null ? `https://www.openstreetmap.org/?mlat=${r.lat}&mlon=${r.lng}#map=18/${r.lat}/${r.lng}` : null,
+      photoUrl: r.attendanceId ? photos.get(`${r.attendanceId}:${r.kind}`) ?? null : null,
       reviewStatus: r.reviewStatus, reviewedBy: r.reviewedById ? name.get(r.reviewedById) ?? null : null, reviewedAt: r.reviewedAt?.toISOString() ?? null, reviewNote: r.reviewNote,
       createdAt: r.createdAt.toISOString(),
     })),
@@ -275,9 +273,3 @@ export async function locationSummary(from: string, to: string): Promise<{ total
     topFlags: [...counts].sort((a, b) => b[1] - a[1]).slice(0, 6).map(([code, count]) => ({ code: code as RiskFlag, label: RISK_FLAG_LABEL[code as RiskFlag] ?? code, count })),
   };
 }
-
-export const requireTrustedProxyForNetworks = (nets: string[]): void => {
-  if (nets.length > 0 && !env().TRUST_PROXY) {
-    throw Errors.validation("Jaringan kantor hanya dapat dipakai bila TRUST_PROXY=true (aplikasi berada di belakang proxy tepercaya yang mengirim alamat IP asli). Atur TRUST_PROXY di environment server terlebih dulu.", { officeNetworks: "Butuh TRUST_PROXY=true" });
-  }
-};

@@ -8,6 +8,7 @@ import { parseInput } from "../validate";
 import { actorCan, requireSelf, type Actor } from "../actor";
 import { writeAudit } from "../audit";
 import { computeEmployeePeriod, employeeLite, loadRangeContext } from "./context";
+import { photosForRange } from "./attendance-photo";
 import type { ReportTable } from "../export";
 import { emptyTotals, STATUS_LABEL, type DayResult, type DayStatus, type RecapTotals } from "@/lib/attendance";
 import { formatDateLong, formatDateRange, formatHours, monthLabel } from "@/lib/format";
@@ -170,7 +171,8 @@ export async function getRecapDetail(actor: Actor, employeeId: string, raw: unkn
   if (!e) throw Errors.notFound("Karyawan");
   const ctx = await loadRangeContext(from, to, { employeeIds: [employeeId] });
   const { days, totals } = computeEmployeePeriod(employeeLite(e), ctx);
-  return { employee: { id: e.id, employeeNo: e.employeeNo, name: e.fullName, position: e.position, division: e.division?.name ?? null }, from, to, label, days, totals };
+  const photos = await photosForRange(employeeId, from, to);
+  return { employee: { id: e.id, employeeNo: e.employeeNo, name: e.fullName, position: e.position, division: e.division?.name ?? null }, from, to, label, days, totals, photos };
 }
 
 // ─────────────────────────── Ekspor ───────────────────────────

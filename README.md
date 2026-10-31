@@ -41,7 +41,8 @@ responsif (komputer & ponsel), tampilan mengikuti aplikasi invoice Trilogika aga
 | **Lupa password mandiri** | Email, tautan sekali pakai 30 menit, anti-enumerasi, dibatasi, akun ber-2FA wajib kode. |
 | **2FA (TOTP)** | Aplikasi autentikator + QR, 10 kode pemulihan, anti-replay, dapat diwajibkan untuk admin, reset oleh Super Admin. |
 | **Notifikasi email/WhatsApp** | Selain dalam aplikasi: SMTP, WhatsApp (Fonnte / Meta Cloud API / webhook), antrean transaksional + percobaan ulang, preferensi per pengguna, pesan uji, status antrean di Pengaturan. |
-| **Pencegahan lokasi palsu** | Penilaian risiko berlapis (kesegaran, akurasi/presisi, titik pusat, koordinat berulang/bersama, perpindahan mustahil, perangkat, jaringan kantor) → tandai/tolak, antrean Tinjauan Lokasi. **Tidak menjamin anti-manipulasi** — lihat batasan. |
+| **Foto absensi bercap** | Foto dari kamera saat check-in/out; **server** mencetak waktu server + koordinat + nama pada foto (tanpa syarat Wi-Fi/jaringan kantor — cocok untuk **dinas luar**), EXIF dibuang, disimpan sebagai bukti append-only, ditinjau HR di rekap & Tinjauan Lokasi. Mati / opsional / wajib. **Bukti untuk ditinjau manusia, bukan jaminan keaslian.** |
+| **Pencegahan lokasi palsu** | Penilaian risiko berlapis (kesegaran, akurasi/presisi, titik pusat, koordinat berulang/bersama, perpindahan mustahil, perangkat) → tandai/tolak, antrean Tinjauan Lokasi (memuat tautan foto). **Tidak menjamin anti-manipulasi** — lihat batasan. |
 | **Laporan & analisis lanjutan** | `/laporan`: ringkasan eksekutif (KPI vs bulan lalu, tren, temuan), kehadiran, cuti & lembur, biaya SDM, rekap BPJS & PPh 21, headcount & turnover; ekspor Excel/CSV/PDF. |
 | Absensi berbasis lokasi · Impor karyawan | Sejak sebelumnya (titik + radius; impor Excel/CSV atomik). |
 

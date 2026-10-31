@@ -16,7 +16,7 @@
 src/lib/        logika MURNI tanpa database (mudah diuji)
   attendance.ts   status harian + rekap (deriveDay, shiftWindow, resolveSchedule, summarizeDays) — shift malam & setengah hari
   payroll.ts      perhitungan gaji (komponen, aturan, lembur, rumus tertulis) · statutory.ts BPJS & PPh 21 (TER + true-up)
-  analytics.ts    rasio/tren/sebaran untuk laporan · location-risk.ts penilaian risiko lokasi · ip.ts cocokkan IP/CIDR
+  analytics.ts    rasio/tren/sebaran untuk laporan · location-risk.ts penilaian risiko lokasi · photo-stamp.ts teks cap foto absensi · ip.ts alamat klien dari X-Forwarded-For
   totp.ts         TOTP/HOTP (RFC 6238/4226) + kode pemulihan · phone.ts normalisasi nomor WhatsApp
   geo.ts          geofence (haversine) · time.ts zona waktu & tanggal · money.ts rupiah (bilangan bulat)
   permissions.ts  matriks RBAC + menu
@@ -51,6 +51,7 @@ Izin ditegakkan di **service layer**: menyembunyikan menu hanya kosmetik. Halama
 11. **BPJS & PPh 21.** `computeStatutory` murni: BPJS per komponen (batas upah), PPh 21 TER bulanan; masa pajak terakhir = setahun − sudah dipotong (YTD dari item periode Disetujui/Diterbitkan). Komponen manual BPJS/Pajak menggantikan otomatis. Hasil disimpan di `payroll_items.statutory`; porsi perusahaan tidak mengurangi gaji bersih (tampil di slip sebagai informasi).
 12. **Notifikasi.** `notifyUsers` menulis notifikasi dalam aplikasi **dan** baris `notification_deliveries` (outbox) dalam transaksi peristiwa; pekerja memproses dengan klaim `SKIP LOCKED`, percobaan ulang bertahap.
 13. **Integritas lokasi.** `assessRisk` (murni) → skor & flag; `decide(mode, skor)` → diterima/ditandai/ditolak; semua tercatat di `location_checks` untuk tinjauan HR.
+14. **Foto absensi bercap.** Klien mengirim multipart (`payload` + `photo`) → `preparePunchPhoto` (di LUAR transaksi: validasi, `stampPhoto` dengan sharp + cap path vektor dari font bundel, EXIF dibuang) → `persistPunchPhoto` di transaksi punch yang sama (`stored_files` + `attendance_photos`, append-only lewat trigger). Waktu cap = waktu check-in/out yang dicatat (waktu server). Tidak ada syarat IP/Wi-Fi.
 
 ## Alur penggajian
 
@@ -66,7 +67,7 @@ Syarat ajukan: ada karyawan, tidak ada gaji bersih negatif, periode absensi suda
 
 `users` · `sessions` · `employees`(+rekening terenkripsi) · `divisions` · `work_schedules` · `schedule_assignments` · `calendar_days` ·
 `attendances` (unik per karyawan-hari) · `attendance_corrections` (append-only) · `leave_requests` (+`dayPart`) · `leave_balance_entries` (append-only, pecahan 0,5) · `overtime_requests` ·
-`location_checks` · `notification_deliveries` · `two_factor_recovery_codes` · `login_challenges` · `password_reset_tokens` ·
+`location_checks` · `attendance_photos` · `notification_deliveries` · `two_factor_recovery_codes` · `login_challenges` · `password_reset_tokens` ·
 `salary_components` · `payroll_runs` · `payroll_items` · `payroll_item_lines` · `payslips` (snapshot, terkunci) · `company_settings` (singleton) ·
 `stored_files` · `notifications` · `audit_logs` (append-only) · `rate_limit_buckets`.
 

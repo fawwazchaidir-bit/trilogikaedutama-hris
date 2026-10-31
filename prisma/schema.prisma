@@ -134,6 +134,8 @@ enum FileKind {
   LOGO
   EMPLOYEE_PHOTO
   LEAVE_ATTACHMENT
+  /// Foto absensi yang sudah dicap (lokasi + waktu server) oleh server.
+  ATTENDANCE_PHOTO
 }
 
 enum LateDeductionMode {
@@ -200,6 +202,15 @@ enum DeliveryStatus {
 enum PunchKind {
   CHECK_IN
   CHECK_OUT
+}
+
+enum AttendancePhotoMode {
+  /// Tanpa foto absensi.
+  OFF
+  /// Foto boleh dilampirkan; tanpa foto tetap diterima.
+  OPTIONAL
+  /// Check-in dan check-out WAJIB disertai foto bercap.
+  REQUIRED
 }
 
 enum LocationPolicyMode {
@@ -401,6 +412,7 @@ model Employee {
   payslips       Payslip[]
   overtimes      OvertimeRequest[]
   locationChecks LocationCheck[]
+  photos         AttendancePhoto[]
 
   @@index([divisionId])
   @@index([isActive])
@@ -490,8 +502,9 @@ model Attendance {
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
 
-  employee       Employee        @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  employee       Employee          @relation(fields: [employeeId], references: [id], onDelete: Restrict)
   locationChecks LocationCheck[]
+  photos         AttendancePhoto[]
 
   @@unique([employeeId, date])
   @@index([date])
@@ -753,25 +766,25 @@ model CompanySettings {
 
   // Kebijakan absensi (perlu dikonfirmasi oleh Super Admin)
   /// Menit keterlambatan dihitung setelah toleransi (true) atau dari jam masuk (false, default).
-  lateMinutesAfterTolerance    Boolean            @default(false)
-  locationEnabled              Boolean            @default(false)
-  locationName                 String?
-  locationLat                  Float?
-  locationLng                  Float?
-  locationRadiusMeters         Int                @default(100)
+  lateMinutesAfterTolerance      Boolean             @default(false)
+  locationEnabled                Boolean             @default(false)
+  locationName                   String?
+  locationLat                    Float?
+  locationLng                    Float?
+  locationRadiusMeters           Int                 @default(100)
   /// Akurasi GPS terburuk yang diterima (meter). Lebih buruk dari ini → ditolak dengan pesan jelas.
-  locationMaxAccuracyMeters    Int                @default(150)
+  locationMaxAccuracyMeters      Int                 @default(150)
   /// Berapa hari ke belakang pengajuan izin/sakit boleh diajukan.
-  requestBackdateDays          Int                @default(7)
-  attendancePolicyConfirmedAt  DateTime?
+  requestBackdateDays            Int                 @default(7)
+  attendancePolicyConfirmedAt    DateTime?
   /// Penilaian risiko lokasi palsu (lihat docs/SECURITY.md).
-  locationSpoofMode            LocationPolicyMode @default(FLAG)
-  /// Jaringan kantor (IPv4/IPv6 atau CIDR). Dipakai sebagai sinyal tambahan; hanya bermakna bila TRUST_PROXY benar.
-  officeNetworks               String[]           @default([])
-  /// Wajibkan check-in/out dari jaringan kantor (mis. untuk karyawan non-lapangan).
-  locationRequireOfficeNetwork Boolean            @default(false)
+  locationSpoofMode              LocationPolicyMode  @default(FLAG)
+  /// Foto absensi bercap lokasi & waktu server (bukti utama untuk dinas luar; tidak bergantung pada Wi-Fi/jaringan kantor).
+  attendancePhotoMode            AttendancePhotoMode @default(OFF)
+  /// Foto harus disertai koordinat (izin lokasi) agar dapat dicap lokasinya.
+  attendancePhotoRequireLocation Boolean             @default(true)
   /// Admin & Super Admin wajib mengaktifkan 2FA.
-  twoFactorRequiredForAdmins   Boolean            @default(false)
+  twoFactorRequiredForAdmins     Boolean             @default(false)
 
   // Kebijakan cuti
   annualLeaveQuota          Int     @default(12)
@@ -820,8 +833,9 @@ model StoredFile {
   uploadedById String   @db.Uuid
   createdAt    DateTime @default(now())
 
-  photoOf     Employee[]     @relation("EmployeePhoto")
-  attachments LeaveRequest[] @relation("LeaveAttachment")
+  photoOf     Employee[]       @relation("EmployeePhoto")
+  attachments LeaveRequest[]   @relation("LeaveAttachment")
+  punchPhoto  AttendancePhoto?
 
   @@index([kind])
   @@map("stored_files")
@@ -901,6 +915,31 @@ model OvertimeRequest {
 }
 
 /// Catatan penilaian lokasi untuk setiap check-in/out saat absensi berbasis lokasi aktif (termasuk yang ditolak).
+/// Foto absensi (check-in/out) yang sudah DICAP server: waktu server + koordinat + nama. Append-only (bukti).
+model AttendancePhoto {
+  id           String    @id @default(uuid()) @db.Uuid
+  attendanceId String?   @db.Uuid
+  employeeId   String    @db.Uuid
+  kind         PunchKind
+  fileId       String    @unique @db.Uuid
+  /// Waktu server yang tercetak pada foto (sama dengan waktu check-in/out yang dicatat).
+  capturedAt   DateTime
+  lat          Float?
+  lng          Float?
+  accuracy     Float?
+  /// Teks cap yang tercetak pada foto (untuk audit; baris dipisah \n).
+  stamp        String
+  createdAt    DateTime  @default(now())
+
+  attendance Attendance? @relation(fields: [attendanceId], references: [id], onDelete: SetNull)
+  employee   Employee    @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  file       StoredFile  @relation(fields: [fileId], references: [id], onDelete: Restrict)
+
+  @@unique([attendanceId, kind])
+  @@index([employeeId, capturedAt])
+  @@map("attendance_photos")
+}
+
 model LocationCheck {
   id           BigInt                @id @default(autoincrement())
   employeeId   String                @db.Uuid

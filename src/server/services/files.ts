@@ -6,7 +6,7 @@ import { Errors } from "../errors";
 import { writeAudit } from "../audit";
 import { actorCan, type Actor } from "../actor";
 
-export type FileKind = "LOGO" | "EMPLOYEE_PHOTO" | "LEAVE_ATTACHMENT";
+export type FileKind = "LOGO" | "EMPLOYEE_PHOTO" | "LEAVE_ATTACHMENT" | "ATTENDANCE_PHOTO";
 
 /** Tipe yang diizinkan, diverifikasi dari MAGIC BYTES (bukan dari ekstensi / Content-Type kiriman klien). SVG sengaja ditolak (risiko XSS). */
 const SIGNATURES: { mime: string; ext: string; test: (b: Uint8Array) => boolean }[] = [
@@ -19,6 +19,8 @@ const ALLOWED: Record<FileKind, string[]> = {
   LOGO: ["image/png", "image/jpeg"],
   EMPLOYEE_PHOTO: ["image/png", "image/jpeg"],
   LEAVE_ATTACHMENT: ["image/png", "image/jpeg", "application/pdf"],
+  // Hanya dibuat oleh server (sesudah dicap & dinormalisasi menjadi JPEG), tidak pernah dari unggahan mentah klien.
+  ATTENDANCE_PHOTO: ["image/jpeg"],
 };
 
 export function sniffMime(bytes: Uint8Array): { mime: string; ext: string } | null {
@@ -41,6 +43,7 @@ export async function storeFile(
   if (kind === "LOGO" && !actorCan(actor, "settings:manage")) throw Errors.forbidden();
   if (kind === "EMPLOYEE_PHOTO" && !actorCan(actor, "employee:manage")) throw Errors.forbidden();
   if (kind === "LEAVE_ATTACHMENT" && !actor.employeeId && !actorCan(actor, "leave:review")) throw Errors.forbidden();
+  if (kind === "ATTENDANCE_PHOTO" && !actor.employeeId) throw Errors.forbidden();
   const maxBytes = env().MAX_UPLOAD_MB * 1024 * 1024;
   if (input.bytes.byteLength === 0) throw Errors.validation("File kosong.");
   if (input.bytes.byteLength > maxBytes) throw Errors.validation(`Ukuran file maksimal ${env().MAX_UPLOAD_MB} MB.`);
@@ -69,6 +72,7 @@ export async function storeFile(
  *  - LOGO: semua pengguna login (tampil di header/slip).
  *  - EMPLOYEE_PHOTO: admin (employee:view) atau karyawan pemilik foto itu sendiri.
  *  - LEAVE_ATTACHMENT: peninjau pengajuan (leave:view_all) atau pengunggahnya.
+ *  - ATTENDANCE_PHOTO: peninjau absensi (attendance:view_all) atau karyawan pemilik foto itu; pembukaan oleh peninjau dicatat di audit.
  * Karyawan TIDAK dapat membuka berkas milik karyawan lain.
  */
 export async function readFileForActor(actor: Actor, id: string) {
@@ -86,6 +90,11 @@ export async function readFileForActor(actor: Actor, id: string) {
     if (ok && file.kind === "LEAVE_ATTACHMENT") {
       await writeAudit(prisma, actor, { action: "file.view", entityType: "StoredFile", entityId: id, summary: "Lampiran pengajuan dibuka" });
     }
+  }
+  if (file.kind === "ATTENDANCE_PHOTO") {
+    const own = actor.employeeId ? (await prisma.attendancePhoto.count({ where: { fileId: id, employeeId: actor.employeeId } })) > 0 : false;
+    ok = own || actorCan(actor, "attendance:view_all");
+    if (ok && !own) await writeAudit(prisma, actor, { action: "file.view", entityType: "StoredFile", entityId: id, summary: "Foto absensi dibuka" });
   }
   if (!ok) throw Errors.forbidden();
   return file;

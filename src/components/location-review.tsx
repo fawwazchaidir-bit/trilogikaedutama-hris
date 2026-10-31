@@ -1,7 +1,7 @@
 "use client";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { ExternalLink } from "lucide-react";
+import { Camera, ExternalLink } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
@@ -48,7 +48,10 @@ export function LocationReviewTable({ items, canReview }: { items: LocationCheck
               <Td className="whitespace-nowrap">{c.kind === "CHECK_IN" ? "Check-in" : "Check-out"} · {formatDateShort(c.date)}<span className="block text-xs text-muted">{formatDateTime(c.createdAt)}{c.distance !== null ? ` · ${c.distance} m dari titik` : ""}{c.accuracy !== null ? ` · ±${Math.round(c.accuracy)} m` : ""}</span></Td>
               <Td align="right" className={c.riskScore >= 70 ? "font-semibold text-brand-700" : c.riskScore >= 50 ? "font-semibold text-amber-700" : ""}>{c.riskScore}</Td>
               <Td className="min-w-64"><ul className="list-disc space-y-0.5 pl-4 text-xs">{c.flags.map((f) => <li key={f.code}>{f.label}</li>)}</ul>
-                {c.mapUrl && <a href={c.mapUrl} target="_blank" rel="noopener noreferrer" className="mt-1 inline-flex items-center gap-1 text-xs text-brand-700 hover:underline"><ExternalLink className="size-3" />Lihat titik di peta</a>}</Td>
+                <span className="mt-1 flex flex-wrap gap-x-3 gap-y-1">
+                  {c.mapUrl && <a href={c.mapUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-xs text-brand-700 hover:underline"><ExternalLink className="size-3" />Lihat titik di peta</a>}
+                  {c.photoUrl && <a href={c.photoUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-xs text-brand-700 hover:underline"><Camera className="size-3" />Lihat foto absensi</a>}
+                </span></Td>
               <Td><Badge tone={DECISION_TONE[c.decision]}>{DECISION_LABEL[c.decision]}</Badge></Td>
               <Td>{c.reviewStatus ? <Badge tone={c.reviewStatus === "OPEN" ? "amber" : c.reviewStatus === "CONFIRMED" ? "red" : "green"}>{REVIEW_LABEL[c.reviewStatus]}</Badge> : "—"}
                 {c.reviewedBy && <span className="mt-1 block text-xs text-muted">{c.reviewedBy}, {formatDateTime(c.reviewedAt)}{c.reviewNote ? ` · ${c.reviewNote}` : ""}</span>}</Td>
