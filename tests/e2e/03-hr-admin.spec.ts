@@ -118,10 +118,11 @@ test.describe("HR — data karyawan", () => {
     await expect(alertWith(dlg, /gaji pokok aktif/i).first()).toBeVisible();
     await dlg.getByRole("button", { name: "Batal" }).click();
 
-    // BPJS: peringatan tarif tidak baku
+    // BPJS: peringatan — komponen manual menggantikan perhitungan otomatis (Tahap 2) dan nominal harus diverifikasi
     await page.getByRole("button", { name: "Tambah komponen" }).click();
     await dlg.getByLabel("Kategori").selectOption("BPJS");
-    await expect(dlg.getByText(/tidak menetapkan tarif BPJS\/pajak/)).toBeVisible();
+    await expect(dlg.getByText(/BPJS\/Pajak yang diisi manual\s+menggantikan/)).toBeVisible();
+    await expect(dlg.getByText(/verifikasi dengan pihak yang berwenang/)).toBeVisible();
     await dlg.getByRole("button", { name: "Batal" }).click();
 
     // ubah data

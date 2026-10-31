@@ -99,7 +99,7 @@ test.describe("lembur dengan persetujuan", () => {
     const dlg = page.getByRole("dialog");
     await dlg.getByLabel("Menit yang disetujui").fill("999");
     await dlg.getByRole("button", { name: "Setujui", exact: true }).click();
-    await expect(alertWith(dlg, /melebihi/i)).toBeVisible(); // batas: tidak boleh melebihi yang diajukan
+    await expect(alertWith(dlg, /melebihi/i).first()).toBeVisible(); // batas: tidak boleh melebihi yang diajukan
     await dlg.getByLabel("Menit yang disetujui").fill("90");
     await dlg.getByRole("button", { name: "Setujui", exact: true }).click();
     await expect(page.getByText("Lembur disetujui.")).toBeVisible();
