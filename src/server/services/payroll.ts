@@ -10,9 +10,11 @@ import { assertCan, type Actor } from "../actor";
 import { writeAudit } from "../audit";
 import { dateToIso, isoToDate } from "../json";
 import { computeEmployeePeriod, employeeLite, loadRangeContext, sourceHash } from "./context";
-import { getSettings, payrollRulesOf } from "./settings";
+import { getSettings, payrollRulesOf, statutoryConfigOf } from "./settings";
+import { approvedOvertimeFor, overtimeTag } from "./overtime";
 import { notifyUsers, superAdminUserIds } from "./notifications";
-import { computeItem, maskAccount, totalsFromLines, type ComponentInput, type PayrollRules } from "@/lib/payroll";
+import { computeItem, maskAccount, totalsFromLines, type ComponentInput, type PayrollRules, type StatutoryContext } from "@/lib/payroll";
+import { employerContributionLines, type StatutoryConfig, type YtdInput } from "@/lib/statutory";
 import type { DayResult, RecapTotals } from "@/lib/attendance";
 import type { PayslipSnapshot } from "@/lib/payslip";
 import { formatDateRange } from "@/lib/format";
@@ -150,14 +152,21 @@ async function loadRun(id: string): Promise<RunRow> {
   return r;
 }
 
-/** Hash sumber terkini per karyawan untuk mendeteksi data yang berubah sejak dihitung. */
-async function currentHashes(run: { attendanceStart: Date; attendanceEnd: Date }, employeeIds: string[]): Promise<Map<string, string>> {
+/**
+ * Hash sumber terkini per karyawan untuk mendeteksi data yang berubah sejak dihitung. Lembur disetujui ikut dihash HANYA
+ * bila periode itu dihitung dengan mode lembur "APPROVED" (mode diambil dari snapshot aturan periode).
+ */
+async function currentHashes(run: { attendanceStart: Date; attendanceEnd: Date; rulesSnapshot?: unknown }, employeeIds: string[]): Promise<Map<string, string>> {
   const out = new Map<string, string>();
   if (!employeeIds.length) return out;
   const emps = await prisma.employee.findMany({ where: { id: { in: employeeIds } } });
   const from = dateToIso(run.attendanceStart), to = dateToIso(run.attendanceEnd);
-  const ctx = await loadRangeContext(from, to, { employeeIds });
-  for (const e of emps) out.set(e.id, sourceHash(computeEmployeePeriod(employeeLite(e), ctx).days));
+  const mode = (run.rulesSnapshot as PayrollRules | null)?.overtimeMode ?? (await getSettings()).overtimeMode;
+  const [ctx, ot] = await Promise.all([
+    loadRangeContext(from, to, { employeeIds }),
+    mode === "APPROVED" ? approvedOvertimeFor(employeeIds, from, to) : Promise.resolve(new Map<string, { date: string; approvedMinutes: number }[]>()),
+  ]);
+  for (const e of emps) out.set(e.id, sourceHash(computeEmployeePeriod(employeeLite(e), ctx).days, overtimeTag(ot.get(e.id))));
   return out;
 }
 
@@ -205,11 +214,23 @@ export interface ItemDetail {
   run: RunDto;
   item: ItemSummary & { slipNote: string | null; employmentStatus: string; bankName: string | null; bankAccountMasked: string | null };
   lines: LineDto[];
-  attendance: { totals: RecapTotals; from: string; to: string };
+  attendance: { totals: RecapTotals; from: string; to: string; overtime: { approvedMinutes: number; paidMinutes: number; days: number } | null };
+  /** BPJS & PPh 21 otomatis untuk item ini (null bila tidak aktif / dilewati). */
+  statutory: ItemStatutory | null;
   /** Hari-hari sumber (kondisi SAAT INI) agar angka dapat ditelusuri; bandingkan dengan ringkasan saat dihitung. */
   days: DayResult[];
   editable: boolean;
 }
+
+/** Isi kolom `payroll_items.statutory`: masukan & hasil BPJS/PPh 21 saat dihitung. */
+export interface ItemStatutoryStored {
+  version: 1;
+  taxMonth: number;
+  finalPeriod: boolean;
+  bpjs: { wage: number; employeeTotal: number; employerTotal: number; employee: { health: number; jht: number; jp: number }; employer: { health: number; jht: number; jp: number; jkk: number; jkm: number } } | null;
+  pph21: { method: "TER" | "ANNUAL"; category: string | null; gross: number; amount: number; detail: string } | null;
+}
+export interface ItemStatutory extends ItemStatutoryStored { employerLines: { name: string; amount: number }[] }
 
 export async function getItem(actor: Actor, itemId: string): Promise<ItemDetail> {
   assertCan(actor, "payroll:view");
@@ -220,9 +241,12 @@ export async function getItem(actor: Actor, itemId: string): Promise<ItemDetail>
   const from = dateToIso(run.attendanceStart), to = dateToIso(run.attendanceEnd);
   const ctx = await loadRangeContext(from, to, { employeeIds: [emp.id] });
   const { days } = computeEmployeePeriod(employeeLite(emp), ctx);
-  const stale = run.status !== "CANCELLED" && sourceHash(days) !== item.sourceHash;
+  const snap = run.rulesSnapshot as (PayrollRules & { statutory?: StatutoryConfig | null }) | null;
+  const ot = snap?.overtimeMode === "APPROVED" ? await approvedOvertimeFor([emp.id], from, to) : new Map();
+  const stale = run.status !== "CANCELLED" && sourceHash(days, overtimeTag(ot.get(emp.id))) !== item.sourceHash;
   const [dto] = await toRunDtos([run]);
-  const summary = item.attendanceSummary as unknown as { totals: RecapTotals };
+  const summary = item.attendanceSummary as unknown as { totals: RecapTotals; overtime?: { approvedMinutes: number; paidMinutes: number; days: number } | null };
+  const stored = item.statutory as unknown as ItemStatutoryStored | null;
   return {
     run: dto!,
     item: {
@@ -232,7 +256,8 @@ export async function getItem(actor: Actor, itemId: string): Promise<ItemDetail>
       slipNote: item.slipNote, employmentStatus: item.employmentStatus, bankName: item.bankName, bankAccountMasked: item.bankAccountMasked,
     },
     lines: item.lines.map((l) => ({ id: l.id, kind: l.kind, category: l.category, name: l.name, source: l.source, amount: Number(l.amount), formula: l.formula, reason: l.reason })),
-    attendance: { totals: summary.totals, from, to },
+    attendance: { totals: summary.totals, from, to, overtime: summary.overtime ?? null },
+    statutory: stored ? { ...stored, employerLines: employerContributionLines(stored.bpjs as never, snap?.statutory?.bpjs ?? null) } : null,
     days, editable: run.status === "DRAFT",
   };
 }
@@ -281,8 +306,12 @@ export async function calculateRun(actor: Actor, runId: string): Promise<{ itemC
   if (run.status !== "DRAFT") throw Errors.conflict("Hanya periode berstatus Draf yang dapat dihitung ulang.");
   const settings = await getSettings();
   const rules = payrollRulesOf(settings);
+  const statCfg = statutoryConfigOf(settings);
+  const statActive = statCfg.bpjs.enabled || statCfg.pph21.enabled;
   const period = { start: dateToIso(run.periodStart), end: dateToIso(run.periodEnd) };
   const attFrom = dateToIso(run.attendanceStart), attTo = dateToIso(run.attendanceEnd);
+  const taxYear = Number(period.end.slice(0, 4));
+  const taxMonth = Number(period.end.slice(5, 7));
 
   const employees = await prisma.employee.findMany({
     where: {
@@ -293,11 +322,13 @@ export async function calculateRun(actor: Actor, runId: string): Promise<{ itemC
     orderBy: { fullName: "asc" },
   });
   const ids = employees.map((e) => e.id);
-  const [ctx, comps, oldAdj, oldItems] = await Promise.all([
+  const [ctx, comps, oldAdj, oldItems, overtimeMap, ytdMap] = await Promise.all([
     loadRangeContext(attFrom, attTo, { employeeIds: ids }),
     prisma.salaryComponent.findMany({ where: { employeeId: { in: ids }, isActive: true } }),
     prisma.payrollItemLine.findMany({ where: { source: "ADJUSTMENT", item: { runId } }, include: { item: { select: { employeeId: true } } } }),
     prisma.payrollItem.findMany({ where: { runId }, select: { employeeId: true, slipNote: true } }),
+    approvedOvertimeFor(ids, attFrom, attTo),
+    statActive && statCfg.pph21.enabled ? ytdFor(ids, taxYear, period.start, runId) : Promise.resolve(new Map<string, YtdInput>()),
   ]);
   const compsBy = new Map<string, ComponentInput[]>();
   for (const c of comps) {
@@ -305,6 +336,7 @@ export async function calculateRun(actor: Actor, runId: string): Promise<{ itemC
     arr.push({
       id: c.id, kind: c.kind, category: c.category, name: c.name, calc: c.calc, amount: Number(c.amount), percentBp: c.percentBp, recurrence: c.recurrence,
       effectiveFrom: dateToIso(c.effectiveFrom), effectiveTo: c.effectiveTo ? dateToIso(c.effectiveTo) : null, description: c.description, isActive: c.isActive,
+      taxable: c.taxable, inBpjsBase: c.inBpjsBase ?? undefined,
     });
     compsBy.set(c.employeeId, arr);
   }
@@ -317,7 +349,18 @@ export async function calculateRun(actor: Actor, runId: string): Promise<{ itemC
   const lineRows: Prisma.PayrollItemLineCreateManyInput[] = [];
   for (const e of employees) {
     const { days, totals } = computeEmployeePeriod(employeeLite(e), ctx);
-    const calc = computeItem({ components: compsBy.get(e.id) ?? [], rules, totals, days, period });
+    const approvals = overtimeMap.get(e.id) ?? [];
+    // Masa pajak terakhir: Desember, atau karyawan berhenti pada periode ini.
+    const leavingNow = !!e.endDate && dateToIso(e.endDate) >= period.start && dateToIso(e.endDate) <= period.end;
+    const finalPeriod = taxMonth === 12 || leavingNow;
+    const joinedThisYear = dateToIso(e.joinDate).startsWith(`${taxYear}-`);
+    const priorMonthsExpected = joinedThisYear ? Math.max(0, taxMonth - Number(dateToIso(e.joinDate).slice(5, 7))) : taxMonth - 1;
+    const statutory: StatutoryContext | null = statActive ? {
+      config: statCfg,
+      employee: { taxStatus: e.taxStatus, hasNpwp: e.hasNpwp, healthEnrolled: e.bpjsHealthEnrolled, employmentEnrolled: e.bpjsEmploymentEnrolled },
+      taxMonth, finalPeriod, priorMonthsExpected, ytd: ytdMap.get(e.id) ?? null,
+    } : null;
+    const calc = computeItem({ components: compsBy.get(e.id) ?? [], rules, totals, days, period, overtime: approvals, statutory });
     const adj = adjBy.get(e.id) ?? [];
     // Dilewati bila tidak ada komponen gaji sama sekali: baris dari aturan (potongan/lembur otomatis) saja tidak cukup
     // untuk memasukkan karyawan ke penggajian — kalau tidak, karyawan tanpa gaji akan bergaji bersih negatif.
@@ -331,13 +374,29 @@ export async function calculateRun(actor: Actor, runId: string): Promise<{ itemC
       ...adj.map((a) => ({ kind: a.kind, category: a.category, name: a.name, source: "ADJUSTMENT" as const, amount: Number(a.amount), formula: a.formula, reason: a.reason, componentId: null, createdById: a.createdById })),
     ];
     const t = totalsFromLines(lines);
+    const warnings = [...calc.warnings];
+    if (statutory?.config?.pph21.enabled && adj.some((a) => a.kind === "EARNING")) {
+      warnings.push("Penyesuaian pendapatan manual tidak ikut dasar PPh 21/BPJS otomatis. Bila bersifat penghasilan (mis. bonus), catat sebagai komponen sekali (ONE_TIME) lalu hitung ulang.");
+    }
+    if (t.netPay < 0 && !warnings.some((w) => w.includes("negatif"))) warnings.push("Gaji bersih negatif — sesuaikan sebelum diajukan.");
+    const stored: ItemStatutoryStored | null = calc.statutory && (calc.statutory.bpjs || calc.statutory.pph21)
+      ? {
+        version: 1, taxMonth, finalPeriod,
+        bpjs: calc.statutory.bpjs ? {
+          wage: calc.statutory.bpjs.wage, employeeTotal: calc.statutory.bpjs.employeeTotal, employerTotal: calc.statutory.bpjs.employerTotal,
+          employee: calc.statutory.bpjs.employee, employer: calc.statutory.bpjs.employer,
+        } : null,
+        pph21: calc.statutory.pph21 ? { method: calc.statutory.pph21.method, category: calc.statutory.pph21.category, gross: calc.statutory.pph21.gross, amount: calc.statutory.pph21.amount, detail: calc.statutory.pph21.detail } : null,
+      } : null;
     const itemId = randomUUID();
     itemRows.push({
       id: itemId, runId, employeeId: e.id, employeeNo: e.employeeNo, employeeName: e.fullName, position: e.position, divisionName: e.division?.name ?? null,
       employmentStatus: e.employmentStatus, bankName: e.bankName, bankAccountMasked: maskAccount(e.bankAccountLast4),
       baseSalary: BigInt(calc.baseSalary), totalEarnings: BigInt(t.totalEarnings), totalDeductions: BigInt(t.totalDeductions), netPay: BigInt(t.netPay),
-      attendanceSummary: { totals, from: attFrom, to: attTo } as unknown as Prisma.InputJsonValue, sourceHash: sourceHash(days),
-      warnings: (t.netPay < 0 && !calc.warnings.some((w) => w.includes("negatif")) ? [...calc.warnings, "Gaji bersih negatif — sesuaikan sebelum diajukan."] : calc.warnings) as unknown as Prisma.InputJsonValue,
+      attendanceSummary: { totals, from: attFrom, to: attTo, overtime: calc.overtime } as unknown as Prisma.InputJsonValue,
+      sourceHash: sourceHash(days, rules.overtimeMode === "APPROVED" ? overtimeTag(approvals) : ""),
+      statutory: stored ? (stored as unknown as Prisma.InputJsonValue) : Prisma.DbNull,
+      warnings: warnings as unknown as Prisma.InputJsonValue,
       slipNote: noteBy.get(e.id) ?? null,
     });
     lines.forEach((l, idx) => lineRows.push({
@@ -346,6 +405,7 @@ export async function calculateRun(actor: Actor, runId: string): Promise<{ itemC
     }));
   }
 
+  const snapshot = { ...rules, statutory: statActive ? statCfg : null };
   await transaction(async (tx) => {
     const fresh = await tx.payrollRun.findUniqueOrThrow({ where: { id: runId }, select: { status: true } });
     if (fresh.status !== "DRAFT") throw Errors.conflict("Status periode berubah. Muat ulang halaman.");
@@ -353,14 +413,45 @@ export async function calculateRun(actor: Actor, runId: string): Promise<{ itemC
     await tx.payrollItem.deleteMany({ where: { runId } });
     if (itemRows.length) await tx.payrollItem.createMany({ data: itemRows });
     if (lineRows.length) await tx.payrollItemLine.createMany({ data: lineRows });
-    await tx.payrollRun.update({ where: { id: runId }, data: { rulesSnapshot: rules as unknown as Prisma.InputJsonValue, calculatedAt: new Date() } });
+    await tx.payrollRun.update({ where: { id: runId }, data: { rulesSnapshot: snapshot as unknown as Prisma.InputJsonValue, calculatedAt: new Date() } });
     await writeAudit(tx, actor, {
       action: "payroll.calculate", entityType: "PayrollRun", entityId: runId,
-      summary: `Gaji "${run.label}" dihitung: ${itemRows.length} karyawan${skipped.length ? `, ${skipped.length} dilewati` : ""}`,
-      after: { items: itemRows.length, skipped: skipped.map((s) => s.employeeNo), rules },
+      summary: `Gaji "${run.label}" dihitung: ${itemRows.length} karyawan${skipped.length ? `, ${skipped.length} dilewati` : ""}${statActive ? " (BPJS/PPh 21 otomatis)" : ""}`,
+      after: { items: itemRows.length, skipped: skipped.map((s) => s.employeeNo), rules, statutoryEnabled: { bpjs: statCfg.bpjs.enabled, pph21: statCfg.pph21.enabled } },
     });
   });
   return { itemCount: itemRows.length, skipped };
+}
+
+/**
+ * Data PPh 21 masa sebelumnya pada tahun pajak yang sama (dari penggajian DISETUJUI/TERBIT lain) — dasar true-up masa pajak
+ * terakhir. Masa dihitung per bulan unik (dua periode pada bulan yang sama dihitung satu masa).
+ */
+async function ytdFor(employeeIds: string[], taxYear: number, beforeDate: string, exceptRunId: string): Promise<Map<string, YtdInput>> {
+  const out = new Map<string, YtdInput>();
+  if (!employeeIds.length) return out;
+  const rows = await prisma.payrollItem.findMany({
+    where: {
+      employeeId: { in: employeeIds }, statutory: { not: Prisma.DbNull },
+      run: { id: { not: exceptRunId }, status: { in: ["APPROVED", "ISSUED"] }, periodEnd: { gte: isoToDate(`${taxYear}-01-01`), lt: isoToDate(beforeDate) } },
+    },
+    select: { employeeId: true, statutory: true, run: { select: { periodEnd: true } } },
+  });
+  const months = new Map<string, Set<string>>();
+  for (const r of rows) {
+    const st = r.statutory as unknown as ItemStatutoryStored | null;
+    if (!st) continue;
+    const y = out.get(r.employeeId) ?? { months: 0, gross: 0, withheld: 0, jhtJpEmployee: 0 };
+    y.gross += st.pph21?.gross ?? 0;
+    y.withheld += st.pph21?.amount ?? 0;
+    y.jhtJpEmployee += (st.bpjs?.employee.jht ?? 0) + (st.bpjs?.employee.jp ?? 0);
+    out.set(r.employeeId, y);
+    const set = months.get(r.employeeId) ?? new Set<string>();
+    set.add(dateToIso(r.run.periodEnd).slice(0, 7));
+    months.set(r.employeeId, set);
+  }
+  for (const [id, y] of out) y.months = months.get(id)?.size ?? 0;
+  return out;
 }
 
 // ─────────────────────────── Penyesuaian (hanya Draf) ───────────────────────────
@@ -555,6 +646,7 @@ export async function issueRun(actor: Actor, runId: string, raw: unknown = {}): 
         earnings: it.lines.filter((l) => l.kind === "EARNING").map(toLine), deductions: it.lines.filter((l) => l.kind === "DEDUCTION").map(toLine),
         totalEarnings: Number(it.totalEarnings), totalDeductions: Number(it.totalDeductions), netPay: Number(it.netPay),
         attendance: settings.slipShowAttendance ? (it.attendanceSummary as unknown as { totals: RecapTotals }).totals : null,
+        ...employerLinesOf(it.statutory, run.rulesSnapshot),
         note: it.slipNote, footerNote: settings.slipFooterNote,
         revisionNote: run.revisionOfId ? `Slip ini merupakan revisi dari periode "${run.revisionOf?.label ?? "sebelumnya"}"${priorNo.get(it.employeeId) ? ` (menggantikan slip ${priorNo.get(it.employeeId)})` : ""}.` : null,
       };
@@ -570,6 +662,15 @@ export async function issueRun(actor: Actor, runId: string, raw: unknown = {}): 
     });
     return { slips: items.length };
   });
+}
+
+/** Beban perusahaan (BPJS porsi pemberi kerja) untuk slip, dari data item & snapshot konfigurasi saat dihitung. */
+function employerLinesOf(statutory: unknown, rulesSnapshot: unknown): { employerContributions?: { name: string; amount: number }[] } {
+  const st = statutory as ItemStatutoryStored | null;
+  const cfg = (rulesSnapshot as { statutory?: StatutoryConfig | null } | null)?.statutory ?? null;
+  if (!st?.bpjs || !cfg) return {};
+  const rows = employerContributionLines(st.bpjs as never, cfg.bpjs);
+  return rows.length ? { employerContributions: rows } : {};
 }
 
 const cancelSchema = z.object({ reason: requiredText(5, 500, "Alasan pembatalan") });

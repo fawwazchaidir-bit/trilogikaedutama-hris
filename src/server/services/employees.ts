@@ -12,6 +12,7 @@ import { env } from "../env";
 import type { ReportTable } from "../export";
 import { isoDate, optionalEmail, optionalPhone, optionalText, requiredText, uuid } from "@/lib/validation/common";
 import { maskAccount } from "@/lib/payroll";
+import { TAX_STATUSES, type TaxStatus } from "@/lib/statutory";
 import { EMPLOYMENT_LABEL, type EmploymentStatus } from "@/lib/labels";
 import { todayIso } from "@/lib/time";
 import type { Paged } from "@/lib/types";
@@ -39,6 +40,11 @@ export const employeeSchema = z.object({
   bankAccountNo: accountNo,
   bankAccountHolder: optionalText(120, "Nama pemilik rekening"),
   notes: optionalText(500, "Catatan"),
+  // Atribut statutori (dipakai bila BPJS/PPh 21 otomatis aktif). undefined = tidak diubah (bawaan saat membuat).
+  taxStatus: z.enum(TAX_STATUSES as unknown as [TaxStatus, ...TaxStatus[]]).optional(),
+  hasNpwp: z.boolean().optional(),
+  bpjsHealthEnrolled: z.boolean().optional(),
+  bpjsEmploymentEnrolled: z.boolean().optional(),
 });
 
 export const employeeListSchema = z.object({
@@ -73,6 +79,10 @@ export interface EmployeeDto {
   notes: string | null;
   userId: string | null;
   userEmail: string | null;
+  taxStatus: TaxStatus;
+  hasNpwp: boolean;
+  bpjsHealthEnrolled: boolean;
+  bpjsEmploymentEnrolled: boolean;
 }
 
 const include = { division: { select: { name: true } }, user: { select: { id: true, email: true } } } satisfies Prisma.EmployeeInclude;
@@ -84,6 +94,7 @@ export const toEmployeeDto = (e: Row): EmployeeDto => ({
   phone: e.phone, email: e.email, address: e.address, bankName: e.bankName, bankAccountMasked: maskAccount(e.bankAccountLast4),
   bankAccountHolder: e.bankAccountHolder, photoUrl: e.photoFileId ? `/api/files/${e.photoFileId}` : null,
   isActive: e.isActive, notes: e.notes, userId: e.userId, userEmail: e.user?.email ?? null,
+  taxStatus: e.taxStatus, hasNpwp: e.hasNpwp, bpjsHealthEnrolled: e.bpjsHealthEnrolled, bpjsEmploymentEnrolled: e.bpjsEmploymentEnrolled,
 });
 
 // ─────────────────────────── Divisi ───────────────────────────
@@ -204,6 +215,16 @@ function bankFields(input: z.infer<typeof employeeSchema>) {
   return out;
 }
 
+/** Atribut statutori yang diisi pengguna (yang tidak diisi dibiarkan / memakai bawaan). */
+function statutoryFields(input: z.infer<typeof employeeSchema>, defaults: { bpjsHealthEnrolled?: boolean; bpjsEmploymentEnrolled?: boolean } = {}) {
+  return {
+    ...(input.taxStatus !== undefined ? { taxStatus: input.taxStatus } : {}),
+    ...(input.hasNpwp !== undefined ? { hasNpwp: input.hasNpwp } : {}),
+    ...(input.bpjsHealthEnrolled !== undefined ? { bpjsHealthEnrolled: input.bpjsHealthEnrolled } : defaults.bpjsHealthEnrolled !== undefined ? { bpjsHealthEnrolled: defaults.bpjsHealthEnrolled } : {}),
+    ...(input.bpjsEmploymentEnrolled !== undefined ? { bpjsEmploymentEnrolled: input.bpjsEmploymentEnrolled } : defaults.bpjsEmploymentEnrolled !== undefined ? { bpjsEmploymentEnrolled: defaults.bpjsEmploymentEnrolled } : {}),
+  };
+}
+
 export async function createEmployee(actor: Actor, raw: unknown): Promise<EmployeeDto> {
   assertCan(actor, "employee:manage");
   const input = parseInput(employeeSchema, raw);
@@ -216,6 +237,7 @@ export async function createEmployee(actor: Actor, raw: unknown): Promise<Employ
         employmentStatus: input.employmentStatus, joinDate: isoToDate(input.joinDate), phone: input.phone, email: input.email,
         address: input.address, bankName: input.bankName, bankAccountHolder: input.bankAccountHolder, notes: input.notes,
         ...bankFields(input),
+        ...statutoryFields(input, input.employmentStatus === "INTERN" ? { bpjsHealthEnrolled: false, bpjsEmploymentEnrolled: false } : {}),
       },
       include,
     });
@@ -241,12 +263,14 @@ export async function updateEmployee(actor: Actor, id: string, raw: unknown): Pr
       employmentStatus: input.employmentStatus, joinDate: isoToDate(input.joinDate), phone: input.phone, email: input.email,
       address: input.address, bankName: input.bankName, bankAccountHolder: input.bankAccountHolder, notes: input.notes,
       ...bankFields(input),
+      ...statutoryFields(input),
     } satisfies Prisma.EmployeeUncheckedUpdateInput;
     const e = await tx.employee.update({ where: { id }, data, include });
     const flat = (r: Row) => ({
       employeeNo: r.employeeNo, fullName: r.fullName, divisionId: r.divisionId, position: r.position, employmentStatus: r.employmentStatus,
       joinDate: dateToIso(r.joinDate), phone: r.phone, email: r.email, address: r.address, bankName: r.bankName,
       bankAccountHolder: r.bankAccountHolder, bankAccountLast4: r.bankAccountLast4, notes: r.notes,
+      taxStatus: r.taxStatus, hasNpwp: r.hasNpwp, bpjsHealthEnrolled: r.bpjsHealthEnrolled, bpjsEmploymentEnrolled: r.bpjsEmploymentEnrolled,
     });
     const d = diffFields(flat(before), flat(e));
     if (d.changed.length) {

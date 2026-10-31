@@ -1,6 +1,6 @@
 import "server-only";
 import { z } from "zod";
-import type { CompanySettings } from "@prisma/client";
+import type { CompanySettings, Prisma } from "@prisma/client";
 import { prisma, transaction } from "../db";
 import { Errors } from "../errors";
 import { parseInput } from "../validate";
@@ -8,6 +8,8 @@ import { assertCan, type Actor } from "../actor";
 import { diffFields, writeAudit } from "../audit";
 import { optionalEmail, optionalPhone, optionalText, requiredText } from "@/lib/validation/common";
 import type { PayrollRules } from "@/lib/payroll";
+import { defaultStatutoryConfig, type StatutoryConfig } from "@/lib/statutory";
+import { statutoryConfigSchema } from "@/lib/validation/statutory";
 import type { GeoPolicy } from "@/lib/geo";
 
 /** Baris pengaturan tunggal; dibuat dengan nilai awal AMAN bila belum ada (mis. database baru tanpa seed). */
@@ -22,8 +24,16 @@ export async function getBrand(): Promise<{ name: string; logoUrl: string }> {
   return { name: s.name, logoUrl: s.logoFileId ? `/api/files/${s.logoFileId}` : "/brand/logo.png" };
 }
 
-export function payrollRulesOf(s: CompanySettings): PayrollRules {
+/** Aturan penggajian lengkap (semua field terisi) — dibaca dari pengaturan. */
+export type FullPayrollRules = PayrollRules & Required<Pick<PayrollRules, "overtimeRateMode" | "overtimeSalaryDivisor" | "overtimeFirstHourBp" | "overtimeNextHoursBp" | "overtimeRequireAttendance">>;
+
+export function payrollRulesOf(s: CompanySettings): FullPayrollRules {
   return {
+    overtimeRateMode: s.overtimeRateMode,
+    overtimeSalaryDivisor: s.overtimeSalaryDivisor,
+    overtimeFirstHourBp: s.overtimeFirstHourBp,
+    overtimeNextHoursBp: s.overtimeNextHoursBp,
+    overtimeRequireAttendance: s.overtimeRequireAttendance,
     lateMode: s.lateDeductionMode,
     lateAmount: Number(s.lateDeductionAmount),
     absenceMode: s.absenceDeductionMode,
@@ -57,7 +67,14 @@ export interface SettingsDto {
     locationRadiusMeters: number; locationMaxAccuracyMeters: number; requestBackdateDays: number; confirmedAt: string | null;
   };
   leave: { annualLeaveQuota: number; allowNegativeLeaveBalance: boolean };
-  payroll: PayrollRules & { confirmedAt: string | null };
+  payroll: FullPayrollRules & { confirmedAt: string | null };
+  statutory: StatutoryConfig;
+}
+
+/** Konfigurasi BPJS/PPh 21 tersimpan; bila belum ada / rusak → nilai bawaan (nonaktif). */
+export function statutoryConfigOf(s: CompanySettings): StatutoryConfig {
+  const parsed = s.statutoryConfig ? statutoryConfigSchema.safeParse(s.statutoryConfig) : null;
+  return parsed?.success ? parsed.data : defaultStatutoryConfig();
 }
 
 export async function getSettingsDto(actor: Actor): Promise<SettingsDto> {
@@ -74,6 +91,7 @@ export async function getSettingsDto(actor: Actor): Promise<SettingsDto> {
     },
     leave: { annualLeaveQuota: s.annualLeaveQuota, allowNegativeLeaveBalance: s.allowNegativeLeaveBalance },
     payroll: { ...payrollRulesOf(s), confirmedAt: s.payrollRulesConfirmedAt?.toISOString() ?? null },
+    statutory: statutoryConfigOf(s),
   };
 }
 
@@ -157,15 +175,25 @@ export const payrollRulesSchema = z.object({
   izinDeductsPay: z.boolean(),
   sakitDeductsPay: z.boolean(),
   cutiDeductsPay: z.boolean(),
-  overtimeMode: z.enum(["MANUAL", "AUTO"]),
+  overtimeMode: z.enum(["MANUAL", "AUTO", "APPROVED"]),
   overtimeRatePerHour: rp("Tarif lembur per jam"),
   overtimeMinMinutes: z.number().int().min(0).max(1440),
   overtimeMaxMinutesPerDay: z.number().int().min(0).max(1440),
+  overtimeRateMode: z.enum(["FIXED_PER_HOUR", "SALARY_DIVISOR"]).default("FIXED_PER_HOUR"),
+  overtimeSalaryDivisor: z.number().int().min(1, "Pembagi lembur 1–1000").max(1000, "Pembagi lembur 1–1000").default(173),
+  overtimeFirstHourBp: z.number().int().min(10_000, "Pengali jam pertama minimal 1× (10000)").max(50_000, "Pengali maksimal 5×").default(10_000),
+  overtimeNextHoursBp: z.number().int().min(10_000, "Pengali jam berikutnya minimal 1× (10000)").max(50_000, "Pengali maksimal 5×").default(10_000),
+  overtimeRequireAttendance: z.boolean().default(true),
 }).superRefine((v, ctx) => {
   if (v.lateMode !== "NONE" && v.lateAmount <= 0) ctx.addIssue({ code: "custom", path: ["lateAmount"], message: "Isi nominal potongan keterlambatan (> 0) atau pilih 'Tidak ada potongan'" });
   if (v.absenceMode === "FIXED_PER_DAY" && v.absenceAmount <= 0) ctx.addIssue({ code: "custom", path: ["absenceAmount"], message: "Isi nominal potongan per hari (> 0)" });
   if (v.absenceMode === "SALARY_DIVISOR" && !v.absenceDivisor) ctx.addIssue({ code: "custom", path: ["absenceDivisor"], message: "Isi pembagi gaji pokok (mis. jumlah hari kerja per bulan)" });
-  if (v.overtimeMode === "AUTO" && v.overtimeRatePerHour <= 0) ctx.addIssue({ code: "custom", path: ["overtimeRatePerHour"], message: "Isi tarif lembur per jam (> 0) untuk mode otomatis" });
+  if (v.overtimeMode !== "MANUAL" && v.overtimeRateMode === "FIXED_PER_HOUR" && v.overtimeRatePerHour <= 0) {
+    ctx.addIssue({ code: "custom", path: ["overtimeRatePerHour"], message: "Isi tarif lembur per jam (> 0) atau pilih tarif dari gaji pokok ÷ pembagi" });
+  }
+  if (v.overtimeMode !== "MANUAL" && v.overtimeMaxMinutesPerDay < v.overtimeMinMinutes) {
+    ctx.addIssue({ code: "custom", path: ["overtimeMaxMinutesPerDay"], message: "Maksimal menit lembur per hari tidak boleh lebih kecil dari minimalnya" });
+  }
 });
 
 /** Mengubah aturan MEMBATALKAN konfirmasi sebelumnya: Super Admin harus memverifikasi ulang sebelum gaji dapat disetujui. */
@@ -182,6 +210,8 @@ export async function updatePayrollRules(actor: Actor, raw: unknown): Promise<vo
         izinDeductsPay: input.izinDeductsPay, sakitDeductsPay: input.sakitDeductsPay, cutiDeductsPay: input.cutiDeductsPay,
         overtimeMode: input.overtimeMode, overtimeRatePerHour: BigInt(input.overtimeRatePerHour),
         overtimeMinMinutes: input.overtimeMinMinutes, overtimeMaxMinutesPerDay: input.overtimeMaxMinutesPerDay,
+        overtimeRateMode: input.overtimeRateMode, overtimeSalaryDivisor: input.overtimeSalaryDivisor,
+        overtimeFirstHourBp: input.overtimeFirstHourBp, overtimeNextHoursBp: input.overtimeNextHoursBp, overtimeRequireAttendance: input.overtimeRequireAttendance,
         payrollRulesConfirmedAt: null, payrollRulesConfirmedById: null,
       },
     });
@@ -190,6 +220,30 @@ export async function updatePayrollRules(actor: Actor, raw: unknown): Promise<vo
       before: payrollRulesOf(before), after: input,
     });
   });
+}
+
+/**
+ * Simpan konfigurasi BPJS & PPh 21 otomatis. Seperti aturan penggajian lain, perubahan MENCABUT konfirmasi:
+ * Super Admin harus memverifikasi tarif/tabel terhadap ketentuan yang berlaku sebelum gaji dapat disetujui.
+ */
+export async function updateStatutoryConfig(actor: Actor, raw: unknown): Promise<StatutoryConfig> {
+  assertCan(actor, "payroll:rules");
+  const input = parseInput(statutoryConfigSchema, raw);
+  await transaction(async (tx) => {
+    const before = await tx.companySettings.findUniqueOrThrow({ where: { id: 1 } });
+    const old = statutoryConfigOf(before);
+    await tx.companySettings.update({
+      where: { id: 1 }, data: { statutoryConfig: input as unknown as Prisma.InputJsonValue, payrollRulesConfirmedAt: null, payrollRulesConfirmedById: null },
+    });
+    const { ter: oldTer, brackets: oldBr, ptkp: oldPtkp, terCategoryOf: oldCat, ...oldPph } = old.pph21;
+    const { ter: newTer, brackets: newBr, ptkp: newPtkp, terCategoryOf: newCat, ...newPph } = input.pph21;
+    await writeAudit(tx, actor, {
+      action: "settings.statutory_update", entityType: "CompanySettings", entityId: "1", summary: "Konfigurasi BPJS & PPh 21 otomatis diubah (konfirmasi dicabut)",
+      before: { bpjs: old.bpjs, pph21: oldPph, tablesChanged: JSON.stringify({ oldTer, oldBr, oldPtkp, oldCat }) !== JSON.stringify({ oldTer: newTer, oldBr: newBr, oldPtkp: newPtkp, oldCat: newCat }) },
+      after: { bpjs: input.bpjs, pph21: newPph },
+    });
+  });
+  return input;
 }
 
 export async function confirmPayrollRules(actor: Actor): Promise<void> {

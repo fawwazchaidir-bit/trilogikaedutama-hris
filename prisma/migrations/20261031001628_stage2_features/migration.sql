@@ -60,7 +60,7 @@ ALTER COLUMN "workingDays" SET DATA TYPE DOUBLE PRECISION;
 ALTER TABLE "payroll_items" ADD COLUMN     "statutory" JSONB;
 
 -- AlterTable
-ALTER TABLE "salary_components" ADD COLUMN     "inBpjsBase" BOOLEAN NOT NULL DEFAULT false,
+ALTER TABLE "salary_components" ADD COLUMN     "inBpjsBase" BOOLEAN,
 ADD COLUMN     "taxable" BOOLEAN NOT NULL DEFAULT true;
 
 -- AlterTable
@@ -246,10 +246,9 @@ ALTER TABLE "location_checks" ADD CONSTRAINT "location_checks_attendanceId_fkey"
 
 -- ═══════════════════════════ Penyesuaian manual (tahap 2) ═══════════════════════════
 
--- Data lama: magang tidak otomatis peserta BPJS; gaji pokok & tunjangan jabatan adalah dasar upah BPJS.
+-- Data lama: magang tidak otomatis peserta BPJS. Komponen lama: "inBpjsBase" NULL = bawaan menurut kategori
+-- (gaji pokok & tunjangan jabatan adalah dasar upah BPJS).
 UPDATE "employees" SET "bpjsHealthEnrolled" = false, "bpjsEmploymentEnrolled" = false WHERE "employmentStatus" = 'INTERN';
-UPDATE "salary_components" SET "inBpjsBase" = true
-  WHERE "kind" = 'EARNING' AND "category" IN ('BASE_SALARY', 'POSITION_ALLOWANCE');
 
 -- ─────────────────────────── Jadwal: shift lintas tengah malam ───────────────────────────
 -- Jam pulang < jam masuk berarti shift berakhir keesokan harinya (mis. 22:00 → 06:00). Jam pulang = jam masuk ditolak.

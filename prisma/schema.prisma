@@ -590,8 +590,9 @@ model SalaryComponent {
   isActive      Boolean             @default(true)
   /// Pendapatan ini masuk penghasilan bruto untuk PPh 21 (hanya berarti bagi komponen pendapatan).
   taxable       Boolean             @default(true)
-  /// Pendapatan ini masuk dasar upah BPJS (gaji pokok + tunjangan tetap).
-  inBpjsBase    Boolean             @default(false)
+  /// Pendapatan ini masuk dasar upah BPJS (gaji pokok + tunjangan tetap). NULL = bawaan menurut kategori
+  /// (gaji pokok & tunjangan jabatan masuk); nilai eksplisit menimpa.
+  inBpjsBase    Boolean?
   createdById   String              @db.Uuid
   createdAt     DateTime            @default(now())
   updatedAt     DateTime            @updatedAt
