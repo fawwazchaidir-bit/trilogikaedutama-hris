@@ -3,7 +3,7 @@ import { requirePagePermission } from "@/server/auth/current";
 import { actorCan } from "@/server/actor";
 import { getSettingsDto } from "@/server/services/settings";
 import { Notice, PageHeader } from "@/components/ui/card";
-import { CompanyForm, LogoCard, PayrollRulesForm, PolicyForm } from "@/components/settings-forms";
+import { CompanyForm, LogoCard, PayrollRulesForm, PolicyForm, StatutoryForm } from "@/components/settings-forms";
 
 export const metadata: Metadata = { title: "Pengaturan" };
 export const dynamic = "force-dynamic";
@@ -20,6 +20,7 @@ export default async function SettingsPage() {
       <LogoCard logoUrl={s.company.logoUrl} canEdit={sa} />
       <PolicyForm s={s} canEdit={sa} />
       <PayrollRulesForm s={s} canEdit={actorCan(user, "payroll:rules")} />
+      <StatutoryForm s={s} canEdit={actorCan(user, "payroll:rules")} />
     </div>
   );
 }

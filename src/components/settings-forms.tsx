@@ -10,7 +10,8 @@ import { useToast } from "@/components/ui/toast";
 import { api, ApiClientError, errorMessage } from "@/lib/api-client";
 import { uploadFile } from "@/components/upload";
 import { formatDateTime } from "@/lib/format";
-import { ABSENCE_MODE_LABEL, LATE_MODE_LABEL, OVERTIME_MODE_LABEL } from "@/lib/labels";
+import { ABSENCE_MODE_LABEL, LATE_MODE_LABEL, OVERTIME_MODE_LABEL, OVERTIME_RATE_MODE_LABEL } from "@/lib/labels";
+import { defaultStatutoryConfig, type StatutoryConfig } from "@/lib/statutory";
 import type { SettingsDto } from "@/server/services/settings";
 
 function useForm() {
@@ -119,6 +120,8 @@ export function PayrollRulesForm({ s, canEdit }: { s: SettingsDto; canEdit: bool
     lateMode: v.lateMode, lateAmount: v.lateAmount, absenceMode: v.absenceMode, absenceAmount: v.absenceAmount, absenceDivisor: v.absenceDivisor.trim() === "" ? null : Number(v.absenceDivisor),
     izinDeductsPay: v.izinDeductsPay, sakitDeductsPay: v.sakitDeductsPay, cutiDeductsPay: v.cutiDeductsPay, overtimeMode: v.overtimeMode, overtimeRatePerHour: v.overtimeRatePerHour,
     overtimeMinMinutes: v.overtimeMinMinutes, overtimeMaxMinutesPerDay: v.overtimeMaxMinutesPerDay,
+    overtimeRateMode: v.overtimeRateMode, overtimeSalaryDivisor: v.overtimeSalaryDivisor, overtimeFirstHourBp: v.overtimeFirstHourBp,
+    overtimeNextHoursBp: v.overtimeNextHoursBp, overtimeRequireAttendance: v.overtimeRequireAttendance,
   });
   return (
     <Card>
@@ -135,13 +138,91 @@ export function PayrollRulesForm({ s, canEdit }: { s: SettingsDto; canEdit: bool
         {v.absenceMode !== "NONE" && <fieldset className="rounded-md border border-line p-4 sm:col-span-2"><legend className="px-1 text-sm font-medium text-ink-soft">Hari berikut ikut dipotong seperti tidak hadir</legend>
           <div className="flex flex-wrap gap-x-6 gap-y-2">{check("Izin", v.izinDeductsPay, (x) => set("izinDeductsPay", x), d)}{check("Sakit", v.sakitDeductsPay, (x) => set("sakitDeductsPay", x), d)}{check("Cuti", v.cutiDeductsPay, (x) => set("cutiDeductsPay", x), d)}</div></fieldset>}
         <SelectField label="Lembur" disabled={d} value={v.overtimeMode} onChange={(e) => set("overtimeMode", e.target.value as typeof v.overtimeMode)}>{Object.entries(OVERTIME_MODE_LABEL).map(([k, l]) => <option key={k} value={k}>{l}</option>)}</SelectField>
-        {v.overtimeMode === "AUTO" && <>
-          <MoneyInput label="Tarif lembur per jam" disabled={d} value={v.overtimeRatePerHour} onChange={(x) => set("overtimeRatePerHour", x ?? 0)} error={f.fe.overtimeRatePerHour} />
+        {v.overtimeMode !== "MANUAL" && <fieldset className="grid gap-4 rounded-md border border-line p-4 sm:col-span-2 sm:grid-cols-2">
+          <legend className="px-1 text-sm font-medium text-ink-soft">Tarif &amp; batas lembur</legend>
+          <SelectField label="Tarif dasar per jam" disabled={d} value={v.overtimeRateMode} onChange={(e) => set("overtimeRateMode", e.target.value as typeof v.overtimeRateMode)}>{Object.entries(OVERTIME_RATE_MODE_LABEL).map(([k, l]) => <option key={k} value={k}>{l}</option>)}</SelectField>
+          {v.overtimeRateMode === "FIXED_PER_HOUR"
+            ? <MoneyInput label="Tarif lembur per jam" disabled={d} value={v.overtimeRatePerHour} onChange={(x) => set("overtimeRatePerHour", x ?? 0)} error={f.fe.overtimeRatePerHour} />
+            : <TextField label="Pembagi gaji pokok per jam" type="number" min={1} max={1000} disabled={d} value={String(v.overtimeSalaryDivisor)} onChange={(e) => set("overtimeSalaryDivisor", Number(e.target.value))} error={f.fe.overtimeSalaryDivisor} hint="Umum dipakai 173 (1/173 upah sebulan per jam). Verifikasi dengan ketentuan yang berlaku." />}
+          <TextField label="Pengali jam lembur pertama (×)" inputMode="decimal" disabled={d} value={String(v.overtimeFirstHourBp / 10000).replace(".", ",")} onChange={(e) => set("overtimeFirstHourBp", Math.round(Number(e.target.value.replace(",", ".")) * 10000) || 0)} error={f.fe.overtimeFirstHourBp} hint="1 = tanpa pengali; mis. 1,5. Berlaku per hari." />
+          <TextField label="Pengali jam berikutnya (×)" inputMode="decimal" disabled={d} value={String(v.overtimeNextHoursBp / 10000).replace(".", ",")} onChange={(e) => set("overtimeNextHoursBp", Math.round(Number(e.target.value.replace(",", ".")) * 10000) || 0)} error={f.fe.overtimeNextHoursBp} hint="mis. 2" />
           <TextField label="Minimal menit lembur per hari" type="number" min={0} disabled={d} value={String(v.overtimeMinMinutes)} onChange={(e) => set("overtimeMinMinutes", Number(e.target.value))} error={f.fe.overtimeMinMinutes} />
           <TextField label="Maksimal menit lembur per hari" type="number" min={0} disabled={d} value={String(v.overtimeMaxMinutesPerDay)} onChange={(e) => set("overtimeMaxMinutesPerDay", Number(e.target.value))} error={f.fe.overtimeMaxMinutesPerDay} />
-          <div className="sm:col-span-2"><Notice tone="warn">Lembur otomatis dihitung dari jam check-out melewati jam pulang — bukan dari persetujuan lembur. Verifikasi sebelum dipakai; pilih &quot;Input manual&quot; bila lembur memerlukan persetujuan.</Notice></div></>}
+          {v.overtimeMode === "APPROVED" && <div className="sm:col-span-2">{check("Bayar hanya sebesar yang terbukti di absensi", v.overtimeRequireAttendance, (x) => set("overtimeRequireAttendance", x), d, "Dibayar = yang terkecil antara menit disetujui dan menit check-out setelah jam pulang (hari non-kerja: seluruh jam kerja tercatat). Nonaktifkan hanya bila absensi tidak dapat diandalkan.")}</div>}
+          {v.overtimeMode === "AUTO" && <div className="sm:col-span-2"><Notice tone="warn">Lembur otomatis dihitung dari jam check-out melewati jam pulang — <strong>tanpa</strong> persetujuan. Pilih &quot;Hanya lembur yang disetujui&quot; bila lembur memerlukan persetujuan atasan.</Notice></div>}
+        </fieldset>}
         {canEdit && <div className="flex flex-wrap gap-2 sm:col-span-2"><Button type="submit" variant="primary" loading={f.busy}>Simpan aturan</Button>
           <Button disabled={f.busy || !!p.confirmedAt} onClick={() => void f.run(() => api("/api/settings/payroll-rules/confirm", { body: {} }), "Aturan penggajian dikonfirmasi.")}>{p.confirmedAt ? "Sudah dikonfirmasi" : "Saya sudah memverifikasi aturan ini"}</Button></div>}
+      </form>
+    </Card>
+  );
+}
+
+// ─────────────────────────── BPJS & PPh 21 otomatis ───────────────────────────
+
+const pctText = (bp: number) => String(bp / 100).replace(".", ",");
+const toBp = (t: string) => Math.round(Number(t.replace(",", ".")) * 100);
+
+export function StatutoryForm({ s, canEdit }: { s: SettingsDto; canEdit: boolean }) {
+  const f = useForm();
+  const c = s.statutory;
+  const [bp, setBp] = useState(c.bpjs);
+  const [pph, setPph] = useState({ enabled: c.pph21.enabled, noNpwp: String(c.pph21.noNpwpMultiplierBp / 100).replace(".", ","), bj: pctText(c.pph21.biayaJabatanBp), bjCap: c.pph21.biayaJabatanMonthlyCap, employerInsuranceInGross: c.pph21.employerInsuranceInGross });
+  const tables = (x: StatutoryConfig) => JSON.stringify({ ptkp: x.pph21.ptkp, terCategoryOf: x.pph21.terCategoryOf, ter: x.pph21.ter, brackets: x.pph21.brackets }, null, 1);
+  const [tablesJson, setTablesJson] = useState(() => tables(c));
+  const [jsonError, setJsonError] = useState<string | null>(null);
+  const d = !canEdit || f.busy;
+  const setB = <K extends keyof typeof bp>(k: K, x: (typeof bp)[K]) => setBp((p) => ({ ...p, [k]: x }));
+  const bpField = (label: string, key: "healthEmployeeBp" | "healthEmployerBp" | "jhtEmployeeBp" | "jhtEmployerBp" | "jpEmployeeBp" | "jpEmployerBp" | "jkkEmployerBp" | "jkmEmployerBp", hint?: string) => (
+    <TextField label={`${label} (%)`} inputMode="decimal" disabled={d} value={pctText(bp[key])} onChange={(e) => setB(key, toBp(e.target.value) || 0)} error={f.fe[`bpjs.${key}`]} hint={hint} />
+  );
+
+  function save() {
+    setJsonError(null);
+    let t: { ptkp: StatutoryConfig["pph21"]["ptkp"]; terCategoryOf: StatutoryConfig["pph21"]["terCategoryOf"]; ter: StatutoryConfig["pph21"]["ter"]; brackets: StatutoryConfig["pph21"]["brackets"] };
+    try { t = JSON.parse(tablesJson); } catch { setJsonError("Tabel (JSON) tidak valid — periksa tanda kurung/koma, atau klik \"Pulihkan tabel bawaan\"."); return; }
+    const body: StatutoryConfig = {
+      version: 1, bpjs: bp,
+      pph21: { enabled: pph.enabled, ...t, biayaJabatanBp: toBp(pph.bj) || 0, biayaJabatanMonthlyCap: pph.bjCap, noNpwpMultiplierBp: toBp(pph.noNpwp) || 0, employerInsuranceInGross: pph.employerInsuranceInGross },
+    };
+    void f.run(() => api("/api/settings/statutory", { method: "PUT", body }), "Konfigurasi BPJS & PPh 21 disimpan. Konfirmasi ulang aturan diperlukan.");
+  }
+
+  return (
+    <Card>
+      <CardHeader title="BPJS & PPh 21 otomatis" description="Menghitung potongan BPJS karyawan, beban BPJS perusahaan, dan PPh 21 (TER; true-up pada masa pajak terakhir). Nonaktif secara bawaan. Komponen potongan BPJS/Pajak manual per karyawan menggantikan perhitungan otomatis."
+        actions={c.bpjs.enabled || c.pph21.enabled ? <Badge tone="blue">Aktif</Badge> : <Badge>Nonaktif</Badge>} />
+      <div className="p-5 pb-0"><Notice tone="warn"><strong>Verifikasi sebelum dipakai.</strong> Tarif, batas upah (mis. batas upah JP berubah tiap tahun), PTKP, dan tabel TER di bawah adalah nilai awal berdasarkan ketentuan yang diketahui saat pengembangan — bukan nasihat pajak. Cocokkan dengan peraturan/lampiran terkini (PP 58/2023, PMK 168/2023, ketentuan BPJS) atau konsultan Anda. Menyimpan perubahan mencabut konfirmasi aturan penggajian.</Notice></div>
+      <form className="space-y-4 p-5" aria-label="Form BPJS dan PPh 21" onSubmit={(e) => { e.preventDefault(); save(); }}>
+        {(f.error || jsonError) && <Notice tone="danger">{jsonError ?? f.error}</Notice>}
+        <fieldset className="grid gap-4 rounded-md border border-line p-4 sm:grid-cols-2">
+          <legend className="px-1 text-sm font-medium text-ink-soft">BPJS</legend>
+          <div className="sm:col-span-2">{check("Hitung BPJS otomatis", bp.enabled, (x) => setB("enabled", x), d, "Dasar upah = komponen pendapatan bertanda \"dasar BPJS\" (bawaan: gaji pokok + tunjangan jabatan). Peserta diatur per karyawan.")}</div>
+          {bpField("Kesehatan — porsi karyawan", "healthEmployeeBp")}{bpField("Kesehatan — porsi perusahaan", "healthEmployerBp")}
+          <MoneyInput label="Batas upah Kesehatan" disabled={d} value={bp.healthWageCap} onChange={(x) => setB("healthWageCap", x ?? 0)} error={f.fe["bpjs.healthWageCap"]} />
+          <span />
+          {bpField("JHT — porsi karyawan", "jhtEmployeeBp")}{bpField("JHT — porsi perusahaan", "jhtEmployerBp")}
+          {bpField("JP — porsi karyawan", "jpEmployeeBp")}{bpField("JP — porsi perusahaan", "jpEmployerBp")}
+          <MoneyInput label="Batas upah JP" disabled={d} value={bp.jpWageCap} onChange={(x) => setB("jpWageCap", x ?? 0)} error={f.fe["bpjs.jpWageCap"]} hint="Diperbarui BPJS Ketenagakerjaan tiap tahun — sesuaikan." />
+          <span />
+          {bpField("JKK — perusahaan", "jkkEmployerBp", "Menurut kelas risiko tempat kerja (0,24%–1,74%)")}{bpField("JKM — perusahaan", "jkmEmployerBp")}
+        </fieldset>
+        <fieldset className="grid gap-4 rounded-md border border-line p-4 sm:grid-cols-2">
+          <legend className="px-1 text-sm font-medium text-ink-soft">PPh 21</legend>
+          <div className="sm:col-span-2">{check("Hitung PPh 21 otomatis", pph.enabled, (x) => setPph((p) => ({ ...p, enabled: x })), d, "Januari–November memakai tarif efektif (TER). Masa pajak terakhir (Desember / karyawan berhenti) dihitung setahun dengan tarif Pasal 17 dan dikurangi PPh yang sudah dipotong (butuh data penggajian disetujui/terbit bulan sebelumnya di sistem).")}</div>
+          <TextField label="Biaya jabatan (%)" inputMode="decimal" disabled={d} value={pph.bj} onChange={(e) => setPph((p) => ({ ...p, bj: e.target.value }))} error={f.fe["pph21.biayaJabatanBp"]} />
+          <MoneyInput label="Batas biaya jabatan per bulan" disabled={d} value={pph.bjCap} onChange={(x) => setPph((p) => ({ ...p, bjCap: x ?? 0 }))} error={f.fe["pph21.biayaJabatanMonthlyCap"]} />
+          <TextField label="Pengali tarif tanpa NPWP (%)" inputMode="decimal" disabled={d} value={pph.noNpwp} onChange={(e) => setPph((p) => ({ ...p, noNpwp: e.target.value }))} error={f.fe["pph21.noNpwpMultiplierBp"]} hint="120 = tarif × 120%" />
+          <div className="self-end">{check("Premi Kesehatan/JKK/JKM yang dibayar perusahaan ikut penghasilan bruto", pph.employerInsuranceInGross, (x) => setPph((p) => ({ ...p, employerInsuranceInGross: x })), d)}</div>
+          <div className="sm:col-span-2 space-y-1.5">
+            <label htmlFor="stat-tables" className="block text-sm font-medium text-ink-soft">Tabel PTKP, kategori TER, tabel TER (A/B/C), dan lapisan Pasal 17 (JSON)</label>
+            <textarea id="stat-tables" rows={10} spellCheck={false} disabled={d} value={tablesJson} onChange={(e) => setTablesJson(e.target.value)} className="w-full rounded-md border border-line bg-white px-3 py-2 font-mono text-xs" />
+            <p className="text-xs text-muted">Tarif dalam basis point (25 = 0,25%). Batas atas naik tegas; baris terakhir <code>upTo: null</code>. Kesalahan ditolak dengan pesan jelas saat disimpan.</p>
+            {canEdit && <Button size="sm" disabled={f.busy} onClick={() => { setTablesJson(tables(defaultStatutoryConfig())); setJsonError(null); }}>Pulihkan tabel bawaan</Button>}
+            {Object.entries(f.fe).filter(([k]) => k.startsWith("pph21.ter") || k.startsWith("pph21.brackets") || k.startsWith("pph21.ptkp") || k.startsWith("pph21.terCategoryOf")).slice(0, 3).map(([k, m]) => <p key={k} role="alert" className="text-xs font-medium text-brand-700">{m}</p>)}
+          </div>
+        </fieldset>
+        {canEdit && <div className="flex flex-wrap gap-2"><Button type="submit" variant="primary" loading={f.busy}>Simpan konfigurasi</Button></div>}
       </form>
     </Card>
   );

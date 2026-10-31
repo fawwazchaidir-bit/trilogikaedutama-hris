@@ -59,6 +59,12 @@ export function PayslipView({ s, voided }: { s: PayslipSnapshot; voided?: boolea
         <div className="flex flex-wrap items-center justify-between gap-2"><p className="font-semibold">Gaji bersih diterima</p><p className="tabular text-2xl font-semibold text-brand-700">{R(s.netPay)}</p></div>
         {s.netPay >= 0 && <p className="mt-1 text-sm italic text-muted">Terbilang: {terbilang(s.netPay)}</p>}
       </div>
+      {s.employerContributions && s.employerContributions.length > 0 && (
+        <Card>
+          <CardHeader title="Beban perusahaan (informasi)" description="Iuran BPJS porsi pemberi kerja. Tidak dipotong dari gaji Anda dan tidak termasuk dalam gaji bersih." />
+          <ul className="space-y-1 p-5 text-sm">{s.employerContributions.map((l) => <li key={l.name} className="flex justify-between gap-4"><span>{l.name}</span><span className="tabular">{R(l.amount)}</span></li>)}</ul>
+        </Card>
+      )}
       {a && (
         <Card>
           <CardHeader title="Ringkasan kehadiran" description={formatDateRange(s.attendanceBasis.start, s.attendanceBasis.end)} />

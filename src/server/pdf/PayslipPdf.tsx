@@ -122,6 +122,15 @@ function SlipPage({ item }: { item: PayslipPdfItem }) {
         {d.netPay >= 0 && <Text style={s.terbilang}>Terbilang: {terbilang(d.netPay)}</Text>}
       </View>
 
+      {d.employerContributions && d.employerContributions.length > 0 && (
+        <View wrap={false}>
+          <Text style={s.sectionTitle}>BEBAN PERUSAHAAN (INFORMASI - TIDAK DIPOTONG DARI GAJI)</Text>
+          {d.employerContributions.map((l) => (
+            <View key={l.name} style={{ flexDirection: "row", justifyContent: "space-between", paddingVertical: 1 }}><Text>{pdfSafe(l.name)}</Text><Text>{rp(l.amount)}</Text></View>
+          ))}
+        </View>
+      )}
+
       {a && (
         <View wrap={false}>
           <Text style={s.sectionTitle}>RINGKASAN KEHADIRAN ({formatDateRange(d.attendanceBasis.start, d.attendanceBasis.end)})</Text>

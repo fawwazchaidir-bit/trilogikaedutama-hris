@@ -5,7 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useState } from "react";
 import {
   Bell, CalendarDays, CircleUserRound, ClipboardCheck, ClipboardList, FileText, KeyRound, LayoutDashboard, LogOut, Menu,
-  ScrollText, Settings, ShieldCheck, TableProperties, Users, UserCog, Wallet, X, Clock, FilePlus2,
+  ScrollText, Settings, ShieldCheck, TableProperties, Users, UserCog, Wallet, X, Clock, FilePlus2, Timer, BarChart3, ShieldEllipsis,
 } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { api } from "@/lib/api-client";
@@ -17,6 +17,10 @@ const ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
   "/absensi-saya": Clock,
   "/pengajuan-saya": FilePlus2,
   "/slip-saya": FileText,
+  "/lembur-saya": Timer,
+  "/lembur": Timer,
+  "/laporan": BarChart3,
+  "/akun": ShieldEllipsis,
   "/profil": CircleUserRound,
   "/karyawan": Users,
   "/jadwal": CalendarDays,
@@ -34,11 +38,11 @@ export interface ShellProps {
   nav: Pick<NavItem, "href" | "label" | "group">[];
   company: { name: string; logoUrl: string };
   unread: number;
-  pendingBadge: { href: string; count: number } | null;
+  pendingBadges: { href: string; count: number }[];
   children: React.ReactNode;
 }
 
-export function AppShell({ user, nav, company, unread, pendingBadge, children }: ShellProps) {
+export function AppShell({ user, nav, company, unread, pendingBadges, children }: ShellProps) {
   const pathname = usePathname();
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -70,7 +74,7 @@ export function AppShell({ user, nav, company, unread, pendingBadge, children }:
               {items.map((item) => {
                 const Icon = ICONS[item.href] ?? FileText;
                 const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
-                const badge = pendingBadge && pendingBadge.href === item.href && pendingBadge.count > 0 ? pendingBadge.count : 0;
+                const badge = pendingBadges.find((b) => b.href === item.href && b.count > 0)?.count ?? 0;
                 return (
                   <Link
                     key={item.href} href={item.href} onClick={() => setOpen(false)} aria-current={active ? "page" : undefined}
