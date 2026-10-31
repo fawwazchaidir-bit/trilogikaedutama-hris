@@ -39,13 +39,17 @@ export async function createSession(userId: string, ip: string | null, userAgent
  * Kebijakan "2FA wajib untuk admin" dibaca pada tiap permintaan; di-cache singkat agar tidak menambah query tiap request.
  * Perubahan pengaturan menghapus cache proses ini (instance lain mengikuti dalam ≤ 15 detik).
  */
-let policyCache: { at: number; adminsRequire2fa: boolean } | null = null;
-export function invalidateSecurityPolicyCache(): void { policyCache = null; }
+// Disimpan di globalThis: Next membangun grafik modul terpisah untuk halaman (RSC) dan route handler, sehingga variabel
+// tingkat-modul biasa TIDAK ikut terhapus saat pengaturan diubah lewat API (kebijakan baru baru berlaku di halaman setelah 15 detik).
+const policyStore = globalThis as unknown as { __securityPolicyCache?: { at: number; adminsRequire2fa: boolean } | null };
+export function invalidateSecurityPolicyCache(): void { policyStore.__securityPolicyCache = null; }
 async function adminsRequireTwoFactor(): Promise<boolean> {
-  if (policyCache && Date.now() - policyCache.at < 15_000) return policyCache.adminsRequire2fa;
+  const hit = policyStore.__securityPolicyCache;
+  if (hit && Date.now() - hit.at < 15_000) return hit.adminsRequire2fa;
   const s = await prisma.companySettings.findUnique({ where: { id: 1 }, select: { twoFactorRequiredForAdmins: true } });
-  policyCache = { at: Date.now(), adminsRequire2fa: !!s?.twoFactorRequiredForAdmins };
-  return policyCache.adminsRequire2fa;
+  const fresh = { at: Date.now(), adminsRequire2fa: !!s?.twoFactorRequiredForAdmins };
+  policyStore.__securityPolicyCache = fresh;
+  return fresh.adminsRequire2fa;
 }
 
 export interface SessionUser extends Actor {
