@@ -102,6 +102,7 @@ test("HR melihat foto absensi di rincian rekap; berkas JPEG nyata (bercap), hany
   const img = await hr.request.get(href);
   expect(img.status()).toBe(200);
   expect(img.headers()["content-type"]).toBe("image/jpeg");
+  expect(img.headers()["cache-control"]).toBe("private, no-store"); // foto berwajah tidak boleh tersimpan di cache peramban
   const bytes = await img.body();
   expect(bytes.length).toBeGreaterThan(5_000);
   expect([...bytes.subarray(0, 3)]).toEqual([0xff, 0xd8, 0xff]);

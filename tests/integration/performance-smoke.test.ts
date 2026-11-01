@@ -74,7 +74,7 @@ describe.skipIf(!process.env.PERF)(`beban ringan — ${N} karyawan × 1 bulan`, 
   it("penggajian: membuat & menghitung periode untuk semua karyawan; laporan biaya/kepatuhan setelahnya", async () => {
     const { id } = await timed("buat periode gaji (hitung semua)", () => createRun(fx.hr, { label: `Gaji ${month}`, periodStart: from, periodEnd: to }), 20_000);
     const run = await timed("buka periode gaji", () => getRun(fx.hr, id), 5000);
-    expect(run.items).toHaveLength(N + 3 - 0 - 0); // 3 karyawan fixtures tanpa komponen gaji dilewati? → disesuaikan di bawah
+    expect(run.items).toHaveLength(N); // 3 karyawan fixture tanpa komponen gaji dilewati
     await timed("hitung ulang periode", () => calculateRun(fx.hr, id), 20_000);
     await timed("laporan biaya SDM", () => getCostReport(fx.superAdmin, { year: Number(month.slice(0, 4)) }), 5000);
     await timed("laporan kepatuhan BPJS/PPh 21", () => getComplianceReport(fx.superAdmin, { month }), 5000);

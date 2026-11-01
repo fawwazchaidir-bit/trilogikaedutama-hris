@@ -53,6 +53,9 @@ Aplikasi hanya mendengarkan loopback; pasang Caddy/Nginx dengan TLS. Contoh Cadd
 
 Catatan: **WhatsApp Cloud API** hanya mengirim teks bebas dalam jendela 24 jam sejak pesan terakhir pengguna; untuk notifikasi proaktif buat template (satu variabel isi `{{1}}`) di Meta, tunggu disetujui, lalu isi `WHATSAPP_TEMPLATE_NAME`. **Fonnte**: sambungkan perangkat WhatsApp di dashboard Fonnte dan isi tokennya. Integrasi dengan penyedia sungguhan belum diuji di lingkungan pengembangan.
 
+## Jam server
+Aplikasi dan PostgreSQL **harus tersinkron NTP** (selisih ≤ beberapa detik). Waktu absensi, masa berlaku sesi/tautan reset, batas laju, dan jendela deteksi lokasi memakai jam aplikasi, sedangkan kolom `createdAt` memakai jam basis data; selisih besar membuat perbandingan keduanya keliru (ditemukan pada uji silang waktu — lihat docs/AUDIT.md).
+
 ## Foto absensi (bukti dinas luar)
 Tidak butuh konfigurasi jaringan. Aplikasi memakai **sharp** (pengolah gambar native; ikut terpasang lewat `npm ci`, memerlukan Linux glibc seperti image `node:22-bookworm-slim`, bukan Alpine) dan font cap di `public/fonts/` (DejaVu Sans Mono Bold, lisensi bebas — ikut disalin ke image oleh `COPY public`). Cap digambar sebagai path vektor, jadi **tidak perlu menginstal font di server**. Kamera & lokasi di browser hanya bekerja lewat **HTTPS**. Foto disimpan di basis data (tabel `stored_files`, ±100–400 KB per foto): perhitungkan pertumbuhan penyimpanan & cadangan (±2 foto/karyawan/hari) dan tentukan masa simpan di Pengaturan (bawaan 6 bulan; foto lebih tua dihapus otomatis tiap 6 jam, ukuran basis data lalu stabil — ruang yang dibebaskan dipakai ulang oleh PostgreSQL). Foto yang dihapus **masih ada di cadangan** sampai `BACKUP_KEEP_DAYS` lewat. Pemicu eksternal (opsional): `RETENTION_WORKER=false` + `CRON_SECRET`, lalu cron harian `curl -fsS -X POST -H "Authorization: Bearer $CRON_SECRET" https://hris.contoh.id/api/internal/retention`.
 
