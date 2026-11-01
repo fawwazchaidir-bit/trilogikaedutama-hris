@@ -3,8 +3,8 @@
 Aplikasi web internal untuk **data karyawan, absensi, rekap otomatis, penggajian, dan slip gaji (PDF)** — Bahasa Indonesia,
 responsif (komputer & ponsel), tampilan mengikuti aplikasi invoice Trilogika agar familier.
 
-> **Bukan mockup.** Setiap tombol terhubung ke database PostgreSQL dan diuji: 539 tes unit/integrasi (terhadap PostgreSQL sungguhan)
-> dan 59 tes E2E di browser (login → absensi → pengajuan → persetujuan → penggajian → slip PDF → pembatalan/revisi → 2FA → lembur → laporan).
+> **Bukan mockup.** Setiap tombol terhubung ke database PostgreSQL dan diuji: 552 tes unit/integrasi (terhadap PostgreSQL sungguhan)
+> dan 73 tes E2E di browser (login → absensi → pengajuan → persetujuan → penggajian → slip PDF → pembatalan/revisi → 2FA → lembur → laporan).
 > Data demo bersifat fiktif. **Baca [docs/KEPUTUSAN-BISNIS.md](docs/KEPUTUSAN-BISNIS.md) sebelum dipakai operasional.**
 
 ## Peran
@@ -92,5 +92,6 @@ Seed demo **menolak** berjalan bila `NODE_ENV=production`, host database bukan l
 - [KEPUTUSAN-BISNIS](docs/KEPUTUSAN-BISNIS.md) — **hal yang perlu Anda tentukan sebelum operasional** + keterbatasan
 - [ARCHITECTURE](docs/ARCHITECTURE.md) — struktur, basis data, cara status & gaji dihitung
 - [SECURITY](docs/SECURITY.md) — kontrol keamanan & privasi
+- [AUDIT](docs/AUDIT.md) — hasil audit pra-PR (temuan & perbaikan, uji silang waktu/zona, sapuan rute API, uji antar sistem, latihan pemasangan) dan **batasannya**
 - [DEPLOYMENT](docs/DEPLOYMENT.md) — konfigurasi, Docker, cadangan/pemulihan
 - [API](docs/API.md) — daftar endpoint
