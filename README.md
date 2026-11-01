@@ -3,7 +3,7 @@
 Aplikasi web internal untuk **data karyawan, absensi, rekap otomatis, penggajian, dan slip gaji (PDF)** — Bahasa Indonesia,
 responsif (komputer & ponsel), tampilan mengikuti aplikasi invoice Trilogika agar familier.
 
-> **Bukan mockup.** Setiap tombol terhubung ke database PostgreSQL dan diuji: 516 tes unit/integrasi (terhadap PostgreSQL sungguhan)
+> **Bukan mockup.** Setiap tombol terhubung ke database PostgreSQL dan diuji: 539 tes unit/integrasi (terhadap PostgreSQL sungguhan)
 > dan 59 tes E2E di browser (login → absensi → pengajuan → persetujuan → penggajian → slip PDF → pembatalan/revisi → 2FA → lembur → laporan).
 > Data demo bersifat fiktif. **Baca [docs/KEPUTUSAN-BISNIS.md](docs/KEPUTUSAN-BISNIS.md) sebelum dipakai operasional.**
 
