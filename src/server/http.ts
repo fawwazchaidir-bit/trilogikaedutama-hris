@@ -50,9 +50,17 @@ export async function readJson<T>(req: Request, schema: ZodType<T>, maxBytes = M
 }
 
 /** Ubah galat apa pun menjadi respons JSON yang aman (pesan guard database kita ditulis untuk pengguna; sisanya disamarkan). */
+/** JSON API tidak boleh disimpan cache (browser/proxy/CDN): isinya data pribadi (gaji, absensi, rekening tersamar). */
+const NO_STORE = { "Cache-Control": "no-store" } as const;
+const json = (body: unknown, init: { status?: number; headers?: HeadersInit } = {}): NextResponse => {
+  const h = new Headers(init.headers);
+  if (!h.has("cache-control")) h.set("cache-control", NO_STORE["Cache-Control"]);
+  return NextResponse.json(body, { status: init.status, headers: h });
+};
+
 export function errorResponse(err: unknown): NextResponse {
   if (err instanceof AppError) {
-    return NextResponse.json(
+    return json(
       { error: { code: err.code, message: err.message, fieldErrors: err.fieldErrors, ...err.extra } },
       { status: err.status },
     );
@@ -60,30 +68,30 @@ export function errorResponse(err: unknown): NextResponse {
   if (err instanceof ZodError) {
     const fieldErrors = zodFieldErrors(err);
     const first = Object.values(fieldErrors)[0] ?? "Data tidak valid.";
-    return NextResponse.json({ error: { code: "VALIDATION", message: first, fieldErrors } }, { status: 422 });
+    return json({ error: { code: "VALIDATION", message: first, fieldErrors } }, { status: 422 });
   }
   if (err instanceof Prisma.PrismaClientKnownRequestError) {
     if (err.code === "P2002") {
-      return NextResponse.json({ error: { code: "CONFLICT", message: "Data dengan nilai yang sama sudah ada." } }, { status: 409 });
+      return json({ error: { code: "CONFLICT", message: "Data dengan nilai yang sama sudah ada." } }, { status: 409 });
     }
     // P2023: nilai kolom tidak sesuai tipenya — di sini hampir selalu id ngawur pada URL (bukan UUID) → sama dengan "tidak ada".
     if (err.code === "P2025" || err.code === "P2023") {
-      return NextResponse.json({ error: { code: "NOT_FOUND", message: "Data tidak ditemukan." } }, { status: 404 });
+      return json({ error: { code: "NOT_FOUND", message: "Data tidak ditemukan." } }, { status: 404 });
     }
     if (err.code === "P2003") {
-      return NextResponse.json({ error: { code: "CONFLICT", message: "Data masih dipakai oleh data lain." } }, { status: 409 });
+      return json({ error: { code: "CONFLICT", message: "Data masih dipakai oleh data lain." } }, { status: 409 });
     }
   }
   // Guard database (trigger) — pesan trigger kita memang ditulis untuk pengguna dan diawali "HRIS-GUARD:".
   const msg = err instanceof Error ? err.message : "";
   const guard = /HRIS-GUARD: ([^\n"]+)/.exec(msg)?.[1];
-  if (guard) return NextResponse.json({ error: { code: "CONFLICT", message: guard.trim() } }, { status: 409 });
+  if (guard) return json({ error: { code: "CONFLICT", message: guard.trim() } }, { status: 409 });
   if (/violates check constraint/i.test(msg)) {
-    return NextResponse.json({ error: { code: "VALIDATION", message: "Data ditolak oleh aturan integritas database. Periksa kembali isian." } }, { status: 422 });
+    return json({ error: { code: "VALIDATION", message: "Data ditolak oleh aturan integritas database. Periksa kembali isian." } }, { status: 422 });
   }
   // Jangan bocorkan detail internal ke pengguna.
   console.error("[api] unhandled error:", err);
-  return NextResponse.json({ error: { code: "INTERNAL", message: "Terjadi kesalahan pada server. Coba lagi." } }, { status: 500 });
+  return json({ error: { code: "INTERNAL", message: "Terjadi kesalahan pada server. Coba lagi." } }, { status: 500 });
 }
 
 interface HandlerArgs<P> {
@@ -133,10 +141,8 @@ export function publicRoute<P = Record<string, never>>(handler: (args: PublicHan
 
 function toResponse(result: unknown): Response {
   if (result instanceof Response) return result;
-  if (result instanceof ApiResult) {
-    return NextResponse.json({ data: result.data }, { status: result.status, headers: result.headers });
-  }
-  return NextResponse.json({ data: result ?? null });
+  if (result instanceof ApiResult) return json({ data: result.data }, { status: result.status, headers: result.headers });
+  return json({ data: result ?? null });
 }
 
 /** Isi JSON permintaan apa adanya; validasi dilakukan oleh service (`parseInput`) agar aturan sama di semua jalur. */

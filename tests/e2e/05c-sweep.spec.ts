@@ -140,9 +140,9 @@ test("CSRF: permintaan pengubah tanpa Origin / dengan Origin asing ditolak 403 (
 test("batas hak akses: Karyawan ditolak di rute admin; HR ditolak di rute khusus Super Admin; Super Admin diterima", async () => {
   const EMPLOYEE_DENIED: [Method, string][] = [
     ["GET", "/api/employees"], ["GET", "/api/employees/export"], ["GET", "/api/payroll"], ["GET", "/api/audit-logs"], ["GET", "/api/users"], ["GET", "/api/leaves"],
-    ["GET", "/api/schedules"], ["GET", "/api/schedule-assignments"], ["GET", "/api/settings"], ["GET", "/api/settings/deliveries"], ["GET", "/api/recap"], ["GET", "/api/recap/export"],
-    ["GET", "/api/reports/export?kind=kehadiran&format=csv"], ["GET", "/api/location"], ["GET", "/api/overtime"], ["GET", "/api/components"],
-    ["POST", "/api/payroll"], ["POST", "/api/employees"], ["POST", "/api/users"], ["PUT", "/api/settings/attendance"], ["PUT", "/api/settings/security"], ["PUT", "/api/settings/statutory"],
+    ["GET", "/api/schedules"], ["GET", "/api/schedule-assignments"], ["GET", "/api/settings"], ["GET", "/api/settings/deliveries"],
+    ["GET", "/api/reports/export?kind=kehadiran&format=csv"], ["GET", "/api/location"], ["GET", "/api/overtime"], ["GET", `/api/components?employeeId=${UUID}`],
+    ["POST", "/api/payroll"], ["POST", "/api/employees"], ["PUT", "/api/settings/attendance"], ["PUT", "/api/settings/security"], ["PUT", "/api/settings/statutory"],
     ["POST", `/api/payroll/${UUID}/approve`], ["POST", `/api/users/${UUID}/reset-2fa`], ["POST", `/api/location/${UUID}/review`], ["POST", `/api/overtime/${UUID}/review`], ["POST", `/api/leaves/${UUID}/review`],
     ["POST", "/api/attendance/correct"],
   ];
@@ -219,3 +219,73 @@ test("jawaban galat seragam: JSON {error:{code,message}}; 401 tanpa membocorkan 
   expect(unknown.status()).toBe(404);
   expect(await unknown.text()).not.toMatch(SECRET_LEAK);
 });
+
+test("rekap karyawan DIKUNCI ke dirinya sendiri: parameter employeeId/pencarian tidak dapat membuka data karyawan lain (JSON & ekspor)", async () => {
+  const me = (await (await ctxs.employee.get("/api/me")).json()).data as { employeeId: string };
+  const others = (await (await ctxs.hr.get("/api/employees?pageSize=100")).json()).data.items as { id: string; fullName: string }[];
+  const other = others.find((e) => e.id !== me.employeeId)!;
+  for (const q of ["", `&employeeId=${other.id}`, `&q=${encodeURIComponent(other.fullName)}`, "&includeInactive=1"]) {
+    const j = (await (await ctxs.employee.get(`/api/recap?view=bulanan${q}`)).json()).data;
+    expect(j.page.items.map((x: { employeeId: string }) => x.employeeId), `recap${q}`).toEqual([me.employeeId]);
+  }
+  const csv = await (await ctxs.employee.get(`/api/recap/export?view=bulanan&format=csv&employeeId=${other.id}`)).text();
+  expect(csv).not.toContain(other.fullName);
+  expect((await ctxs.employee.get(`/api/recap/detail?employeeId=${other.id}`)).status()).toBe(403);
+  expect((await ctxs.employee.get(`/api/attendance/corrections?employeeId=${other.id}`)).status()).toBe(200); // dikunci ke diri sendiri
+  const rows = (await (await ctxs.employee.get(`/api/attendance/corrections?employeeId=${other.id}`)).json()).data as { employeeId: string }[];
+  expect(rows.every((r) => r.employeeId === me.employeeId)).toBe(true);
+  expect((await ctxs.employee.get(`/api/leave-balance?employeeId=${other.id}`)).status()).toBe(403);
+});
+
+test("eskalasi hak dengan badan YANG VALID: Karyawan/HR tidak dapat membuat/mengubah akun di atas haknya; tidak ada perubahan tersimpan", async () => {
+  const meEmp = (await (await ctxs.employee.get("/api/me")).json()).data as { id?: string; userId?: string; employeeId: string };
+  const ownUserId = (meEmp.id ?? meEmp.userId)!;
+  const adminId = ((await (await ctxs.admin.get("/api/me")).json()).data as { id?: string; userId?: string });
+  const adminUserId = (adminId.id ?? adminId.userId)!;
+  const strong = "Sandi-Kuat-Uji-2026!xQ";
+  const mk = (role: string) => ({ email: `eskalasi-${role.toLowerCase()}@demo.hris.test`, name: "Eskalasi Uji", role, password: strong });
+
+  // Karyawan: tidak boleh membuat akun apa pun, menaikkan perannya sendiri, atau mereset password siapa pun.
+  for (const role of ["EMPLOYEE", "HR_ADMIN", "SUPER_ADMIN"]) expect((await send(ctxs.employee, "POST", "/api/users", { body: mk(role) })).status(), `Karyawan membuat ${role}`).toBe(403);
+  expect((await send(ctxs.employee, "PATCH", `/api/users/${ownUserId}`, { body: { role: "SUPER_ADMIN" } })).status()).toBe(403);
+  expect((await send(ctxs.employee, "PATCH", `/api/users/${adminUserId}`, { body: { isActive: false } })).status()).toBe(403);
+  expect((await send(ctxs.employee, "POST", `/api/users/${adminUserId}/password`, { body: { password: strong } })).status()).toBe(403);
+  // HR: boleh mengelola Karyawan, TIDAK boleh membuat/mengubah/mereset akun admin (HR maupun Super Admin).
+  for (const role of ["HR_ADMIN", "SUPER_ADMIN"]) expect((await send(ctxs.hr, "POST", "/api/users", { body: mk(role) })).status(), `HR membuat ${role}`).toBe(403);
+  expect((await send(ctxs.hr, "PATCH", `/api/users/${adminUserId}`, { body: { isActive: false, role: "EMPLOYEE" } })).status()).toBe(403);
+  expect((await send(ctxs.hr, "POST", `/api/users/${adminUserId}/password`, { body: { password: strong } })).status()).toBe(403);
+  // Akun Super Admin tetap utuh & masih dapat masuk; tidak ada akun "eskalasi" yang terbentuk.
+  const users = (await (await ctxs.admin.get("/api/users")).json()).data as { email: string; role: string; isActive: boolean }[];
+  expect(users.some((u) => u.email.startsWith("eskalasi-"))).toBe(false);
+  expect(users.find((u) => u.email === USERS.pimpinan)).toMatchObject({ role: "SUPER_ADMIN", isActive: true });
+  const relog = await pwRequest.newContext({ baseURL: base });
+  expect((await relog.post("/api/auth/login", { data: { email: USERS.pimpinan, password: E2E_PASSWORD }, headers: { origin: base } })).status()).toBe(200);
+  await relog.dispose();
+  // Unggahan oleh pihak tak berhak ditolak SEBELUM badan dibaca (logo: HR; foto karyawan: Karyawan; impor: Karyawan).
+  const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNgYGD4DwABBAEAX+XDSwAAAABJRU5ErkJggg==", "base64");
+  const up = (c: APIRequestContext, url: string) => c.post(url, { multipart: { file: { name: "x.png", mimeType: "image/png", buffer: png } }, headers: { origin: base }, failOnStatusCode: false });
+  expect((await up(ctxs.hr, "/api/settings/logo")).status()).toBe(403);
+  expect((await up(ctxs.employee, `/api/employees/${UUID}/photo`)).status()).toBe(403);
+  expect((await up(ctxs.employee, "/api/employees/import")).status()).toBe(403);
+});
+
+test("Cache-Control: SEMUA respons JSON API (sukses & galat) tidak boleh disimpan cache", async () => {
+  const bad: string[] = [];
+  const seen = { json: 0 };
+  for (const e of ENDPOINTS.filter((x) => x.method === "GET" && x.route !== "/api/files/[id]" && !x.route.includes("/pdf") && !x.route.includes("/export") && !x.route.includes("/slips") && !x.route.endsWith("/template"))) {
+    for (const [role, c] of [["admin", ctxs.admin], ["anon", ctxs.anon]] as const) {
+      const r = await send(c, "GET", withQuery(e));
+      if (!(r.headers()["content-type"] ?? "").includes("application/json")) continue;
+      seen.json++;
+      if (!/no-store/.test(r.headers()["cache-control"] ?? "")) bad.push(`${role} GET ${e.route} (${r.status()}) cache-control="${r.headers()["cache-control"] ?? ""}"`);
+    }
+  }
+  const post = await send(ctxs.admin, "POST", "/api/employees", { body: {} });
+  if (!/no-store/.test(post.headers()["cache-control"] ?? "")) bad.push("POST galat tanpa no-store");
+  expect(seen.json).toBeGreaterThan(40);
+  expect(bad, bad.join("\n")).toEqual([]);
+  // Berkas pribadi (slip PDF, ekspor) tetap dilarang dicache oleh header mereka sendiri.
+  const slips = (await (await ctxs.employee.get("/api/payslips")).json()).data as { id: string }[];
+  if (slips[0]) expect((await ctxs.employee.get(`/api/payslips/${slips[0].id}/pdf`)).headers()["cache-control"] ?? "").toMatch(/no-store|private/);
+});
+
