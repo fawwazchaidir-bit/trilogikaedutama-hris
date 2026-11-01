@@ -49,3 +49,43 @@ test("Super Admin mengatur penanda tangan (nama, jabatan, kota) dan mengunggah g
   await expect(page.getByRole("img", { name: /Tanda tangan Fawwaz Chaidir/ })).toBeVisible();
   await expect(page.getByRole("button", { name: "Cabut gambar" })).toBeVisible();
 });
+
+// Regresi: rute unggah (logo, foto karyawan, tanda tangan) membuat berkas dan memasangnya dalam satu transaksi. Dulu pemasangan memakai
+// transaksi terpisah yang tidak melihat berkas yang belum ter-commit → "File ... tidak valid" untuk SETIAP unggahan.
+test("unggah logo lewat UI berhasil dan dipakai (tidak lagi 'File logo tidak valid')", async ({ page }) => {
+  await login(page, USERS.pimpinan);
+  await page.goto("/pengaturan");
+  const png = await signaturePng(page);
+  await page.locator("#logo-file").setInputFiles({ name: "logo-baru.png", mimeType: "image/png", buffer: png });
+  await expect(page.getByText("Logo diperbarui.")).toBeVisible();
+  await expect(page.getByRole("img", { name: "Logo saat ini" })).toHaveAttribute("src", /\/api\/files\/[0-9a-f-]{36}/);
+  const src = (await page.getByRole("img", { name: "Logo saat ini" }).getAttribute("src"))!;
+  const file = await page.request.get(src);
+  expect(file.status()).toBe(200);
+  expect(file.headers()["content-type"]).toBe("image/png");
+});
+
+test("unggah foto karyawan (API rute foto) berhasil; foto hanya dapat dibuka HR/pemilik; Karyawan tidak boleh mengunggah", async ({ browser }) => {
+  const hrCtx = await browser.newContext();
+  const hr = await hrCtx.newPage();
+  await login(hr, USERS.hr);
+  const origin = new URL(hr.url()).origin;
+  const people = (await (await hr.request.get("/api/employees?q=Budi")).json()).data.items as { id: string; fullName: string }[];
+  const budi = people.find((e) => /^Budi/.test(e.fullName))!;
+  const png = await signaturePng(hr);
+  const up = await hr.request.post(`/api/employees/${budi.id}/photo`, { multipart: { file: { name: "foto.png", mimeType: "image/png", buffer: png } }, headers: { origin } });
+  expect(up.status(), await up.text()).toBe(201);
+  const fileId = (await up.json()).data.id as string;
+  expect((await hr.request.get(`/api/files/${fileId}`)).status()).toBe(200);
+  const detail = (await (await hr.request.get(`/api/employees/${budi.id}`)).json()).data;
+  expect(JSON.stringify(detail)).toContain(fileId);
+
+  const ayu = await browser.newContext();
+  const ap = await ayu.newPage();
+  await login(ap, USERS.ayu);
+  expect((await ap.request.get(`/api/files/${fileId}`)).status()).toBe(403); // foto karyawan lain
+  expect((await ap.request.post(`/api/employees/${budi.id}/photo`, { multipart: { file: { name: "x.png", mimeType: "image/png", buffer: png } }, headers: { origin } })).status()).toBe(403);
+  await ayu.close();
+  await hrCtx.close();
+});
+

@@ -1,7 +1,7 @@
 import "server-only";
 import { z } from "zod";
 import type { CompanySettings, Prisma } from "@prisma/client";
-import { prisma, transaction } from "../db";
+import { prisma, transaction, type Tx } from "../db";
 import { Errors } from "../errors";
 import { parseInput } from "../validate";
 import { assertCan, type Actor } from "../actor";
@@ -132,9 +132,13 @@ export async function updateCompany(actor: Actor, raw: unknown): Promise<void> {
   });
 }
 
-export async function setLogo(actor: Actor, fileId: string): Promise<void> {
+/**
+ * `tx`: WAJIB diteruskan bila berkas baru dibuat di transaksi yang sama (rute unggah) — transaksi baru tidak dapat melihat
+ * baris yang belum di-commit, sehingga berkas dianggap "tidak valid". Tanpa `tx`, fungsi membuka transaksinya sendiri.
+ */
+export async function setLogo(actor: Actor, fileId: string, outer?: Tx): Promise<void> {
   assertCan(actor, "settings:manage");
-  await transaction(async (tx) => {
+  await (outer ? (fn: (t: Tx) => Promise<void>) => fn(outer) : transaction)(async (tx) => {
     const f = await tx.storedFile.findUnique({ where: { id: fileId }, select: { kind: true } });
     if (f?.kind !== "LOGO") throw Errors.validation("File logo tidak valid.");
     const before = await tx.companySettings.findUniqueOrThrow({ where: { id: 1 }, select: { logoFileId: true } });
@@ -144,9 +148,9 @@ export async function setLogo(actor: Actor, fileId: string): Promise<void> {
 }
 
 /** Pasang gambar tanda tangan (file jenis SIGNATURE) atau cabut (null). Slip yang sudah terbit tidak berubah (snapshot). */
-export async function setSignature(actor: Actor, fileId: string | null): Promise<void> {
+export async function setSignature(actor: Actor, fileId: string | null, outer?: Tx): Promise<void> {
   assertCan(actor, "settings:manage");
-  await transaction(async (tx) => {
+  await (outer ? (fn: (t: Tx) => Promise<void>) => fn(outer) : transaction)(async (tx) => {
     if (fileId) {
       const f = await tx.storedFile.findUnique({ where: { id: fileId }, select: { kind: true } });
       if (f?.kind !== "SIGNATURE") throw Errors.validation("File tanda tangan tidak valid.");

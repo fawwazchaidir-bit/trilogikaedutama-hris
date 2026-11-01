@@ -13,7 +13,7 @@ export const POST = route(async ({ req, actor }) => {
   const png = await normalizeSignature(bytes);
   return created(await transaction(async (tx) => {
     const file = await storeFile(actor, "SIGNATURE", { name: "tanda-tangan.png", bytes: png }, tx);
-    await setSignature(actor, file.id);
+    await setSignature(actor, file.id, tx);
     return file;
   }));
 });

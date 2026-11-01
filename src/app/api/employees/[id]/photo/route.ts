@@ -11,7 +11,7 @@ export const POST = route<{ id: string }>(async ({ req, actor, params }) => {
   const { name, bytes } = await readUpload(req);
   return created(await transaction(async (tx) => {
     const file = await storeFile(actor, "EMPLOYEE_PHOTO", { name, bytes }, tx);
-    await setEmployeePhoto(actor, params.id, file.id);
+    await setEmployeePhoto(actor, params.id, file.id, tx);
     return file;
   }));
 });
