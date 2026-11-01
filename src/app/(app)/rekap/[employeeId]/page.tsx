@@ -49,7 +49,9 @@ export default async function RecapDetailPage({ params, searchParams }: { params
               <Td className="whitespace-nowrap text-xs">{(d.photos[x.date] ?? []).length === 0 ? <span className="text-muted">—</span> : (
                 <span className="flex flex-col gap-1">{d.photos[x.date]!.map((p) => (
                   <span key={p.kind} className="flex items-center gap-2">
-                    <a href={p.url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-brand-700 hover:underline"><Camera className="size-3" />{p.kind === "CHECK_IN" ? "Masuk" : "Pulang"}</a>
+                    {p.url
+                      ? <a href={p.url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-brand-700 hover:underline"><Camera className="size-3" />{p.kind === "CHECK_IN" ? "Masuk" : "Pulang"}</a>
+                      : <span className="inline-flex items-center gap-1 text-muted" title={`Foto dihapus otomatis (retensi) · ${p.stamp.split("\n").join(" · ")}`}><Camera className="size-3" />{p.kind === "CHECK_IN" ? "Masuk" : "Pulang"} · foto dihapus</span>}
                     {p.mapUrl && <a href={p.mapUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-0.5 text-muted hover:underline" aria-label={`Lokasi foto ${p.kind === "CHECK_IN" ? "masuk" : "pulang"}`}><MapPin className="size-3" />peta</a>}
                   </span>
                 ))}</span>

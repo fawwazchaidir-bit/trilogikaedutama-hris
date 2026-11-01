@@ -45,6 +45,8 @@ const schema = z.object({
   CRON_SECRET: opt(z.string().min(16, "CRON_SECRET minimal 16 karakter")),
   /** Jalankan pekerja pengiriman di dalam proses aplikasi (default true). Matikan bila memakai pemicu eksternal. */
   DELIVERY_WORKER: bool.default(true),
+  /** Jalankan penghapusan foto absensi kedaluwarsa (retensi) di dalam proses aplikasi (default true). Matikan bila memakai pemicu eksternal /api/internal/retention. */
+  RETENTION_WORKER: bool.default(true),
   /** Masa berlaku tautan "lupa password" (menit). */
   PASSWORD_RESET_MINUTES: int(30, 5, 1440),
   /** Kunci AES-256 (32 byte, base64) untuk enkripsi nomor rekening. Buat: `openssl rand -base64 32`. */

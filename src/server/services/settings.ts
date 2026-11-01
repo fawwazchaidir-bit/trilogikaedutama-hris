@@ -66,7 +66,7 @@ export interface SettingsDto {
   attendance: {
     lateMinutesAfterTolerance: boolean; locationEnabled: boolean; locationName: string | null; locationLat: number | null; locationLng: number | null;
     locationRadiusMeters: number; locationMaxAccuracyMeters: number; requestBackdateDays: number; confirmedAt: string | null;
-    locationSpoofMode: "OFF" | "FLAG" | "BLOCK"; photoMode: "OFF" | "OPTIONAL" | "REQUIRED"; photoRequireLocation: boolean;
+    locationSpoofMode: "OFF" | "FLAG" | "BLOCK"; photoMode: "OFF" | "OPTIONAL" | "REQUIRED"; photoRequireLocation: boolean; photoRetentionMonths: number;
   };
   leave: { annualLeaveQuota: number; allowNegativeLeaveBalance: boolean };
   payroll: FullPayrollRules & { confirmedAt: string | null };
@@ -91,7 +91,7 @@ export async function getSettingsDto(actor: Actor): Promise<SettingsDto> {
       locationLat: s.locationLat, locationLng: s.locationLng, locationRadiusMeters: s.locationRadiusMeters,
       locationMaxAccuracyMeters: s.locationMaxAccuracyMeters, requestBackdateDays: s.requestBackdateDays,
       confirmedAt: s.attendancePolicyConfirmedAt?.toISOString() ?? null,
-      locationSpoofMode: s.locationSpoofMode, photoMode: s.attendancePhotoMode, photoRequireLocation: s.attendancePhotoRequireLocation,
+      locationSpoofMode: s.locationSpoofMode, photoMode: s.attendancePhotoMode, photoRequireLocation: s.attendancePhotoRequireLocation, photoRetentionMonths: s.attendancePhotoRetentionMonths,
     },
     leave: { annualLeaveQuota: s.annualLeaveQuota, allowNegativeLeaveBalance: s.allowNegativeLeaveBalance },
     payroll: { ...payrollRulesOf(s), confirmedAt: s.payrollRulesConfirmedAt?.toISOString() ?? null },
@@ -156,6 +156,8 @@ export const attendancePolicySchema = z.object({
   attendancePhotoMode: z.enum(["OFF", "OPTIONAL", "REQUIRED"]).optional(),
   /** Foto harus disertai koordinat (izin lokasi) agar dapat dicap lokasinya. */
   attendancePhotoRequireLocation: z.boolean().optional(),
+  /** Foto lebih tua dari ini dihapus otomatis (jejak teks cap tetap). 0 = simpan selamanya (tidak disarankan). */
+  attendancePhotoRetentionMonths: z.number({ error: "Masa simpan harus berupa angka" }).int("Masa simpan harus bilangan bulat (bulan)").min(0, "Minimal 0 (simpan selamanya)").max(120, "Maksimal 120 bulan").optional(),
 }).superRefine((v, ctx) => {
   if (v.locationEnabled && (v.locationLat === null || v.locationLng === null)) {
     ctx.addIssue({ code: "custom", path: ["locationLat"], message: "Isi titik lokasi (lintang & bujur) sebelum mengaktifkan absensi berbasis lokasi" });

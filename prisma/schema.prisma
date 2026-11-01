@@ -783,6 +783,8 @@ model CompanySettings {
   attendancePhotoMode            AttendancePhotoMode @default(OFF)
   /// Foto harus disertai koordinat (izin lokasi) agar dapat dicap lokasinya.
   attendancePhotoRequireLocation Boolean             @default(true)
+  /// Foto absensi yang lebih tua dari ini dihapus otomatis (jejak teks cap tetap). 0 = simpan selamanya (tidak disarankan).
+  attendancePhotoRetentionMonths Int                 @default(6)
   /// Admin & Super Admin wajib mengaktifkan 2FA.
   twoFactorRequiredForAdmins     Boolean             @default(false)
 
@@ -921,7 +923,8 @@ model AttendancePhoto {
   attendanceId String?   @db.Uuid
   employeeId   String    @db.Uuid
   kind         PunchKind
-  fileId       String    @unique @db.Uuid
+  /// NULL setelah foto dihapus oleh retensi (jejak teks cap tetap ada).
+  fileId       String?   @unique @db.Uuid
   /// Waktu server yang tercetak pada foto (sama dengan waktu check-in/out yang dicatat).
   capturedAt   DateTime
   lat          Float?
@@ -929,14 +932,17 @@ model AttendancePhoto {
   accuracy     Float?
   /// Teks cap yang tercetak pada foto (untuk audit; baris dipisah \n).
   stamp        String
+  /// Waktu foto dihapus oleh retensi; NULL = foto masih ada.
+  purgedAt     DateTime?
   createdAt    DateTime  @default(now())
 
   attendance Attendance? @relation(fields: [attendanceId], references: [id], onDelete: SetNull)
   employee   Employee    @relation(fields: [employeeId], references: [id], onDelete: Restrict)
-  file       StoredFile  @relation(fields: [fileId], references: [id], onDelete: Restrict)
+  file       StoredFile? @relation(fields: [fileId], references: [id], onDelete: Restrict)
 
   @@unique([attendanceId, kind])
   @@index([employeeId, capturedAt])
+  @@index([capturedAt])
   @@map("attendance_photos")
 }
 

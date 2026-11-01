@@ -81,7 +81,7 @@ export function PolicyForm({ s, canEdit }: { s: SettingsDto; canEdit: boolean })
     lateMinutesAfterTolerance: a.lateMinutesAfterTolerance, locationEnabled: a.locationEnabled, locationName: a.locationName ?? "", locationLat: a.locationLat === null ? "" : String(a.locationLat),
     locationLng: a.locationLng === null ? "" : String(a.locationLng), locationRadiusMeters: String(a.locationRadiusMeters), locationMaxAccuracyMeters: String(a.locationMaxAccuracyMeters),
     requestBackdateDays: String(a.requestBackdateDays), annualLeaveQuota: String(s.leave.annualLeaveQuota), allowNegativeLeaveBalance: s.leave.allowNegativeLeaveBalance,
-    locationSpoofMode: a.locationSpoofMode, photoMode: a.photoMode, photoRequireLocation: a.photoRequireLocation,
+    locationSpoofMode: a.locationSpoofMode, photoMode: a.photoMode, photoRequireLocation: a.photoRequireLocation, photoRetentionMonths: String(a.photoRetentionMonths),
   });
   const set = <K extends keyof typeof v>(k: K, x: (typeof v)[K]) => setV((p) => ({ ...p, [k]: x }));
   const d = !canEdit || f.busy;
@@ -89,7 +89,7 @@ export function PolicyForm({ s, canEdit }: { s: SettingsDto; canEdit: boolean })
   return (
     <Card>
       <CardHeader title="Kebijakan absensi & cuti" description="Berlaku untuk seluruh karyawan. Hanya Super Admin yang dapat mengubah." actions={a.confirmedAt ? <Badge tone="green">Dikonfirmasi {formatDateTime(a.confirmedAt)}</Badge> : <Badge tone="amber">Nilai awal — perlu dikonfirmasi</Badge>} />
-      <form className="grid gap-4 p-5 sm:grid-cols-2" aria-label="Form kebijakan" onSubmit={(e) => { e.preventDefault(); void f.run(() => api("/api/settings/attendance", { method: "PUT", body: { lateMinutesAfterTolerance: v.lateMinutesAfterTolerance, locationEnabled: v.locationEnabled, locationName: v.locationName, locationLat: num(v.locationLat), locationLng: num(v.locationLng), locationRadiusMeters: Number(v.locationRadiusMeters), locationMaxAccuracyMeters: Number(v.locationMaxAccuracyMeters), requestBackdateDays: Number(v.requestBackdateDays), annualLeaveQuota: Number(v.annualLeaveQuota), allowNegativeLeaveBalance: v.allowNegativeLeaveBalance, locationSpoofMode: v.locationSpoofMode, attendancePhotoMode: v.photoMode, attendancePhotoRequireLocation: v.photoRequireLocation } }), "Kebijakan disimpan dan dikonfirmasi."); }}>
+      <form className="grid gap-4 p-5 sm:grid-cols-2" aria-label="Form kebijakan" onSubmit={(e) => { e.preventDefault(); void f.run(() => api("/api/settings/attendance", { method: "PUT", body: { lateMinutesAfterTolerance: v.lateMinutesAfterTolerance, locationEnabled: v.locationEnabled, locationName: v.locationName, locationLat: num(v.locationLat), locationLng: num(v.locationLng), locationRadiusMeters: Number(v.locationRadiusMeters), locationMaxAccuracyMeters: Number(v.locationMaxAccuracyMeters), requestBackdateDays: Number(v.requestBackdateDays), annualLeaveQuota: Number(v.annualLeaveQuota), allowNegativeLeaveBalance: v.allowNegativeLeaveBalance, locationSpoofMode: v.locationSpoofMode, attendancePhotoMode: v.photoMode, attendancePhotoRequireLocation: v.photoRequireLocation, attendancePhotoRetentionMonths: Number(v.photoRetentionMonths) } }), "Kebijakan disimpan dan dikonfirmasi."); }}>
         {f.error && <div className="sm:col-span-2"><Notice tone="danger">{f.error}</Notice></div>}
         <div className="sm:col-span-2">{check("Hitung menit keterlambatan setelah toleransi", v.lateMinutesAfterTolerance, (x) => set("lateMinutesAfterTolerance", x), d, "Nonaktif (default): menit terlambat dihitung dari jam masuk, mis. masuk 08.21 dengan jam 08.00 = 21 menit. Aktif: dihitung dari batas toleransi.")}</div>
         <TextField label="Kuota cuti tahunan (hari)" type="number" min={0} max={366} disabled={d} value={v.annualLeaveQuota} onChange={(e) => set("annualLeaveQuota", e.target.value)} error={f.fe.annualLeaveQuota} hint="Contoh 12. Sesuaikan dengan kebijakan perusahaan & ketentuan yang berlaku." />
@@ -123,6 +123,16 @@ export function PolicyForm({ s, canEdit }: { s: SettingsDto; canEdit: boolean })
             <option value="REQUIRED">Wajib pada check-in &amp; check-out (disarankan)</option>
           </SelectField>
           <div className="self-end">{check("Foto wajib disertai lokasi (izin GPS)", v.photoRequireLocation, (x) => set("photoRequireLocation", x), d || v.photoMode === "OFF", "Bila aktif, absen ditolak jika lokasi tidak terbaca sehingga cap foto selalu memuat koordinat.")}</div>
+          <TextField label="Simpan foto absensi (bulan)" type="number" min={0} max={120} disabled={d} value={v.photoRetentionMonths} onChange={(e) => set("photoRetentionMonths", e.target.value)} error={f.fe.attendancePhotoRetentionMonths}
+            hint="Foto lebih tua dari ini dihapus otomatis & permanen (dicek tiap 6 jam). Jejak teks cap (waktu, koordinat, nama) tetap tersimpan; foto yang sedang ditinjau/terkonfirmasi tidak dihapus. 0 = simpan selamanya (tidak disarankan)." />
+          <div className="self-end text-xs text-muted">Cadangan basis data yang sudah dibuat tetap memuat foto sampai cadangan itu kedaluwarsa (lihat <code>BACKUP_KEEP_DAYS</code>).</div>
+          {(() => {
+            const n = Number(v.photoRetentionMonths);
+            if (v.photoRetentionMonths.trim() === "" || !Number.isFinite(n)) return null;
+            if (n === 0) return <div className="sm:col-span-2"><Notice tone="warn">Foto disimpan <strong>selamanya</strong>: data wajah karyawan menumpuk tanpa batas. Tentukan masa simpan sesuai kebijakan privasi perusahaan.</Notice></div>;
+            if (n < a.photoRetentionMonths && a.photoRetentionMonths > 0) return <div className="sm:col-span-2"><Notice tone="danger">Masa simpan diturunkan dari {a.photoRetentionMonths} ke {n} bulan: setelah disimpan, foto lebih tua dari {n} bulan akan <strong>dihapus permanen</strong> pada pengecekan berikutnya (paling lama 6 jam). Tidak dapat dibatalkan.</Notice></div>;
+            return null;
+          })()}
           {v.photoMode !== "OFF" && v.locationEnabled && <div className="sm:col-span-2"><Notice tone="warn">Radius lokasi di atas <strong>menolak</strong> absen di luar kantor — termasuk dinas luar. Bila ada karyawan dinas luar, matikan &quot;Aktifkan absensi berbasis lokasi&quot; dan andalkan foto bercap.</Notice></div>}
         </fieldset>
         {canEdit && <div className="sm:col-span-2"><Button type="submit" variant="primary" loading={f.busy}>Simpan & konfirmasi</Button></div>}

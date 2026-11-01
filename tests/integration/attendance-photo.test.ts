@@ -77,7 +77,7 @@ describe("check-in / check-out dengan foto — cap dari SERVER", () => {
   it("file tersimpan: JPEG, kind ATTENDANCE_PHOTO, hash sesuai, EXIF dibuang, pita cap benar-benar tergambar", async () => {
     await checkIn(fx.emp1, { location: loc() }, at("07:58"), ctx(await photo()));
     const p = (await photos())[0]!;
-    const f = await prisma.storedFile.findUniqueOrThrow({ where: { id: p.fileId } });
+    const f = await prisma.storedFile.findUniqueOrThrow({ where: { id: p.fileId! } });
     expect(f.kind).toBe("ATTENDANCE_PHOTO");
     expect(f.mimeType).toBe("image/jpeg");
     expect(f.size).toBe(f.data.length);
@@ -210,11 +210,11 @@ describe("akses foto", () => {
 
   it("pemilik & HR/Super Admin boleh membuka; karyawan lain DITOLAK; pembukaan oleh peninjau dicatat di audit", async () => {
     const p = await seeded();
-    expect((await readFileForActor(fx.emp1, p.fileId)).kind).toBe("ATTENDANCE_PHOTO");
-    expect((await fail(readFileForActor(fx.emp2, p.fileId)))?.code).toBe("FORBIDDEN");
-    expect((await readFileForActor(fx.hr, p.fileId)).id).toBe(p.fileId);
-    expect((await readFileForActor(fx.superAdmin, p.fileId)).id).toBe(p.fileId);
-    expect(await prisma.auditLog.count({ where: { action: "file.view", entityId: p.fileId } })).toBe(2); // HR + Super Admin (bukan pemilik)
+    expect((await readFileForActor(fx.emp1, p.fileId!)).kind).toBe("ATTENDANCE_PHOTO");
+    expect((await fail(readFileForActor(fx.emp2, p.fileId!)))?.code).toBe("FORBIDDEN");
+    expect((await readFileForActor(fx.hr, p.fileId!)).id).toBe(p.fileId);
+    expect((await readFileForActor(fx.superAdmin, p.fileId!)).id).toBe(p.fileId);
+    expect(await prisma.auditLog.count({ where: { action: "file.view", entityId: p.fileId! } })).toBe(2); // HR + Super Admin (bukan pemilik)
   });
 
   it("tampil di rincian rekap untuk HR dan pemiliknya; karyawan lain tidak dapat melihat rincian itu", async () => {

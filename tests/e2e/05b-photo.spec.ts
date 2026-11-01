@@ -32,6 +32,15 @@ test("Super Admin mewajibkan foto absensi; opsi jaringan kantor (Wi-Fi/IP) sudah
   const mode = form.locator('select:has(option[value="OPTIONAL"])');
   await mode.selectOption("REQUIRED");
   await expect(form.getByLabel("Foto wajib disertai lokasi (izin GPS)")).toBeChecked();
+  // Retensi: bawaan 6 bulan; menurunkannya memunculkan peringatan penghapusan permanen; 0 = selamanya diberi peringatan.
+  const months = form.getByLabel("Simpan foto absensi (bulan)");
+  await expect(months).toHaveValue("6");
+  await months.fill("3");
+  await expect(form.getByText(/dihapus permanen/)).toBeVisible();
+  await months.fill("0");
+  await expect(form.getByText(/disimpan selamanya/)).toBeVisible();
+  await months.fill("6");
+  await expect(form.getByText(/dihapus permanen pada pengecekan berikutnya/)).toHaveCount(0);
   await form.getByRole("button", { name: "Simpan & konfirmasi" }).click();
   await expect(page.getByText("Kebijakan disimpan dan dikonfirmasi.")).toBeVisible();
 });

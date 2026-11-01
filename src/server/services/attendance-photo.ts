@@ -67,7 +67,11 @@ export async function persistPunchPhoto(tx: Prisma.TransactionClient, actor: Act
 
 export interface PunchPhotoDto {
   kind: "CHECK_IN" | "CHECK_OUT";
-  url: string;
+  /** null = fotonya sudah dihapus oleh retensi (jejak teks cap & koordinat tetap ada). */
+  url: string | null;
+  purgedAt: string | null;
+  /** Teks cap yang tercetak pada foto (waktu server, koordinat, nama, ID). */
+  stamp: string;
   capturedAt: string;
   lat: number | null; lng: number | null; accuracy: number | null;
   mapUrl: string | null;
@@ -87,7 +91,8 @@ export async function photosForRange(employeeId: string, from: string, to: strin
   for (const r of rows) {
     if (!r.attendance) continue;
     (out[dateToIso(r.attendance.date)] ??= []).push({
-      kind: r.kind, url: `/api/files/${r.fileId}`, capturedAt: r.capturedAt.toISOString(), lat: r.lat, lng: r.lng, accuracy: r.accuracy, mapUrl: mapUrlOf(r.lat, r.lng),
+      kind: r.kind, url: r.fileId ? `/api/files/${r.fileId}` : null, purgedAt: r.purgedAt?.toISOString() ?? null, stamp: r.stamp,
+      capturedAt: r.capturedAt.toISOString(), lat: r.lat, lng: r.lng, accuracy: r.accuracy, mapUrl: mapUrlOf(r.lat, r.lng),
     });
   }
   return out;
@@ -98,5 +103,5 @@ export async function photoUrlsFor(pairs: { attendanceId: string | null; kind: "
   const ids = [...new Set(pairs.map((p) => p.attendanceId).filter((x): x is string => !!x))];
   if (ids.length === 0) return new Map();
   const rows = await prisma.attendancePhoto.findMany({ where: { attendanceId: { in: ids } }, select: { attendanceId: true, kind: true, fileId: true } });
-  return new Map(rows.map((r) => [`${r.attendanceId}:${r.kind}`, `/api/files/${r.fileId}`]));
+  return new Map(rows.flatMap((r) => (r.fileId ? [[`${r.attendanceId}:${r.kind}`, `/api/files/${r.fileId}`] as const] : [])));
 }

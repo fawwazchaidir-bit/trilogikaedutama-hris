@@ -52,6 +52,7 @@ Izin ditegakkan di **service layer**: menyembunyikan menu hanya kosmetik. Halama
 12. **Notifikasi.** `notifyUsers` menulis notifikasi dalam aplikasi **dan** baris `notification_deliveries` (outbox) dalam transaksi peristiwa; pekerja memproses dengan klaim `SKIP LOCKED`, percobaan ulang bertahap.
 13. **Integritas lokasi.** `assessRisk` (murni) → skor & flag; `decide(mode, skor)` → diterima/ditandai/ditolak; semua tercatat di `location_checks` untuk tinjauan HR.
 14. **Foto absensi bercap.** Klien mengirim multipart (`payload` + `photo`) → `preparePunchPhoto` (di LUAR transaksi: validasi, `stampPhoto` dengan sharp + cap path vektor dari font bundel, EXIF dibuang) → `persistPunchPhoto` di transaksi punch yang sama (`stored_files` + `attendance_photos`, append-only lewat trigger). Waktu cap = waktu check-in/out yang dicatat (waktu server). Tidak ada syarat IP/Wi-Fi.
+15. **Retensi foto.** `purgeExpiredPhotos` (dipanggil `retention-worker` tiap 6 jam atau `/api/internal/retention`): per batch, dalam satu transaksi — pilih foto `capturedAt < retentionCutoff(now, bulan)` yang tidak ditahan tinjauan OPEN/CONFIRMED (`FOR UPDATE SKIP LOCKED`), kosongkan `fileId` + isi `purgedAt`, hapus baris `stored_files`, tulis audit `attendance_photo.purge`. Trigger hanya mengizinkan perubahan sempit itu; teks cap tetap.
 
 ## Alur penggajian
 
