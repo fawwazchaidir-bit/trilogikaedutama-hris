@@ -34,7 +34,8 @@ const check = (label: string, checked: boolean, on: (v: boolean) => void, disabl
 export function CompanyForm({ s, canEdit }: { s: SettingsDto; canEdit: boolean }) {
   const f = useForm();
   const [v, setV] = useState({ name: s.company.name, legalName: s.company.legalName ?? "", tagline: s.company.tagline ?? "", address: s.company.address ?? "", phone: s.company.phone ?? "", email: s.company.email ?? "", website: s.company.website ?? "",
-    slipShowAttendance: s.slip.showAttendance, slipFooterNote: s.slip.footerNote ?? "", slipNumberPrefix: s.slip.numberPrefix });
+    slipShowAttendance: s.slip.showAttendance, slipFooterNote: s.slip.footerNote ?? "", slipNumberPrefix: s.slip.numberPrefix,
+    slipSignerName: s.slip.signer.name ?? "", slipSignerTitle: s.slip.signer.title ?? "", slipSignerPlace: s.slip.signer.place ?? "" });
   const set = <K extends keyof typeof v>(k: K, x: (typeof v)[K]) => setV((p) => ({ ...p, [k]: x }));
   const d = !canEdit || f.busy;
   return (
@@ -52,8 +53,39 @@ export function CompanyForm({ s, canEdit }: { s: SettingsDto; canEdit: boolean }
         <TextField label="Awalan nomor slip" disabled={d} value={v.slipNumberPrefix} onChange={(e) => set("slipNumberPrefix", e.target.value)} error={f.fe.slipNumberPrefix} hint="Contoh hasil: SG-202610-R01-001" />
         <div className="sm:col-span-2">{check("Tampilkan ringkasan kehadiran pada slip gaji", v.slipShowAttendance, (x) => set("slipShowAttendance", x), d)}</div>
         <div className="sm:col-span-2"><TextAreaField label="Catatan kaki slip (opsional)" rows={2} disabled={d} value={v.slipFooterNote} onChange={(e) => set("slipFooterNote", e.target.value)} error={f.fe.slipFooterNote} /></div>
+        <fieldset className="grid gap-4 rounded-md border border-line p-4 sm:col-span-2 sm:grid-cols-3">
+          <legend className="px-1 text-sm font-medium text-ink-soft">Penanda tangan slip gaji</legend>
+          <TextField label="Nama penanda tangan" disabled={d} value={v.slipSignerName} onChange={(e) => set("slipSignerName", e.target.value)} error={f.fe.slipSignerName} placeholder="mis. Fawwaz Chaidir, S.Psi." />
+          <TextField label="Jabatan" disabled={d} value={v.slipSignerTitle} onChange={(e) => set("slipSignerTitle", e.target.value)} error={f.fe.slipSignerTitle} placeholder="mis. Chief Executive Officer" />
+          <TextField label="Kota (opsional)" disabled={d} value={v.slipSignerPlace} onChange={(e) => set("slipSignerPlace", e.target.value)} error={f.fe.slipSignerPlace} placeholder="mis. Yogyakarta" hint="Tampil sebelum tanggal terbit." />
+          <p className="text-xs text-muted sm:col-span-3">Tampil di kanan bawah slip. Kosongkan nama untuk tidak menampilkan blok tanda tangan. Berlaku untuk slip yang terbit <strong>setelah</strong> disimpan; slip yang sudah terbit tidak berubah. Gambar tanda tangan diunggah pada kartu di bawah.</p>
+        </fieldset>
         {canEdit && <div className="sm:col-span-2"><Button type="submit" variant="primary" loading={f.busy}>Simpan</Button></div>}
       </form>
+    </Card>
+  );
+}
+
+export function SignatureCard({ signatureUrl, signerName, canEdit }: { signatureUrl: string | null; signerName: string | null; canEdit: boolean }) {
+  const f = useForm();
+  return (
+    <Card>
+      <CardHeader title="Gambar tanda tangan slip" description="PNG atau JPG (maks. 3 MB), latar putih/transparan. Dikecilkan & disimpan sebagai PNG. Opsional: tanpa gambar, slip menyisakan ruang untuk tanda tangan basah." />
+      <div className="flex flex-wrap items-center gap-5 p-5">
+        {signatureUrl
+          // eslint-disable-next-line @next/next/no-img-element
+          ? <img src={signatureUrl} alt={`Tanda tangan ${signerName ?? "penanda tangan"} saat ini`} className="h-20 w-48 rounded-lg border border-line bg-white object-contain p-1" />
+          : <div className="grid h-20 w-48 place-items-center rounded-lg border border-dashed border-line text-xs text-muted">Belum ada gambar</div>}
+        {canEdit && (
+          <div className="space-y-1.5">
+            <label htmlFor="signature-file" className="block text-sm font-medium text-ink-soft">Unggah tanda tangan baru</label>
+            <input id="signature-file" type="file" accept="image/png,image/jpeg" disabled={f.busy} onChange={(e) => { const file = e.target.files?.[0]; if (file) void f.run(() => uploadFile("/api/settings/signature", file), "Gambar tanda tangan diperbarui."); e.target.value = ""; }} className="block text-sm file:mr-3 file:rounded-md file:border file:border-line file:bg-white file:px-3 file:py-1.5 hover:file:bg-canvas" />
+            {signatureUrl && <Button size="sm" variant="danger" disabled={f.busy} onClick={() => void f.run(() => api("/api/settings/signature", { method: "DELETE" }), "Gambar tanda tangan dicabut.")}>Cabut gambar</Button>}
+            {!signerName && signatureUrl && <p className="text-xs text-amber-700">Isi nama penanda tangan agar blok tanda tangan tampil pada slip.</p>}
+            {f.error && <p role="alert" className="text-xs font-medium text-brand-700">{f.error}</p>}
+          </div>
+        )}
+      </div>
     </Card>
   );
 }

@@ -4,7 +4,7 @@ import { actorCan } from "@/server/actor";
 import { getSettingsDto } from "@/server/services/settings";
 import { Notice, PageHeader } from "@/components/ui/card";
 import { getDeliveryStats } from "@/server/services/delivery-admin";
-import { CompanyForm, DeliveriesCard, LogoCard, PayrollRulesForm, PolicyForm, SecurityForm, StatutoryForm } from "@/components/settings-forms";
+import { CompanyForm, DeliveriesCard, LogoCard, PayrollRulesForm, PolicyForm, SecurityForm, SignatureCard, StatutoryForm } from "@/components/settings-forms";
 
 export const metadata: Metadata = { title: "Pengaturan" };
 export const dynamic = "force-dynamic";
@@ -20,6 +20,7 @@ export default async function SettingsPage() {
       {!sa && <Notice tone="info">Anda dapat melihat pengaturan. Perubahan hanya dapat dilakukan Super Admin/Pimpinan.</Notice>}
       <CompanyForm s={s} canEdit={sa} />
       <LogoCard logoUrl={s.company.logoUrl} canEdit={sa} />
+      <SignatureCard signatureUrl={s.slip.signer.signatureUrl} signerName={s.slip.signer.name} canEdit={sa} />
       <PolicyForm s={s} canEdit={sa} />
       <SecurityForm s={s} canEdit={sa} />
       {deliveries && <DeliveriesCard stats={deliveries} />}

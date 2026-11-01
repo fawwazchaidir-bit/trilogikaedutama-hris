@@ -6,7 +6,7 @@ import { Errors } from "../errors";
 import { writeAudit } from "../audit";
 import { actorCan, type Actor } from "../actor";
 
-export type FileKind = "LOGO" | "EMPLOYEE_PHOTO" | "LEAVE_ATTACHMENT" | "ATTENDANCE_PHOTO";
+export type FileKind = "LOGO" | "EMPLOYEE_PHOTO" | "LEAVE_ATTACHMENT" | "ATTENDANCE_PHOTO" | "SIGNATURE";
 
 /** Tipe yang diizinkan, diverifikasi dari MAGIC BYTES (bukan dari ekstensi / Content-Type kiriman klien). SVG sengaja ditolak (risiko XSS). */
 const SIGNATURES: { mime: string; ext: string; test: (b: Uint8Array) => boolean }[] = [
@@ -21,6 +21,8 @@ const ALLOWED: Record<FileKind, string[]> = {
   LEAVE_ATTACHMENT: ["image/png", "image/jpeg", "application/pdf"],
   // Hanya dibuat oleh server (sesudah dicap & dinormalisasi menjadi JPEG), tidak pernah dari unggahan mentah klien.
   ATTENDANCE_PHOTO: ["image/jpeg"],
+  // Hanya PNG hasil normalisasi server (lihat photo/signature.ts).
+  SIGNATURE: ["image/png"],
 };
 
 export function sniffMime(bytes: Uint8Array): { mime: string; ext: string } | null {
@@ -40,7 +42,7 @@ export async function storeFile(
   input: { name: string; bytes: Uint8Array },
   tx: Pick<typeof prisma, "storedFile"> = prisma,
 ): Promise<{ id: string; mimeType: string; size: number }> {
-  if (kind === "LOGO" && !actorCan(actor, "settings:manage")) throw Errors.forbidden();
+  if ((kind === "LOGO" || kind === "SIGNATURE") && !actorCan(actor, "settings:manage")) throw Errors.forbidden();
   if (kind === "EMPLOYEE_PHOTO" && !actorCan(actor, "employee:manage")) throw Errors.forbidden();
   if (kind === "LEAVE_ATTACHMENT" && !actor.employeeId && !actorCan(actor, "leave:review")) throw Errors.forbidden();
   if (kind === "ATTENDANCE_PHOTO" && !actor.employeeId) throw Errors.forbidden();
@@ -69,7 +71,7 @@ export async function storeFile(
 
 /**
  * Baca file untuk ditampilkan. Aturan akses:
- *  - LOGO: semua pengguna login (tampil di header/slip).
+ *  - LOGO & SIGNATURE: semua pengguna login (tampil di header/slip; tanda tangan tampil pada slip setiap karyawan).
  *  - EMPLOYEE_PHOTO: admin (employee:view) atau karyawan pemilik foto itu sendiri.
  *  - LEAVE_ATTACHMENT: peninjau pengajuan (leave:view_all) atau pengunggahnya.
  *  - ATTENDANCE_PHOTO: peninjau absensi (attendance:view_all) atau karyawan pemilik foto itu; pembukaan oleh peninjau dicatat di audit.
@@ -78,7 +80,7 @@ export async function storeFile(
 export async function readFileForActor(actor: Actor, id: string) {
   const file = await prisma.storedFile.findUnique({ where: { id } });
   if (!file) throw Errors.notFound("File");
-  let ok = file.kind === "LOGO";
+  let ok = file.kind === "LOGO" || file.kind === "SIGNATURE";
   if (file.kind === "EMPLOYEE_PHOTO") {
     ok = actorCan(actor, "employee:view");
     if (!ok && actor.employeeId) {

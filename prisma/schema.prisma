@@ -136,6 +136,8 @@ enum FileKind {
   LEAVE_ATTACHMENT
   /// Foto absensi yang sudah dicap (lokasi + waktu server) oleh server.
   ATTENDANCE_PHOTO
+  /// Gambar tanda tangan penanda tangan slip gaji (PNG hasil normalisasi server).
+  SIGNATURE
 }
 
 enum LateDeductionMode {
@@ -760,9 +762,14 @@ model CompanySettings {
   logoFileId String? @db.Uuid
 
   // Slip gaji
-  slipShowAttendance Boolean @default(true)
-  slipFooterNote     String?
-  slipNumberPrefix   String  @default("SG")
+  slipShowAttendance  Boolean @default(true)
+  slipFooterNote      String?
+  slipNumberPrefix    String  @default("SG")
+  /// Penanda tangan slip (diatur Super Admin): nama, jabatan, kota (opsional), dan gambar tanda tangan (PNG, opsional).
+  slipSignerName      String?
+  slipSignerTitle     String?
+  slipSignerPlace     String?
+  slipSignatureFileId String? @db.Uuid
 
   // Kebijakan absensi (perlu dikonfirmasi oleh Super Admin)
   /// Menit keterlambatan dihitung setelah toleransi (true) atau dari jam masuk (false, default).

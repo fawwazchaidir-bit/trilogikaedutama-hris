@@ -62,7 +62,7 @@ export function geoPolicyOf(s: CompanySettings): GeoPolicy {
 
 export interface SettingsDto {
   company: { name: string; legalName: string | null; tagline: string | null; address: string | null; phone: string | null; email: string | null; website: string | null; logoUrl: string | null };
-  slip: { showAttendance: boolean; footerNote: string | null; numberPrefix: string };
+  slip: { showAttendance: boolean; footerNote: string | null; numberPrefix: string; signer: { name: string | null; title: string | null; place: string | null; signatureUrl: string | null } };
   attendance: {
     lateMinutesAfterTolerance: boolean; locationEnabled: boolean; locationName: string | null; locationLat: number | null; locationLng: number | null;
     locationRadiusMeters: number; locationMaxAccuracyMeters: number; requestBackdateDays: number; confirmedAt: string | null;
@@ -85,7 +85,10 @@ export async function getSettingsDto(actor: Actor): Promise<SettingsDto> {
   const s = await getSettings();
   return {
     company: { name: s.name, legalName: s.legalName, tagline: s.tagline, address: s.address, phone: s.phone, email: s.email, website: s.website, logoUrl: s.logoFileId ? `/api/files/${s.logoFileId}` : null },
-    slip: { showAttendance: s.slipShowAttendance, footerNote: s.slipFooterNote, numberPrefix: s.slipNumberPrefix },
+    slip: {
+      showAttendance: s.slipShowAttendance, footerNote: s.slipFooterNote, numberPrefix: s.slipNumberPrefix,
+      signer: { name: s.slipSignerName, title: s.slipSignerTitle, place: s.slipSignerPlace, signatureUrl: s.slipSignatureFileId ? `/api/files/${s.slipSignatureFileId}` : null },
+    },
     attendance: {
       lateMinutesAfterTolerance: s.lateMinutesAfterTolerance, locationEnabled: s.locationEnabled, locationName: s.locationName,
       locationLat: s.locationLat, locationLng: s.locationLng, locationRadiusMeters: s.locationRadiusMeters,
@@ -112,6 +115,9 @@ export const companySchema = z.object({
   website: optionalText(160, "Situs web"),
   slipShowAttendance: z.boolean(),
   slipFooterNote: optionalText(400, "Catatan kaki slip"),
+  slipSignerName: optionalText(120, "Nama penanda tangan"),
+  slipSignerTitle: optionalText(120, "Jabatan penanda tangan"),
+  slipSignerPlace: optionalText(80, "Kota"),
   slipNumberPrefix: z.string().trim().regex(/^[A-Za-z0-9]{1,8}$/, "Awalan nomor slip: 1–8 huruf/angka").transform((v) => v.toUpperCase()),
 });
 
@@ -134,6 +140,23 @@ export async function setLogo(actor: Actor, fileId: string): Promise<void> {
     const before = await tx.companySettings.findUniqueOrThrow({ where: { id: 1 }, select: { logoFileId: true } });
     await tx.companySettings.update({ where: { id: 1 }, data: { logoFileId: fileId } });
     await writeAudit(tx, actor, { action: "settings.logo_update", entityType: "CompanySettings", entityId: "1", summary: "Logo diganti", before: { logoFileId: before.logoFileId }, after: { logoFileId: fileId } });
+  });
+}
+
+/** Pasang gambar tanda tangan (file jenis SIGNATURE) atau cabut (null). Slip yang sudah terbit tidak berubah (snapshot). */
+export async function setSignature(actor: Actor, fileId: string | null): Promise<void> {
+  assertCan(actor, "settings:manage");
+  await transaction(async (tx) => {
+    if (fileId) {
+      const f = await tx.storedFile.findUnique({ where: { id: fileId }, select: { kind: true } });
+      if (f?.kind !== "SIGNATURE") throw Errors.validation("File tanda tangan tidak valid.");
+    }
+    const before = await tx.companySettings.findUniqueOrThrow({ where: { id: 1 }, select: { slipSignatureFileId: true } });
+    await tx.companySettings.update({ where: { id: 1 }, data: { slipSignatureFileId: fileId } });
+    await writeAudit(tx, actor, {
+      action: fileId ? "settings.signature_update" : "settings.signature_remove", entityType: "CompanySettings", entityId: "1",
+      summary: fileId ? "Gambar tanda tangan slip diganti" : "Gambar tanda tangan slip dicabut", before: { slipSignatureFileId: before.slipSignatureFileId }, after: { slipSignatureFileId: fileId },
+    });
   });
 }
 

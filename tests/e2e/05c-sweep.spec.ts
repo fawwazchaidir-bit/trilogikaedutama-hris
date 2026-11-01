@@ -38,7 +38,7 @@ const PUBLIC = new Set(["/api/health", "/api/auth/login", "/api/auth/2fa", "/api
 /** Tidak disapu dengan `{}` karena `{}` SAH dan mengubah data / menutup sesi / mengirim pesan. */
 const NO_EMPTY_BODY = new Set([
   "/api/attendance/check-in", "/api/attendance/check-out", "/api/auth/logout", "/api/auth/password", "/api/leave-balance/grant-quota",
-  "/api/settings/payroll-rules/confirm", "/api/notifications/read", "/api/account/notifications/test", "/api/settings/deliveries",
+  "/api/settings/payroll-rules/confirm", "/api/settings/signature", "/api/notifications/read", "/api/account/notifications/test", "/api/settings/deliveries",
 ]);
 
 const withQuery = (e: Ep) => (e.route === "/api/reports/export" ? `${e.url}?kind=kehadiran&format=csv` : e.route === "/api/recap/detail" ? `${e.url}?employeeId=${UUID}` : e.url);
@@ -148,7 +148,7 @@ test("batas hak akses: Karyawan ditolak di rute admin; HR ditolak di rute khusus
   ];
   const HR_DENIED: [Method, string][] = [
     ["GET", "/api/audit-logs"], ["PUT", "/api/settings/attendance"], ["PUT", "/api/settings/payroll-rules"], ["PUT", "/api/settings/statutory"], ["PUT", "/api/settings/security"],
-    ["POST", "/api/settings/payroll-rules/confirm"], ["POST", `/api/payroll/${UUID}/approve`], ["POST", `/api/users/${UUID}/reset-2fa`], ["POST", "/api/settings/logo"],
+    ["POST", "/api/settings/payroll-rules/confirm"], ["POST", `/api/payroll/${UUID}/approve`], ["POST", `/api/users/${UUID}/reset-2fa`], ["POST", "/api/settings/logo"], ["POST", "/api/settings/signature"], ["DELETE", "/api/settings/signature"],
   ];
   const known = new Set(ENDPOINTS.map((e) => `${e.method} ${e.route.replace(/\[[^\]]+\]/g, UUID)}`));
   const bad: string[] = [];

@@ -3,7 +3,7 @@
 ## A. Setup awal (Super Admin & HR) — urutan yang disarankan
 
 1. **Masuk** dengan akun Super Admin dari seed produksi → wajib ganti password.
-2. **Pengaturan → Profil lembaga & slip**: nama, alamat, telepon, **unggah logo**, awalan nomor slip.
+2. **Pengaturan → Profil lembaga & slip**: nama, alamat, telepon, **unggah logo**, awalan nomor slip, dan **penanda tangan slip** (nama, jabatan, kota, lalu *Gambar tanda tangan slip* — PNG/JPG; hanya Super Admin). Tanpa nama penanda tangan, blok tanda tangan tidak dicetak. Berlaku untuk slip yang terbit **setelahnya**; slip lama tidak berubah.
 3. **Pengaturan → Kebijakan absensi & cuti** *(Super Admin)*: kuota cuti tahunan, batas pengajuan mundur, menit terlambat dari jam masuk / setelah toleransi, absensi lokasi (opsional). Tekan **Simpan & konfirmasi** — ini menandai kebijakan sudah Anda periksa.
 4. **Jadwal & Libur**: periksa jadwal "Reguler" (contoh 08.00–16.00), tambah jadwal lain (mis. Ramadan) dan **penugasan** per karyawan/divisi/seluruh perusahaan dengan rentang tanggal. Isi **hari libur nasional & cuti bersama** (tidak ada daftar bawaan — sesuaikan dengan ketetapan pemerintah tahun berjalan).
 5. **Karyawan**: buat divisi lewat **Kelola divisi**, lalu tambah karyawan satu per satu atau **Impor** dari Excel/CSV (unduh templat dulu; divisi baru pada file ikut dibuat otomatis).
@@ -28,7 +28,7 @@
 - **Keamanan & Notifikasi:** aktifkan **2FA**, atur notifikasi **email/WhatsApp**, kirim pesan uji. **Lupa password?** di halaman masuk → tautan via email (bila diaktifkan) — atau minta HR.
 - **Absen berbasis lokasi:** gunakan GPS presisi tinggi dan matikan aplikasi lokasi palsu/mode pengembang; absen yang tampak tidak wajar akan ditandai untuk ditinjau HR (bukan otomatis dianggap curang).
 - **Pengajuan Saya**: pilih jenis, tanggal, alasan, lampiran (opsional). Status: Menunggu → Disetujui/Ditolak. Pengajuan *Menunggu* dapat dibatalkan sendiri. Cuti memakai saldo; tanggal akhir pekan/libur tidak dihitung.
-- **Slip Gaji Saya**: **Lihat** (layar, nyaman di ponsel) atau **PDF**. Hanya slip yang sudah diterbitkan; slip yang dibatalkan hilang dari daftar Anda.
+- **Slip Gaji Saya**: **Lihat** (layar, nyaman di ponsel) atau **PDF** (satu halaman: ringkasan kehadiran termasuk *Lembur dibayar*, kolom **Catatan** untuk motivasi/peringatan, dan tanda tangan di kanan bawah). Hanya slip yang sudah diterbitkan; slip yang dibatalkan hilang dari daftar Anda.
 - **Profil & Jadwal**: data Anda dan jadwal 14 hari. Ubah data lewat HR.
 
 ## C. Admin / HR
@@ -42,6 +42,7 @@
 - **Penggajian**:
   1. **Buat periode gaji** (mis. 1–31 bulan lalu; opsional *periode absensi berbeda* untuk cut-off). Sistem langsung menghitung.
   2. **Periksa** tiap karyawan: komponen, rumus, sumber absensi. Peringatan (mis. absensi belum lengkap, gaji negatif) tampil di tabel. Tambah **penyesuaian** (alasan wajib) bila perlu. Koreksi absensi/komponen lalu klik **Hitung ulang**.
+  2b. Isi **Catatan slip** per karyawan (motivasi / peringatan, maks. 400 karakter) di halaman rincian karyawan sebelum periode diajukan; kolom Catatan di slip selalu tampil ("-" bila kosong).
   3. **Ajukan persetujuan** → Pimpinan **Setujui** → HR **Terbitkan slip** (karyawan mendapat notifikasi).
   4. **Unduh semua slip** (1 PDF atau ZIP per karyawan).
   5. Salah? Hanya **Pimpinan** yang dapat *Batalkan penerbitan* (alasan wajib; slip jadi VOID) → HR *Buat revisi* → ulangi alur.

@@ -42,6 +42,8 @@ Aplikasi sengaja **tidak mengunci** kebijakan perusahaan. Semua di bawah ini ada
 | 24 | Periode gaji & cut-off absensi, tanggal pembayaran | Dibuat per periode |
 | 25 | Siapa yang menyetujui gaji | Super Admin (satu-satunya yang dapat menyetujui/membatalkan) |
 | 26 | Format nomor slip | `SG-YYYYMM-Rnn-nnn` (awalan dapat diubah) |
+| 26a | **Penanda tangan slip** (nama, jabatan, kota, gambar tanda tangan opsional) — siapa yang menandatangani slip atas nama perusahaan. Dibekukan pada slip saat terbit. **Ini gambar tanda tangan + nama tercetak, BUKAN tanda tangan elektronik tersertifikasi** (yang memerlukan penyelenggara sertifikasi elektronik); bila perlu kekuatan pembuktian lebih, minta pendapat hukum | Kosong (tanpa blok tanda tangan) | Pengaturan → Profil lembaga & slip |
+| 26b | **Catatan slip** per karyawan (motivasi / peringatan, maks. 400 karakter), diisi HR sebelum periode diajukan. Isi catatan tercetak pada slip dan dilihat karyawan — jaga nada dan hindari data sensitif | Kosong ("-") | Penggajian → rincian karyawan |
 
 ## 4. Akses, privasi, notifikasi & operasional
 | # | Keputusan |

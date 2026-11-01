@@ -14,11 +14,11 @@ export async function renderReportPdf(table: ReportTable, ctx: { companyName: st
   return renderToBuffer(<ReportPdf data={{ companyName: ctx.companyName, table, printedBy: ctx.printedBy, printedAt }} />);
 }
 
-export interface SlipForRender { snapshot: PayslipSnapshot; voided: boolean }
+export interface SlipForRender { snapshot: PayslipSnapshot; voided: boolean; /** Hanya untuk uji: paksa tingkat kepadatan. */ forceTier?: number }
 
 /**
- * Render satu atau banyak slip (satu halaman per slip) DARI SNAPSHOT. Logo dibaca dari berkas yang dirujuk snapshot
- * (berkas tidak pernah ditimpa, sehingga logo slip lama tetap sama).
+ * Render satu atau banyak slip (satu halaman per slip) DARI SNAPSHOT. Logo & gambar tanda tangan dibaca dari berkas yang dirujuk
+ * snapshot (berkas tidak pernah ditimpa, sehingga slip lama tetap sama).
  */
 export async function renderPayslipsPdf(slips: SlipForRender[]): Promise<Buffer> {
   const logoCache = new Map<string, Awaited<ReturnType<typeof readFileBytes>>>();
@@ -33,7 +33,13 @@ export async function renderPayslipsPdf(slips: SlipForRender[]): Promise<Buffer>
     } else {
       logo = await defaultLogo();
     }
-    items.push({ snapshot: sl.snapshot, logo, voided: sl.voided, printedAt });
+    const sigId = sl.snapshot.signer?.signatureFileId ?? null;
+    let signature: Awaited<ReturnType<typeof readFileBytes>> = null;
+    if (sigId) {
+      if (!logoCache.has(sigId)) logoCache.set(sigId, await readFileBytes(sigId));
+      signature = logoCache.get(sigId) ?? null;
+    }
+    items.push({ snapshot: sl.snapshot, logo, signature, voided: sl.voided, printedAt, forceTier: sl.forceTier });
   }
   return renderToBuffer(<PayslipDocument items={items} />);
 }
