@@ -20,7 +20,7 @@ const snap: PayslipSnapshot = {
   ],
   deductions: [{ name: "Koreksi kasbon", category: "OTHER_DEDUCTION", amount: 100_000, formula: "Penyesuaian manual", note: "Sesuai surat pernyataan", manual: true }],
   totalEarnings: 5_340_000, totalDeductions: 100_000, netPay: 5_240_000,
-  attendance: { scheduledDays: 21, presentDays: 17, onTimeDays: 16, lateCount: 1, lateMinutes: 20, izinDays: 1, sakitDays: 2, cutiDays: 0, absentDays: 1, pendingDays: 0, incompleteCount: 1, workedMinutes: 7655, offDayAttendance: 0, offDays: 10 },
+  attendance: { scheduledDays: 21, presentDays: 17, onTimeDays: 16, lateDays: 1, lateCount: 1, lateMinutes: 20, izinDays: 1, sakitDays: 2, cutiDays: 0, absentDays: 1, pendingDays: 0, incompleteCount: 1, workedMinutes: 7655, offDayAttendance: 0, offDays: 10 },
   note: "Terima kasih atas kontribusinya.", footerNote: "Slip ini rahasia.", revisionNote: null,
 };
 

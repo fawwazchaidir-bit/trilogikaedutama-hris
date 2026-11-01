@@ -18,12 +18,14 @@ import type { ComponentDto } from "@/server/services/components";
 
 interface Form {
   category: ComponentCategory; name: string; calc: ComponentCalc; amount: number | null; percent: string; recurrence: "RECURRING" | "ONE_TIME";
-  effectiveFrom: string; effectiveTo: string; description: string;
+  effectiveFrom: string; effectiveTo: string; description: string; taxable: boolean; inBpjsBase: boolean;
 }
-const blank = (today: string): Form => ({ category: "BASE_SALARY", name: "Gaji pokok", calc: "FIXED", amount: null, percent: "", recurrence: "RECURRING", effectiveFrom: today, effectiveTo: "", description: "" });
+/** Bawaan dasar upah BPJS: gaji pokok & tunjangan jabatan. */
+const bpjsDefault = (c: ComponentCategory) => c === "BASE_SALARY" || c === "POSITION_ALLOWANCE";
+const blank = (today: string): Form => ({ category: "BASE_SALARY", name: "Gaji pokok", calc: "FIXED", amount: null, percent: "", recurrence: "RECURRING", effectiveFrom: today, effectiveTo: "", description: "", taxable: true, inBpjsBase: true });
 const fromDto = (c: ComponentDto): Form => ({
   category: c.category, name: c.name, calc: c.calc, amount: c.calc === "PERCENT_OF_BASE" ? null : c.amount, percent: c.percent === null ? "" : String(c.percent).replace(".", ","),
-  recurrence: c.recurrence, effectiveFrom: c.effectiveFrom, effectiveTo: c.effectiveTo ?? "", description: c.description ?? "",
+  recurrence: c.recurrence, effectiveFrom: c.effectiveFrom, effectiveTo: c.effectiveTo ?? "", description: c.description ?? "", taxable: c.taxable, inBpjsBase: c.inBpjsBase,
 });
 
 export function ComponentsManager({ employeeId, items, today }: { employeeId: string; items: ComponentDto[]; today: string }) {
@@ -44,6 +46,7 @@ export function ComponentsManager({ employeeId, items, today }: { employeeId: st
       employeeId, category: x.category, name: x.name, calc: x.calc, recurrence: x.recurrence, effectiveFrom: x.effectiveFrom,
       effectiveTo: x.recurrence === "ONE_TIME" ? null : x.effectiveTo || null, description: x.description,
       ...(x.calc === "PERCENT_OF_BASE" ? { percent: x.percent.trim() === "" ? null : Number(x.percent.replace(",", ".")) } : { amount: x.amount ?? undefined }),
+      ...((EARNING_CATEGORIES as string[]).includes(x.category) ? { taxable: x.taxable, inBpjsBase: x.inBpjsBase } : {}),
     };
     try {
       if (editing.id) await api(`/api/components/${editing.id}`, { method: "PUT", body }); else await api("/api/components", { body });
@@ -82,7 +85,7 @@ export function ComponentsManager({ employeeId, items, today }: { employeeId: st
         footer={<><Button onClick={() => setEditing(null)} disabled={busy}>Batal</Button><Button variant="primary" loading={busy} onClick={save}>Simpan</Button></>}>
         {f && <div className="grid gap-4 sm:grid-cols-2">
           {error && <div className="sm:col-span-2"><Notice tone="danger">{error}</Notice></div>}
-          <SelectField label="Kategori" required value={f.category} onChange={(e) => set("category", e.target.value as ComponentCategory)} error={fe.category}>
+          <SelectField label="Kategori" required value={f.category} onChange={(e) => setEditing((cur) => (cur ? { ...cur, form: { ...cur.form, category: e.target.value as ComponentCategory, ...(cur.id ? {} : { inBpjsBase: bpjsDefault(e.target.value as ComponentCategory) }) } } : cur))} error={fe.category}>
             <optgroup label="Pendapatan">{EARNING_CATEGORIES.map((c) => <option key={c} value={c}>{CATEGORY_LABEL[c]}</option>)}</optgroup>
             <optgroup label="Potongan">{DEDUCTION_CATEGORIES.map((c) => <option key={c} value={c}>{CATEGORY_LABEL[c]}</option>)}</optgroup>
           </SelectField>
@@ -99,7 +102,15 @@ export function ComponentsManager({ employeeId, items, today }: { employeeId: st
           <TextField label={f.recurrence === "ONE_TIME" ? "Tanggal (menentukan periode gaji)" : "Berlaku mulai"} type="date" required value={f.effectiveFrom} onChange={(e) => set("effectiveFrom", e.target.value)} error={fe.effectiveFrom} />
           {f.recurrence === "RECURRING" && <TextField label="Berlaku sampai (opsional)" type="date" min={f.effectiveFrom} value={f.effectiveTo} onChange={(e) => set("effectiveTo", e.target.value)} error={fe.effectiveTo} hint="Kosong = seterusnya. Isi untuk cicilan kasbon." />}
           <div className="sm:col-span-2"><TextAreaField label="Keterangan" rows={2} value={f.description} onChange={(e) => set("description", e.target.value)} error={fe.description} /></div>
-          {sensitive && <div className="sm:col-span-2"><Notice tone="warn"><span className="flex gap-2"><AlertTriangle className="mt-0.5 size-4 shrink-0" /><span>Aplikasi <strong>tidak menetapkan tarif BPJS/pajak</strong>. Isi nominal atau persen sesuai ketentuan yang berlaku dan kebijakan perusahaan, lalu verifikasi dengan pihak yang berwenang (mis. konsultan pajak/BPJS).</span></span></Notice></div>}
+          {(EARNING_CATEGORIES as string[]).includes(f.category) && (
+            <fieldset className="rounded-md border border-line p-4 sm:col-span-2"><legend className="px-1 text-sm font-medium text-ink-soft">Dasar perhitungan BPJS &amp; PPh 21 otomatis</legend>
+              <div className="flex flex-col gap-2">
+                <label className="flex items-start gap-2 text-sm"><input type="checkbox" className="mt-0.5" checked={f.taxable} onChange={(e) => set("taxable", e.target.checked)} /><span>Termasuk penghasilan bruto kena PPh 21<span className="block text-xs text-muted">Hilangkan centang untuk tunjangan yang bukan objek pajak menurut ketentuan.</span></span></label>
+                <label className="flex items-start gap-2 text-sm"><input type="checkbox" className="mt-0.5" checked={f.inBpjsBase} onChange={(e) => set("inBpjsBase", e.target.checked)} /><span>Termasuk dasar upah BPJS<span className="block text-xs text-muted">Upah BPJS = gaji pokok + tunjangan tetap (bawaan: gaji pokok &amp; tunjangan jabatan).</span></span></label>
+              </div>
+              <p className="mt-2 text-xs text-muted">Berlaku bila perhitungan otomatis diaktifkan di Pengaturan. Mengisi komponen potongan kategori BPJS/Pajak secara manual akan menggantikan perhitungan otomatis untuk karyawan ini.</p>
+            </fieldset>)}
+          {sensitive && <div className="sm:col-span-2"><Notice tone="warn"><span className="flex gap-2"><AlertTriangle className="mt-0.5 size-4 shrink-0" /><span>Komponen potongan BPJS/Pajak yang diisi manual <strong>menggantikan</strong> perhitungan otomatis (bila aktif) untuk karyawan ini. Isi nominal atau persen sesuai ketentuan yang berlaku dan kebijakan perusahaan, lalu verifikasi dengan pihak yang berwenang (mis. konsultan pajak/BPJS).</span></span></Notice></div>}
         </div>}
       </Dialog>
     </Card>

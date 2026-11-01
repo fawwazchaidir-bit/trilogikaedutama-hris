@@ -1,3 +1,4 @@
+import { makeDay } from "../helpers/day";
 import { describe, expect, it } from "vitest";
 import { computeItem, selectComponents, totalsFromLines, type ComponentInput, type PayrollRules } from "@/lib/payroll";
 import { emptyTotals, type DayResult } from "@/lib/attendance";
@@ -146,11 +147,7 @@ describe("computeItem — aturan potongan (opsional, default nonaktif)", () => {
 });
 
 describe("computeItem — lembur", () => {
-  const dayWith = (afterEndMinutes: number, scheduled = true): DayResult => ({
-    date: "2026-10-05", status: "HADIR", scheduled, offReason: null, scheduleName: null, scheduleStart: "08:00", scheduleEnd: "16:00",
-    checkInAt: null, checkOutAt: null, checkInTime: null, checkOutTime: null, late: false, lateMinutes: 0, workedMinutes: 0,
-    missingCheckout: false, incomplete: false, afterEndMinutes, leaveType: null, leaveRequestId: null, explain: "",
-  });
+  const dayWith = (afterEndMinutes: number, scheduled = true): DayResult => makeDay({ scheduled, afterEndMinutes });
 
   it("MANUAL (default): tidak ada lembur otomatis", () => {
     const r = computeItem({ components: [BASE], rules: { ...NO_RULES, overtimeRatePerHour: 20_000 }, totals: totals(), days: [dayWith(120)], period: PERIOD });

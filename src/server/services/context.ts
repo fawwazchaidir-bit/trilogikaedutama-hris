@@ -40,7 +40,7 @@ export async function loadRangeContext(from: string, to: string, opts: { employe
       startDate: dateToIso(a.startDate), endDate: a.endDate ? dateToIso(a.endDate) : null,
     })),
     calendar: new Map(calendar.map((c) => [dateToIso(c.date), { kind: c.kind, name: c.name }])),
-    leaves: leaves.map((l): LeaveLite => ({ id: l.id, employeeId: l.employeeId, type: l.type, startDate: dateToIso(l.startDate), endDate: dateToIso(l.endDate), status: l.status })),
+    leaves: leaves.map((l): LeaveLite => ({ id: l.id, employeeId: l.employeeId, type: l.type, startDate: dateToIso(l.startDate), endDate: dateToIso(l.endDate), status: l.status, dayPart: l.dayPart })),
     attendance: attendance.map((a): AttendanceLite => ({ employeeId: a.employeeId, date: dateToIso(a.date), checkInAt: a.checkInAt, checkOutAt: a.checkOutAt })),
   };
 }
@@ -57,11 +57,20 @@ export function computeEmployeePeriod(emp: EmployeeLite, ctx: RangeContext): Emp
   return { days, totals: summarizeDays(days) };
 }
 
-/** Hash kanonik data harian sumber → mendeteksi bahwa absensi/jadwal/pengajuan berubah sejak penghitungan gaji. */
-export function sourceHash(days: DayResult[]): string {
+/**
+ * Hash kanonik data harian sumber → mendeteksi bahwa absensi/jadwal/pengajuan berubah sejak penghitungan gaji.
+ * `extra` (mis. lembur disetujui) hanya ditambahkan bila ada, sehingga hash periode lama tetap sama.
+ * Hari tanpa pengajuan setengah hari menghasilkan string yang identik dengan versi sebelumnya.
+ */
+export function sourceHash(days: DayResult[], extra = ""): string {
   const canon = days
     .filter((d) => d.status !== "DI_LUAR_MASA_KERJA")
-    .map((d) => [d.date, d.status, d.scheduled ? 1 : 0, d.lateMinutes, d.workedMinutes, d.afterEndMinutes, d.incomplete ? 1 : 0].join("|"))
+    .map((d) => {
+      const core = [d.date, d.status, d.scheduled ? 1 : 0, d.lateMinutes, d.workedMinutes, d.afterEndMinutes, d.incomplete ? 1 : 0].join("|");
+      if (!d.dayPart || d.dayPart === "FULL") return core;
+      const f = d.fractions;
+      return `${core}|${d.dayPart}|${f.present}|${f.izin}|${f.sakit}|${f.cuti}|${f.absent}|${f.pending}`;
+    })
     .join("\n");
-  return createHash("sha256").update(canon).digest("hex");
+  return createHash("sha256").update(extra ? `${canon}\n#${extra}` : canon).digest("hex");
 }

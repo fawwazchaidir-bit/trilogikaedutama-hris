@@ -24,7 +24,11 @@ export default defineConfig({
     locale: "id-ID",
     timezoneId: "Asia/Jakarta",
     // Di CI: `npx playwright install chromium`. Di sandbox ini: PW_CHROMIUM_PATH=/opt/pw-browsers/chromium
-    launchOptions: { executablePath: process.env.PW_CHROMIUM_PATH || undefined },
+    launchOptions: {
+      executablePath: process.env.PW_CHROMIUM_PATH || undefined,
+      // Kamera palsu (video uji) untuk menguji foto absensi tanpa perangkat keras; izin kamera diberikan otomatis.
+      args: ["--use-fake-device-for-media-stream", "--use-fake-ui-for-media-stream"],
+    },
   },
   // Build produksi sungguhan (sekaligus memverifikasi `next build`) dengan database TEST.
   webServer: {

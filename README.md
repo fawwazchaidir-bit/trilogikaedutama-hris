@@ -3,17 +3,17 @@
 Aplikasi web internal untuk **data karyawan, absensi, rekap otomatis, penggajian, dan slip gaji (PDF)** — Bahasa Indonesia,
 responsif (komputer & ponsel), tampilan mengikuti aplikasi invoice Trilogika agar familier.
 
-> **Bukan mockup.** Setiap tombol terhubung ke database PostgreSQL dan diuji: 225 tes unit/integrasi (terhadap PostgreSQL sungguhan)
-> dan 38 tes E2E di browser (login → absensi → pengajuan → persetujuan → penggajian → slip PDF → pembatalan/revisi).
+> **Bukan mockup.** Setiap tombol terhubung ke database PostgreSQL dan diuji: 552 tes unit/integrasi (terhadap PostgreSQL sungguhan)
+> dan 73 tes E2E di browser (login → absensi → pengajuan → persetujuan → penggajian → slip PDF → pembatalan/revisi → 2FA → lembur → laporan).
 > Data demo bersifat fiktif. **Baca [docs/KEPUTUSAN-BISNIS.md](docs/KEPUTUSAN-BISNIS.md) sebelum dipakai operasional.**
 
 ## Peran
 
 | Peran | Ringkasan hak akses |
 |---|---|
-| **Super Admin / Pimpinan** | Semua: akun admin & karyawan, kebijakan absensi/cuti, aturan penggajian, **persetujuan** & pembatalan penggajian, audit log, laporan. |
-| **Admin / HR** | Data karyawan, jadwal & hari libur, koreksi absensi (beralasan), proses izin/sakit/cuti, rekap, komponen gaji, menghitung & **menerbitkan** gaji, unduh slip. **Tidak** dapat menyetujui gaji, mengubah aturan penggajian/kebijakan, mengelola akun admin, atau melihat audit log. |
-| **Karyawan** | Profil & jadwal sendiri, check-in/out, riwayat & rekap sendiri, mengajukan izin/sakit/cuti, melihat & mengunduh **slip miliknya** yang sudah terbit. Tidak dapat melihat data orang lain — dipaksa di sisi server, bukan hanya disembunyikan di menu. |
+| **Super Admin / Pimpinan** | Semua: akun admin & karyawan (termasuk reset 2FA), kebijakan absensi/cuti/keamanan, aturan penggajian & BPJS/PPh 21, **persetujuan** & pembatalan penggajian, audit log, laporan. |
+| **Admin / HR** | Data karyawan, jadwal & hari libur, koreksi absensi (beralasan), proses izin/sakit/cuti & lembur, tinjauan lokasi, rekap & laporan, komponen gaji, menghitung & **menerbitkan** gaji, unduh slip. **Tidak** dapat menyetujui gaji, mengubah aturan penggajian/BPJS/PPh 21/kebijakan/keamanan, mengelola akun admin, atau melihat audit log. |
+| **Karyawan** | Profil & jadwal sendiri, check-in/out, riwayat & rekap sendiri, mengajukan izin/sakit/cuti (termasuk setengah hari) dan lembur, melihat & mengunduh **slip miliknya** yang sudah terbit, mengatur 2FA & notifikasi. Tidak dapat melihat data orang lain — dipaksa di sisi server, bukan hanya disembunyikan di menu. |
 
 ## Fitur Tahap 1 (berfungsi)
 
@@ -30,14 +30,23 @@ responsif (komputer & ponsel), tampilan mengikuti aplikasi invoice Trilogika aga
 | **Slip gaji** | PDF A4 profesional (logo dari Pengaturan), rupiah, ringkasan kehadiran, rekening disamarkan, unduh per karyawan atau seluruh periode (1 PDF / ZIP). Dirender dari **snapshot** yang terkunci. |
 | **Dashboard** | Admin: hadir/terlambat/belum absen, pengajuan menunggu, absensi belum lengkap, status & total gaji. Karyawan: jadwal, tombol absen, rekap bulan ini, status pengajuan, slip terbaru. |
 
-## Fitur Tahap 2 (sudah dikerjakan sebagian)
+## Fitur Tahap 2 (berfungsi — diuji)
 
-| Fitur | Status |
+| Fitur | Isi |
 |---|---|
-| Absensi berbasis lokasi (titik + radius, opsional) | ✅ Berfungsi, diuji di browser. Tanpa selfie & tanpa pelacakan terus-menerus. Lokasi perangkat hanyalah alat bantu. |
-| Impor massal karyawan (Excel/CSV) | ✅ Templat, pratinjau per baris, komit atomik (satu baris salah = tidak ada yang tersimpan). |
-| Notifikasi (pengajuan, keputusan, slip, persetujuan gaji) | ✅ Dalam aplikasi (lonceng + halaman). ❌ Belum ada email/WhatsApp/push. |
-| Laporan & analisis lanjutan | ❌ **Belum dibuat.** Yang ada: rekap + ekspor, ringkasan dashboard. |
+| **Shift lintas tengah malam** | Jadwal 22.00–06.00 dst. (maks. 16 jam); shift milik tanggal ia dimulai; check-out dini hari menutup shift kemarin (masa tenggang 6 jam); koreksi admin & dashboard mengikuti. |
+| **Izin/sakit/cuti setengah hari** | Pagi/siang, pecahan 0,5 di rekap, saldo, buku saldo, gaji; jam masuk efektif cuti pagi = tengah shift. |
+| **Lembur dengan persetujuan** | Pengajuan → setujui/kurangi/tolak → dibayar sesuai bukti absensi; tarif tetap atau gaji ÷ pembagi; pengali jam; periode gaji ditandai "Data berubah" bila persetujuan berubah. |
+| **BPJS & PPh 21 otomatis** | BPJS (Kesehatan, JHT, JP, JKK, JKM; porsi karyawan & perusahaan), PPh 21 TER + true-up masa pajak terakhir; semua tarif/tabel dapat diubah; komponen manual menggantikan otomatis; konfirmasi Super Admin wajib. **Nonaktif secara bawaan & wajib diverifikasi.** |
+| **Lupa password mandiri** | Email, tautan sekali pakai 30 menit, anti-enumerasi, dibatasi, akun ber-2FA wajib kode. |
+| **2FA (TOTP)** | Aplikasi autentikator + QR, 10 kode pemulihan, anti-replay, dapat diwajibkan untuk admin, reset oleh Super Admin. |
+| **Notifikasi email/WhatsApp** | Selain dalam aplikasi: SMTP, WhatsApp (Fonnte / Meta Cloud API / webhook), antrean transaksional + percobaan ulang, preferensi per pengguna, pesan uji, status antrean di Pengaturan. |
+| **Foto absensi bercap** | Foto dari kamera saat check-in/out; **server** mencetak waktu server + koordinat + nama pada foto (tanpa syarat Wi-Fi/jaringan kantor — cocok untuk **dinas luar**), EXIF dibuang, disimpan sebagai bukti append-only, ditinjau HR di rekap & Tinjauan Lokasi. Mati / opsional / wajib. **Retensi otomatis** (bawaan 6 bulan; jejak teks tetap, yang sedang ditinjau dikecualikan, tiap penghapusan diaudit). **Bukti untuk ditinjau manusia, bukan jaminan keaslian.** |
+| **Pencegahan lokasi palsu** | Penilaian risiko berlapis (kesegaran, akurasi/presisi, titik pusat, koordinat berulang/bersama, perpindahan mustahil, perangkat) → tandai/tolak, antrean Tinjauan Lokasi (memuat tautan foto). **Tidak menjamin anti-manipulasi** — lihat batasan. |
+| **Laporan & analisis lanjutan** | `/laporan`: ringkasan eksekutif (KPI vs bulan lalu, tren, temuan), kehadiran, cuti & lembur, biaya SDM, rekap BPJS & PPh 21, headcount & turnover; ekspor Excel/CSV/PDF. |
+| Absensi berbasis lokasi · Impor karyawan | Sejak sebelumnya (titik + radius; impor Excel/CSV atomik). |
+
+Batasan yang jujur (lokasi palsu tidak 100% dapat dicegah di web, integrasi WhatsApp/email belum diuji ke penyedia sungguhan, tabel pajak wajib diverifikasi) ada di [docs/KEPUTUSAN-BISNIS.md](docs/KEPUTUSAN-BISNIS.md).
 
 ## Teknologi
 
@@ -75,6 +84,7 @@ Seed demo **menolak** berjalan bila `NODE_ENV=production`, host database bukan l
 | `npm run db:migrate` · `db:seed` · `db:seed:dev` | Migrasi · seed produksi · seed demo |
 | `npm run db:backup` · `db:restore` · `db:verify` | Cadangan · pemulihan · verifikasi hasil pemulihan |
 | `npm run user:create` | Buat akun dari terminal (pemulihan akses) |
+| `npm run typecheck` | Pemeriksaan tipe (strict) |
 
 ## Dokumentasi
 
@@ -82,5 +92,6 @@ Seed demo **menolak** berjalan bila `NODE_ENV=production`, host database bukan l
 - [KEPUTUSAN-BISNIS](docs/KEPUTUSAN-BISNIS.md) — **hal yang perlu Anda tentukan sebelum operasional** + keterbatasan
 - [ARCHITECTURE](docs/ARCHITECTURE.md) — struktur, basis data, cara status & gaji dihitung
 - [SECURITY](docs/SECURITY.md) — kontrol keamanan & privasi
+- [AUDIT](docs/AUDIT.md) — hasil audit pra-PR (temuan & perbaikan, uji silang waktu/zona, sapuan rute API, uji antar sistem, latihan pemasangan) dan **batasannya**
 - [DEPLOYMENT](docs/DEPLOYMENT.md) — konfigurasi, Docker, cadangan/pemulihan
 - [API](docs/API.md) — daftar endpoint

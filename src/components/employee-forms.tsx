@@ -10,22 +10,26 @@ import { useToast } from "@/components/ui/toast";
 import { api, ApiClientError, errorMessage } from "@/lib/api-client";
 import { uploadFile } from "@/components/upload";
 import { EMPLOYMENT_LABEL, type EmploymentStatus } from "@/lib/labels";
+import { TAX_STATUSES, TAX_STATUS_LABEL, type TaxStatus } from "@/lib/statutory";
 import type { EmployeeDto } from "@/server/services/employees";
 
 interface Div { id: string; name: string }
 type Form = {
   employeeNo: string; fullName: string; divisionId: string; position: string; employmentStatus: EmploymentStatus; joinDate: string;
   phone: string; email: string; address: string; bankName: string; bankAccountNo: string; clearBank: boolean; bankAccountHolder: string; notes: string;
+  taxStatus: TaxStatus; hasNpwp: boolean; bpjsHealthEnrolled: boolean; bpjsEmploymentEnrolled: boolean;
 };
 
 const blank = (today: string): Form => ({
   employeeNo: "", fullName: "", divisionId: "", position: "", employmentStatus: "PERMANENT", joinDate: today, phone: "", email: "", address: "",
   bankName: "", bankAccountNo: "", clearBank: false, bankAccountHolder: "", notes: "",
+  taxStatus: "TK0", hasNpwp: true, bpjsHealthEnrolled: true, bpjsEmploymentEnrolled: true,
 });
 const fromDto = (e: EmployeeDto): Form => ({
   employeeNo: e.employeeNo, fullName: e.fullName, divisionId: e.divisionId ?? "", position: e.position, employmentStatus: e.employmentStatus, joinDate: e.joinDate,
   phone: e.phone ?? "", email: e.email ?? "", address: e.address ?? "", bankName: e.bankName ?? "", bankAccountNo: "", clearBank: false,
   bankAccountHolder: e.bankAccountHolder ?? "", notes: e.notes ?? "",
+  taxStatus: e.taxStatus, hasNpwp: e.hasNpwp, bpjsHealthEnrolled: e.bpjsHealthEnrolled, bpjsEmploymentEnrolled: e.bpjsEmploymentEnrolled,
 });
 
 export function EmployeeFormDialog({ open, onClose, employee, divisions, today }: { open: boolean; onClose: () => void; employee: EmployeeDto | null; divisions: Div[]; today: string }) {
@@ -42,6 +46,7 @@ export function EmployeeFormDialog({ open, onClose, employee, divisions, today }
     const body = {
       employeeNo: form.employeeNo, fullName: form.fullName, divisionId: form.divisionId || null, position: form.position, employmentStatus: form.employmentStatus,
       joinDate: form.joinDate, phone: form.phone, email: form.email, address: form.address, bankName: form.bankName, bankAccountHolder: form.bankAccountHolder, notes: form.notes,
+      taxStatus: form.taxStatus, hasNpwp: form.hasNpwp, bpjsHealthEnrolled: form.bpjsHealthEnrolled, bpjsEmploymentEnrolled: form.bpjsEmploymentEnrolled,
       ...(form.clearBank ? { bankAccountNo: null } : form.bankAccountNo.trim() ? { bankAccountNo: form.bankAccountNo.trim() } : {}),
     };
     try {
@@ -66,7 +71,8 @@ export function EmployeeFormDialog({ open, onClose, employee, divisions, today }
           <option value="">— Tanpa divisi —</option>{divisions.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
         </SelectField>
         <TextField label="Jabatan" required value={form.position} onChange={(e) => set("position", e.target.value)} error={fe.position} />
-        <SelectField label="Status karyawan" required value={form.employmentStatus} onChange={(e) => set("employmentStatus", e.target.value as EmploymentStatus)} error={fe.employmentStatus}>
+        <SelectField label="Status karyawan" required value={form.employmentStatus}
+          onChange={(e) => { const v = e.target.value as EmploymentStatus; setForm((f) => ({ ...f, employmentStatus: v, ...(employee ? {} : { bpjsHealthEnrolled: v !== "INTERN", bpjsEmploymentEnrolled: v !== "INTERN" }) })); }} error={fe.employmentStatus}>
           {(Object.keys(EMPLOYMENT_LABEL) as EmploymentStatus[]).map((s) => <option key={s} value={s}>{EMPLOYMENT_LABEL[s]}</option>)}
         </SelectField>
         <TextField label="Tanggal mulai bekerja" type="date" required value={form.joinDate} onChange={(e) => set("joinDate", e.target.value)} error={fe.joinDate} />
@@ -80,6 +86,17 @@ export function EmployeeFormDialog({ open, onClose, employee, divisions, today }
             placeholder={employee?.bankAccountMasked ? "Kosongkan jika tidak diubah" : ""} hint="Disimpan terenkripsi" />
           <TextField label="Nama pemilik rekening" value={form.bankAccountHolder} onChange={(e) => set("bankAccountHolder", e.target.value)} error={fe.bankAccountHolder} />
           {employee?.bankAccountMasked && <label className="flex items-center gap-2 text-sm sm:col-span-3"><input type="checkbox" checked={form.clearBank} onChange={(e) => set("clearBank", e.target.checked)} />Hapus nomor rekening tersimpan ({employee.bankAccountMasked})</label>}
+        </fieldset>
+        <fieldset className="grid gap-4 rounded-md border border-line p-4 sm:col-span-2 sm:grid-cols-2">
+          <legend className="px-1 text-sm font-medium text-ink-soft">Pajak &amp; BPJS (untuk perhitungan otomatis)</legend>
+          <SelectField label="Status PTKP" value={form.taxStatus} onChange={(e) => set("taxStatus", e.target.value as TaxStatus)} error={fe.taxStatus} hint="Menentukan kategori TER dan PTKP PPh 21.">
+            {TAX_STATUSES.map((s) => <option key={s} value={s}>{TAX_STATUS_LABEL[s]}</option>)}
+          </SelectField>
+          <div className="flex flex-col justify-end gap-2 pb-1 text-sm">
+            <label className="flex items-center gap-2"><input type="checkbox" checked={form.hasNpwp} onChange={(e) => set("hasNpwp", e.target.checked)} />Memiliki NPWP / NIK terdaftar (tanpa NPWP: tarif PPh 21 lebih tinggi)</label>
+            <label className="flex items-center gap-2"><input type="checkbox" checked={form.bpjsHealthEnrolled} onChange={(e) => set("bpjsHealthEnrolled", e.target.checked)} />Peserta BPJS Kesehatan</label>
+            <label className="flex items-center gap-2"><input type="checkbox" checked={form.bpjsEmploymentEnrolled} onChange={(e) => set("bpjsEmploymentEnrolled", e.target.checked)} />Peserta BPJS Ketenagakerjaan (JHT, JP, JKK, JKM)</label>
+          </div>
         </fieldset>
         <div className="sm:col-span-2"><TextAreaField label="Catatan internal" rows={2} value={form.notes} onChange={(e) => set("notes", e.target.value)} error={fe.notes} /></div>
       </div>

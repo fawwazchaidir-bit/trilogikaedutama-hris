@@ -8,7 +8,8 @@ import { currentPayrollSummary, type RunDto } from "./payroll";
 import { getTodayState, type TodayState } from "./attendance";
 import { listLeaves, listMyLeaves, pendingLeaveCount, type LeaveDto } from "./leave";
 import { listMyPayslips, type PayslipDto } from "./payslips";
-import { summarizeDays, type RecapTotals } from "@/lib/attendance";
+import { openLocationReviewCount } from "./location";
+import { currentDayRow, summarizeDays, type RecapTotals } from "@/lib/attendance";
 import { addDays, todayIso } from "@/lib/time";
 
 export interface AdminDashboard {
@@ -24,6 +25,8 @@ export interface AdminDashboard {
   /** Check-in hari ini yang belum check-out (informasi). */
   openCheckouts: number;
   pendingRequests: number;
+  /** Absensi lokasi yang ditandai/ditolak dan belum ditinjau (hanya bila berhak meninjau). */
+  openLocationReviews: number | null;
   /** Absensi belum lengkap (check-in tanpa check-out) dalam 31 hari terakhir, tidak termasuk hari ini. */
   incomplete: number;
   incompleteList: { employeeId: string; name: string; date: string }[];
@@ -46,7 +49,8 @@ export async function getAdminDashboard(actor: Actor, now: Date = new Date()): P
   let incomplete = 0;
   for (const e of employees) {
     const { days } = computeEmployeePeriod(employeeLite(e), ctx);
-    const t = days.find((d) => d.date === today);
+    // Shift malam kemarin yang masih berjalan lebih relevan daripada baris hari ini yang shift-nya belum mulai.
+    const t = currentDayRow(days, now, tz);
     if (t) {
       if (t.status === "HADIR") present++;
       else if (t.status === "TERLAMBAT") { present++; late++; }
@@ -65,15 +69,16 @@ export async function getAdminDashboard(actor: Actor, now: Date = new Date()): P
   }
   incompleteList.sort((a, b) => b.date.localeCompare(a.date));
 
-  const [pendingRequests, pendingRows, payroll, settings, def] = await Promise.all([
+  const [pendingRequests, openLocationReviews, pendingRows, payroll, settings, def] = await Promise.all([
     pendingLeaveCount(),
+    actorCan(actor, "location:review") ? openLocationReviewCount() : Promise.resolve(null),
     actorCan(actor, "leave:view_all") ? listLeaves(actor, { status: "PENDING", pageSize: 5 }) : Promise.resolve(null),
     actorCan(actor, "payroll:view") ? currentPayrollSummary() : Promise.resolve(null),
     prisma.companySettings.findUnique({ where: { id: 1 } }),
     prisma.workSchedule.count({ where: { isDefault: true } }),
   ]);
   return {
-    today, activeEmployees: employees.length, present, late, notYet, absent, onLeave, noSchedule, openCheckouts, pendingRequests,
+    today, activeEmployees: employees.length, present, late, notYet, absent, onLeave, noSchedule, openCheckouts, pendingRequests, openLocationReviews,
     incomplete, incompleteList, pendingList: pendingRows?.items ?? [], payroll, missingDefaultSchedule: def === 0,
     setup: { attendanceConfirmed: !!settings?.attendancePolicyConfirmedAt, payrollRulesConfirmed: !!settings?.payrollRulesConfirmedAt },
   };

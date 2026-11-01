@@ -7,6 +7,7 @@ import { Card, CardHeader, Notice } from "@/components/ui/card";
 import { DayStatusBadge } from "@/components/ui/badge";
 import { useToast } from "@/components/ui/toast";
 import { TextAreaField } from "@/components/ui/field";
+import { PhotoCapture } from "@/components/photo-capture";
 import { api, errorMessage } from "@/lib/api-client";
 import { formatDateWithDay, dotTime } from "@/lib/format";
 import type { TodayState } from "@/server/services/attendance";
@@ -25,11 +26,12 @@ function useServerClock(serverNow: string, timeZone: string) {
   return new Intl.DateTimeFormat("id-ID", { timeZone, hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23" }).format(now).replace(/\./g, ":");
 }
 
-function readLocation(): Promise<{ lat: number; lng: number; accuracy: number }> {
+/** Koordinat + waktu pembacaan (jam perangkat) agar server dapat menilai kesegaran pembacaan. */
+function readLocation(): Promise<{ lat: number; lng: number; accuracy: number; timestamp: number; clientNow: number }> {
   return new Promise((resolve, reject) => {
     if (!("geolocation" in navigator)) return reject(new Error("Perangkat/browser Anda tidak mendukung lokasi."));
     navigator.geolocation.getCurrentPosition(
-      (p) => resolve({ lat: p.coords.latitude, lng: p.coords.longitude, accuracy: p.coords.accuracy }),
+      (p) => resolve({ lat: p.coords.latitude, lng: p.coords.longitude, accuracy: p.coords.accuracy, timestamp: p.timestamp, clientNow: Date.now() }),
       (e) => reject(new Error(
         e.code === e.PERMISSION_DENIED ? "Izin lokasi ditolak. Aktifkan izin lokasi untuk situs ini di pengaturan browser/ponsel, lalu coba lagi."
           : e.code === e.TIMEOUT ? "Lokasi tidak berhasil dibaca (waktu habis). Pastikan GPS aktif dan coba lagi."
@@ -46,6 +48,7 @@ export function AttendancePanel({ initial }: { initial: TodayState }) {
   const [override, setOverride] = useState<{ forServerNow: string; state: TodayState } | null>(null);
   const state = override && override.forServerNow === initial.serverNow ? override.state : initial;
   const [note, setNote] = useState("");
+  const [photo, setPhoto] = useState<Blob | null>(null);
   const [busy, setBusy] = useState<"in" | "out" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const clock = useServerClock(state.serverNow, state.timeZone);
@@ -54,10 +57,23 @@ export function AttendancePanel({ initial }: { initial: TodayState }) {
     setBusy(kind);
     setError(null);
     try {
-      const location = state.geo.enabled ? await readLocation() : null;
-      const next = await api<TodayState>(`/api/attendance/check-${kind}`, { body: { note: note.trim() || null, location } });
+      const photoOn = state.photo.mode !== "OFF";
+      if (photoOn && state.photo.mode === "REQUIRED" && !photo) throw new Error("Ambil foto absensi dulu (tombol Buka kamera), lalu tekan lagi.");
+      // Lokasi dibaca bila absensi berbasis lokasi aktif, atau bila ada foto yang harus bercap lokasi (wajib → galat jelas bila gagal; tidak wajib → dicoba saja).
+      const location = state.geo.enabled || (photo && state.photo.requireLocation) ? await readLocation() : photo ? await readLocation().catch(() => null) : null;
+      const payload = { note: note.trim() || null, location };
+      let next: TodayState;
+      if (photo) {
+        const form = new FormData();
+        form.set("payload", JSON.stringify(payload));
+        form.set("photo", photo, "absensi.jpg");
+        next = await api<TodayState>(`/api/attendance/check-${kind}`, { form });
+      } else {
+        next = await api<TodayState>(`/api/attendance/check-${kind}`, { body: payload });
+      }
       setOverride({ forServerNow: initial.serverNow, state: next });
       setNote("");
+      setPhoto(null);
       toast.success(kind === "in" ? `Check-in tercatat pukul ${dotTime(next.day.checkInTime ?? "")} WIB.` : `Check-out tercatat pukul ${dotTime(next.day.checkOutTime ?? "")} WIB.`);
       router.refresh();
     } catch (e) {
@@ -70,7 +86,7 @@ export function AttendancePanel({ initial }: { initial: TodayState }) {
   const d = state.day;
   return (
     <Card>
-      <CardHeader title="Absensi hari ini" description={formatDateWithDay(state.today)} />
+      <CardHeader title="Absensi hari ini" description={state.workDate !== state.today ? `Shift ${formatDateWithDay(state.workDate)} masih berjalan` : formatDateWithDay(state.today)} />
       <div className="space-y-5 p-5">
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div>
@@ -81,7 +97,7 @@ export function AttendancePanel({ initial }: { initial: TodayState }) {
             {state.schedule ? (
               <>
                 <p className="font-medium text-ink">{state.schedule.name}</p>
-                <p className="text-muted">{dotTime(state.schedule.startTime)} – {dotTime(state.schedule.endTime)} · toleransi {state.schedule.lateToleranceMinutes} mnt</p>
+                <p className="text-muted">{dotTime(state.schedule.startTime)} – {dotTime(state.schedule.endTime)}{state.schedule.endTime < state.schedule.startTime ? " (+1 hari)" : ""} · toleransi {state.schedule.lateToleranceMinutes} mnt</p>
               </>
             ) : <p className="text-muted">Tidak ada jadwal kerja</p>}
             <div className="mt-1.5 flex justify-end"><DayStatusBadge status={d.status} missingCheckout={d.missingCheckout} /></div>
@@ -94,18 +110,27 @@ export function AttendancePanel({ initial }: { initial: TodayState }) {
         {error && <Notice tone="danger">{error}</Notice>}
 
         <dl className="grid grid-cols-2 gap-3 text-sm">
-          <div className="rounded-md border border-line bg-canvas/60 p-3"><dt className="text-xs text-muted">Check-in</dt><dd className="tabular mt-0.5 text-lg font-semibold">{d.checkInTime ? dotTime(d.checkInTime) : "—"}</dd></div>
-          <div className="rounded-md border border-line bg-canvas/60 p-3"><dt className="text-xs text-muted">Check-out</dt><dd className="tabular mt-0.5 text-lg font-semibold">{d.checkOutTime ? dotTime(d.checkOutTime) : "—"}</dd></div>
+          <div className="rounded-md border border-line bg-canvas/60 p-3"><dt className="text-xs text-muted">Check-in</dt><dd className="tabular mt-0.5 text-lg font-semibold">{d.checkInTime ? dotTime(d.checkInTime) : "—"}{d.checkInNextDay && <span className="ml-1 text-xs font-normal text-muted">(+1 hari)</span>}</dd></div>
+          <div className="rounded-md border border-line bg-canvas/60 p-3"><dt className="text-xs text-muted">Check-out</dt><dd className="tabular mt-0.5 text-lg font-semibold">{d.checkOutTime ? dotTime(d.checkOutTime) : "—"}{d.checkOutNextDay && <span className="ml-1 text-xs font-normal text-muted">(+1 hari)</span>}</dd></div>
         </dl>
         {d.checkInTime && <p className="text-xs text-muted">{d.explain}</p>}
 
         {(state.canCheckIn || state.canCheckOut) && (
           <TextAreaField label="Catatan (opsional)" rows={2} maxLength={200} value={note} onChange={(e) => setNote(e.target.value)} placeholder="mis. bekerja dari lokasi klien" />
         )}
+        {state.photo.mode !== "OFF" && (state.canCheckIn || state.canCheckOut) && (
+          <div className="space-y-2 rounded-md border border-line p-3">
+            <PhotoCapture value={photo} onChange={setPhoto} required={state.photo.mode === "REQUIRED"} disabled={busy !== null} />
+            <p className="flex items-start gap-1.5 text-xs text-muted"><MapPin className="mt-0.5 size-3.5 shrink-0" />
+              Foto dicap <strong className="mx-0.5 font-medium">waktu server</strong>{state.photo.requireLocation ? " dan koordinat lokasi Anda" : " (dan koordinat bila tersedia)"} oleh server, sehingga cocok untuk dinas luar. Tanpa syarat Wi-Fi/jaringan kantor.
+              Browser akan meminta izin kamera{state.photo.requireLocation ? " dan lokasi" : ""}.
+            </p>
+          </div>
+        )}
         {state.geo.enabled && (state.canCheckIn || state.canCheckOut) && (
           <p className="flex items-start gap-1.5 text-xs text-muted"><MapPin className="mt-0.5 size-3.5 shrink-0" />
             Absensi berbasis lokasi aktif{state.geo.name ? ` (${state.geo.name})` : ""}: browser akan meminta izin lokasi satu kali saat Anda menekan tombol. Radius {state.geo.radiusMeters} m.
-            Lokasi perangkat hanya alat bantu dan tidak dilacak terus-menerus.
+            Lokasi dibaca sekali dan diperiksa kewajarannya (mis. terhadap aplikasi lokasi palsu); tidak dilacak terus-menerus.
           </p>
         )}
         <div className="grid grid-cols-2 gap-3">

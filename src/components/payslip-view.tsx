@@ -1,6 +1,6 @@
 import { Card, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { formatDateLong, formatDateRange, formatDuration } from "@/lib/format";
+import { formatDateLong, formatDateRange, formatDuration, formatDays } from "@/lib/format";
 import { formatRupiah } from "@/lib/money";
 import { terbilang } from "@/lib/terbilang";
 import { EMPLOYMENT_LABEL } from "@/lib/labels";
@@ -59,12 +59,18 @@ export function PayslipView({ s, voided }: { s: PayslipSnapshot; voided?: boolea
         <div className="flex flex-wrap items-center justify-between gap-2"><p className="font-semibold">Gaji bersih diterima</p><p className="tabular text-2xl font-semibold text-brand-700">{R(s.netPay)}</p></div>
         {s.netPay >= 0 && <p className="mt-1 text-sm italic text-muted">Terbilang: {terbilang(s.netPay)}</p>}
       </div>
+      {s.employerContributions && s.employerContributions.length > 0 && (
+        <Card>
+          <CardHeader title="Beban perusahaan (informasi)" description="Iuran BPJS porsi pemberi kerja. Tidak dipotong dari gaji Anda dan tidak termasuk dalam gaji bersih." />
+          <ul className="space-y-1 p-5 text-sm">{s.employerContributions.map((l) => <li key={l.name} className="flex justify-between gap-4"><span>{l.name}</span><span className="tabular">{R(l.amount)}</span></li>)}</ul>
+        </Card>
+      )}
       {a && (
         <Card>
           <CardHeader title="Ringkasan kehadiran" description={formatDateRange(s.attendanceBasis.start, s.attendanceBasis.end)} />
           <dl className="grid grid-cols-2 gap-3 p-5 text-sm sm:grid-cols-4">
-            {[["Hari kerja terjadwal", a.scheduledDays], ["Hadir", a.presentDays], ["Terlambat", `${a.lateCount}x (${formatDuration(a.lateMinutes)})`], ["Tidak hadir", a.absentDays],
-              ["Izin", a.izinDays], ["Sakit", a.sakitDays], ["Cuti", a.cutiDays], ["Jam kerja tercatat", formatDuration(a.workedMinutes)]].map(([k, v]) => (
+            {[["Hari kerja terjadwal", formatDays(a.scheduledDays)], ["Hadir", formatDays(a.presentDays)], ["Terlambat", `${a.lateCount}x (${formatDuration(a.lateMinutes)})`], ["Tidak hadir", formatDays(a.absentDays)],
+              ["Izin", formatDays(a.izinDays)], ["Sakit", formatDays(a.sakitDays)], ["Cuti", formatDays(a.cutiDays)], ["Jam kerja tercatat", formatDuration(a.workedMinutes)]].map(([k, v]) => (
               <div key={String(k)}><dt className="text-xs text-muted">{k}</dt><dd className="font-semibold">{v}</dd></div>
             ))}
           </dl>

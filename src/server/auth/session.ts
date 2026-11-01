@@ -35,9 +35,29 @@ export async function createSession(userId: string, ip: string | null, userAgent
   return { token, expiresAt };
 }
 
+/**
+ * Kebijakan "2FA wajib untuk admin" dibaca pada tiap permintaan; di-cache singkat agar tidak menambah query tiap request.
+ * Perubahan pengaturan menghapus cache proses ini (instance lain mengikuti dalam ≤ 15 detik).
+ */
+// Disimpan di globalThis: Next membangun grafik modul terpisah untuk halaman (RSC) dan route handler, sehingga variabel
+// tingkat-modul biasa TIDAK ikut terhapus saat pengaturan diubah lewat API (kebijakan baru baru berlaku di halaman setelah 15 detik).
+const policyStore = globalThis as unknown as { __securityPolicyCache?: { at: number; adminsRequire2fa: boolean } | null };
+export function invalidateSecurityPolicyCache(): void { policyStore.__securityPolicyCache = null; }
+async function adminsRequireTwoFactor(): Promise<boolean> {
+  const hit = policyStore.__securityPolicyCache;
+  if (hit && Date.now() - hit.at < 15_000) return hit.adminsRequire2fa;
+  const s = await prisma.companySettings.findUnique({ where: { id: 1 }, select: { twoFactorRequiredForAdmins: true } });
+  const fresh = { at: Date.now(), adminsRequire2fa: !!s?.twoFactorRequiredForAdmins };
+  policyStore.__securityPolicyCache = fresh;
+  return fresh.adminsRequire2fa;
+}
+
 export interface SessionUser extends Actor {
   sessionId: string;
   mustChangePassword: boolean;
+  twoFactorEnabled: boolean;
+  /** Kebijakan mewajibkan 2FA untuk peran ini tetapi belum diaktifkan → hanya halaman/API pengaturan 2FA yang boleh dipakai. */
+  mustSetupTwoFactor: boolean;
   /** Akun demonstrasi (hanya untuk pengujian) → antarmuka menampilkan banner peringatan. */
   isDemo: boolean;
 }
@@ -67,6 +87,8 @@ export async function validateSession(token: string | undefined | null): Promise
     role: session.user.role,
     employeeId: session.user.employee?.id ?? null,
     mustChangePassword: session.user.mustChangePassword,
+    twoFactorEnabled: session.user.twoFactorEnabled,
+    mustSetupTwoFactor: session.user.role !== "EMPLOYEE" && !session.user.twoFactorEnabled && (await adminsRequireTwoFactor()),
     isDemo: session.user.isDemo,
   };
 }

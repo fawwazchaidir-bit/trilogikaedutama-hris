@@ -26,9 +26,21 @@ export const scheduleSchema = z.object({
   isDefault: z.boolean().optional(),
   isActive: z.boolean().optional(),
 }).superRefine((v, ctx) => {
-  if (v.endTime <= v.startTime) ctx.addIssue({ code: "custom", path: ["endTime"], message: "Jam pulang harus setelah jam masuk" });
-  if (v.absentCutoffTime <= v.startTime) ctx.addIssue({ code: "custom", path: ["absentCutoffTime"], message: "Batas tidak hadir harus setelah jam masuk" });
-  if (timeToMinutes(v.absentCutoffTime) < timeToMinutes(v.startTime) + v.lateToleranceMinutes) {
+  const overnight = v.endTime < v.startTime;
+  if (v.endTime === v.startTime) ctx.addIssue({ code: "custom", path: ["endTime"], message: "Jam pulang tidak boleh sama dengan jam masuk" });
+  if (v.absentCutoffTime === v.startTime) ctx.addIssue({ code: "custom", path: ["absentCutoffTime"], message: "Batas tidak hadir tidak boleh sama dengan jam masuk" });
+  const start = timeToMinutes(v.startTime);
+  // Menit sejak jam masuk (melewati tengah malam bila perlu).
+  const cutoffOffset = (timeToMinutes(v.absentCutoffTime) - start + 1440) % 1440;
+  if (overnight) {
+    // Shift malam: jam pulang keesokan harinya. Batas tidak hadir boleh malam yang sama atau dini hari berikutnya, tetapi sebelum shift berakhir.
+    const length = (timeToMinutes(v.endTime) - start + 1440) % 1440;
+    if (length > 16 * 60) ctx.addIssue({ code: "custom", path: ["endTime"], message: "Durasi shift lintas tengah malam maksimal 16 jam" });
+    if (cutoffOffset > length) ctx.addIssue({ code: "custom", path: ["absentCutoffTime"], message: "Batas tidak hadir harus sebelum jam pulang shift" });
+  } else if (v.absentCutoffTime <= v.startTime) {
+    ctx.addIssue({ code: "custom", path: ["absentCutoffTime"], message: "Batas tidak hadir harus setelah jam masuk" });
+  }
+  if (cutoffOffset < v.lateToleranceMinutes) {
     ctx.addIssue({ code: "custom", path: ["absentCutoffTime"], message: "Batas tidak hadir tidak boleh lebih awal dari batas toleransi keterlambatan" });
   }
 });

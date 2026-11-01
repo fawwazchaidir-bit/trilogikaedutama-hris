@@ -17,10 +17,12 @@ export const getCurrentUser = cache(async (): Promise<SessionUser | null> => {
 });
 
 /** Untuk halaman server: arahkan ke /login bila belum masuk. */
-export async function requirePageUser(): Promise<SessionUser> {
+export async function requirePageUser(opts: { allowSetup?: boolean } = {}): Promise<SessionUser> {
   const user = await getCurrentUser();
   if (!user) redirect("/login");
   if (user.mustChangePassword) redirect("/change-password");
+  // 2FA wajib tetapi belum aktif: semua halaman mengarahkan ke pengaturan 2FA (kecuali halaman itu sendiri & layout).
+  if (user.mustSetupTwoFactor && !opts.allowSetup) redirect("/akun");
   return user;
 }
 
@@ -30,6 +32,9 @@ export async function requireApiUser(opts: { allowMustChange?: boolean } = {}): 
   if (!user) throw Errors.unauthenticated();
   if (user.mustChangePassword && !opts.allowMustChange) {
     throw Errors.forbidden("Anda harus mengganti password terlebih dahulu.");
+  }
+  if (user.mustSetupTwoFactor && !opts.allowMustChange) {
+    throw Errors.forbidden("Kebijakan perusahaan mewajibkan autentikasi dua langkah (2FA). Aktifkan dulu di menu Keamanan & Notifikasi.");
   }
   return user;
 }

@@ -1,4 +1,10 @@
-import { readBody, route } from "@/server/http";
+import { route } from "@/server/http";
+import { deviceToken } from "@/server/http-device";
+import { readPunchRequest } from "@/server/punch-request";
 import { checkOut } from "@/server/services/attendance";
 
-export const POST = route(async ({ req, actor }) => checkOut(actor, await readBody(req)));
+/** JSON biasa, atau multipart (`payload` + `photo`) bila memakai foto absensi. */
+export const POST = route(async ({ req, actor, meta }) => {
+  const { body, photo } = await readPunchRequest(req);
+  return checkOut(actor, body, new Date(), { ip: meta.ip, deviceToken: await deviceToken(), photo });
+});

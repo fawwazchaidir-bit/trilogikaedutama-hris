@@ -38,6 +38,7 @@ export interface UserDto {
   isActive: boolean;
   isDemo: boolean;
   mustChangePassword: boolean;
+  twoFactorEnabled: boolean;
   lastLoginAt: string | null;
   employeeId: string | null;
   employeeNo: string | null;
@@ -45,7 +46,7 @@ export interface UserDto {
 
 type Row = Prisma.UserGetPayload<{ include: { employee: { select: { id: true; employeeNo: true } } } }>;
 const toDto = (u: Row): UserDto => ({
-  id: u.id, email: u.email, name: u.name, role: u.role, isActive: u.isActive, isDemo: u.isDemo, mustChangePassword: u.mustChangePassword,
+  id: u.id, email: u.email, name: u.name, role: u.role, isActive: u.isActive, isDemo: u.isDemo, mustChangePassword: u.mustChangePassword, twoFactorEnabled: u.twoFactorEnabled,
   lastLoginAt: u.lastLoginAt?.toISOString() ?? null, employeeId: u.employee?.id ?? null, employeeNo: u.employee?.employeeNo ?? null,
 });
 

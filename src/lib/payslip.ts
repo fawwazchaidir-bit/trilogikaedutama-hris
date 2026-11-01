@@ -38,6 +38,8 @@ export interface PayslipSnapshot {
   netPay: number;
   /** Ringkasan kehadiran — hanya bila diaktifkan di pengaturan saat terbit. */
   attendance: RecapTotals | null;
+  /** Beban perusahaan (BPJS porsi pemberi kerja) — informasi, TIDAK mengurangi gaji bersih. */
+  employerContributions?: { name: string; amount: number }[];
   note: string | null;
   footerNote: string | null;
   /** Jejak revisi: nomor slip pada periode yang dibatalkan dan digantikan oleh slip ini. */

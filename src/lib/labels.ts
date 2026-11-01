@@ -32,4 +32,9 @@ export const CALENDAR_KIND_LABEL = { HOLIDAY: "Hari libur", SPECIAL_WORKDAY: "Ha
 export const LEDGER_KIND_LABEL = { GRANT: "Saldo awal / kuota", ADJUSTMENT: "Penyesuaian", USAGE: "Pemakaian", RESTORE: "Pengembalian" } as const;
 export const LATE_MODE_LABEL = { NONE: "Tidak ada potongan", PER_OCCURRENCE: "Nominal per kali terlambat", PER_MINUTE: "Nominal per menit terlambat" } as const;
 export const ABSENCE_MODE_LABEL = { NONE: "Tidak ada potongan", FIXED_PER_DAY: "Nominal tetap per hari", SALARY_DIVISOR: "Gaji pokok ÷ pembagi (per hari)" } as const;
-export const OVERTIME_MODE_LABEL = { MANUAL: "Input manual (disarankan)", AUTO: "Otomatis dari jam pulang" } as const;
+export const OVERTIME_MODE_LABEL = {
+  MANUAL: "Input manual (tanpa perhitungan otomatis)",
+  APPROVED: "Hanya lembur yang disetujui & terbukti di absensi (disarankan)",
+  AUTO: "Otomatis dari jam pulang (tanpa persetujuan)",
+} as const;
+export const OVERTIME_RATE_MODE_LABEL = { FIXED_PER_HOUR: "Nominal tetap per jam", SALARY_DIVISOR: "Gaji pokok ÷ pembagi (mis. 173)" } as const;

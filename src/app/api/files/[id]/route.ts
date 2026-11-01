@@ -16,7 +16,8 @@ export const GET = route<{ id: string }>(async ({ actor, params }) => {
       "Content-Disposition": `${isPdf || file.kind === "LEAVE_ATTACHMENT" ? "attachment" : "inline"}; filename="${file.originalName}"`,
       "X-Content-Type-Options": "nosniff",
       "Content-Security-Policy": "default-src 'none'; sandbox",
-      "Cache-Control": "private, max-age=3600, immutable",
+      // Logo & foto profil boleh disimpan cache pribadi 1 jam; berkas sensitif (foto absensi berwajah, lampiran cuti/sakit) TIDAK PERNAH.
+      "Cache-Control": file.kind === "LOGO" || file.kind === "EMPLOYEE_PHOTO" ? "private, max-age=3600, immutable" : "private, no-store",
     },
   });
 });

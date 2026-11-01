@@ -8,14 +8,14 @@ import { parseInput } from "../validate";
 import { actorCan, assertCan, requireSelf, type Actor } from "../actor";
 import { writeAudit } from "../audit";
 import { dateToIso, isoToDate } from "../json";
-import { countScheduledDays } from "@/lib/attendance";
+import { countScheduledDays, type DayPart } from "@/lib/attendance";
 import { employeeLite, loadRangeContext } from "./context";
 import { getSettings } from "./settings";
 import { notifyUsers, reviewerUserIds } from "./notifications";
 import { diffDays, rangesOverlap, todayIso } from "@/lib/time";
 import { isoDate, optionalText, requiredText, uuid } from "@/lib/validation/common";
 import { LEAVE_TYPE_LABEL, type LeaveType, type RequestStatus } from "@/lib/labels";
-import { formatDateRange } from "@/lib/format";
+import { formatDateRange, formatDays } from "@/lib/format";
 import type { Paged } from "@/lib/types";
 
 export const MAX_LEAVE_RANGE_DAYS = 90;
@@ -26,7 +26,10 @@ export const leaveSubmitSchema = z.object({
   endDate: isoDate,
   reason: requiredText(5, 500, "Alasan"),
   attachmentFileId: uuid.nullable().optional(),
+  /** Seluruh hari (default) atau setengah hari pagi/siang — hanya untuk pengajuan satu hari. */
+  dayPart: z.enum(["FULL", "MORNING", "AFTERNOON"]).default("FULL"),
 }).superRefine((v, ctx) => {
+  if (v.dayPart !== "FULL" && v.startDate !== v.endDate) ctx.addIssue({ code: "custom", path: ["dayPart"], message: "Setengah hari hanya untuk pengajuan satu hari (tanggal mulai = tanggal selesai)" });
   if (v.endDate < v.startDate) ctx.addIssue({ code: "custom", path: ["endDate"], message: "Tanggal selesai tidak boleh sebelum tanggal mulai" });
   else if (diffDays(v.endDate, v.startDate) + 1 > MAX_LEAVE_RANGE_DAYS) ctx.addIssue({ code: "custom", path: ["endDate"], message: `Rentang pengajuan maksimal ${MAX_LEAVE_RANGE_DAYS} hari` });
 });
@@ -51,6 +54,8 @@ export interface LeaveDto {
   endDate: string;
   reason: string;
   status: RequestStatus;
+  dayPart: DayPart;
+  /** Hari kerja terjadwal yang tercakup (0,5 untuk setengah hari). */
   workingDays: number | null;
   attachmentUrl: string | null;
   reviewedBy: string | null;
@@ -72,7 +77,7 @@ async function toDtos(rows: Row[]): Promise<LeaveDto[]> {
   const name = new Map(users.map((u) => [u.id, u.name]));
   return rows.map((r) => ({
     id: r.id, employeeId: r.employeeId, employeeName: r.employee.fullName, employeeNo: r.employee.employeeNo, division: r.employee.division?.name ?? null,
-    type: r.type, startDate: dateToIso(r.startDate), endDate: dateToIso(r.endDate), reason: r.reason, status: r.status, workingDays: r.workingDays,
+    type: r.type, startDate: dateToIso(r.startDate), endDate: dateToIso(r.endDate), reason: r.reason, status: r.status, dayPart: r.dayPart, workingDays: r.workingDays,
     attachmentUrl: r.attachmentFileId ? `/api/files/${r.attachmentFileId}` : null,
     reviewedBy: r.reviewedById ? name.get(r.reviewedById) ?? null : null, reviewedAt: r.reviewedAt?.toISOString() ?? null, reviewNote: r.reviewNote,
     cancelledAt: r.cancelledAt?.toISOString() ?? null, cancelReason: r.cancelReason, createdAt: r.createdAt.toISOString(),
@@ -81,14 +86,19 @@ async function toDtos(rows: Row[]): Promise<LeaveDto[]> {
 
 // ─────────────────────────── Hari kerja yang tercakup ───────────────────────────
 
-async function workingDaysOf(employeeId: string, start: string, end: string) {
+async function workingDaysOf(employeeId: string, start: string, end: string, dayPart: DayPart = "FULL") {
   const emp = await prisma.employee.findUniqueOrThrow({ where: { id: employeeId } });
   const ctx = await loadRangeContext(start, end, { employeeIds: [employeeId] });
-  return countScheduledDays(employeeLite(emp), start, end, {
+  const r = countScheduledDays(employeeLite(emp), start, end, {
     now: ctx.now, timeZone: ctx.timeZone, lateAfterTolerance: ctx.lateAfterTolerance, schedules: ctx.schedules,
     defaultSchedule: ctx.defaultSchedule, assignments: ctx.assignments, calendar: ctx.calendar,
   });
+  if (dayPart === "FULL") return r;
+  // Setengah hari: pengajuan satu hari, memotong/menghitung 0,5 hari kerja.
+  return { total: r.total * 0.5, byYear: new Map([...r.byYear].map(([y, n]) => [y, n * 0.5] as [number, number])) };
 }
+
+const isHalfStep = (n: number) => Number.isFinite(n) && Number.isInteger(n * 2);
 
 // ─────────────────────────── Saldo cuti ───────────────────────────
 
@@ -134,7 +144,7 @@ export async function getLedger(actor: Actor, employeeId: string, year?: number)
 const setBalanceSchema = z.object({
   employeeId: uuid,
   year: z.number().int().min(2000).max(2200),
-  targetDays: z.number({ error: "Saldo harus berupa angka" }).int("Saldo harus bilangan bulat (hari)").min(-366).max(366),
+  targetDays: z.number({ error: "Saldo harus berupa angka" }).min(-366).max(366).refine(isHalfStep, "Saldo harus kelipatan 0,5 hari"),
   note: requiredText(5, 300, "Catatan"),
 });
 
@@ -159,7 +169,7 @@ export async function setBalance(actor: Actor, raw: unknown): Promise<BalanceDto
     });
     await writeAudit(tx, actor, {
       action: "leave_balance.set", entityType: "Employee", entityId: input.employeeId,
-      summary: `Saldo cuti ${emp.fullName} ${input.year}: ${before.balance} → ${input.targetDays} hari`, before: { balance: before.balance }, after: { balance: input.targetDays }, reason: input.note,
+      summary: `Saldo cuti ${emp.fullName} ${input.year}: ${formatDays(before.balance)} → ${formatDays(input.targetDays)} hari`, before: { balance: before.balance }, after: { balance: input.targetDays }, reason: input.note,
     });
     return balanceOf(tx, input.employeeId, input.year);
   });
@@ -199,7 +209,7 @@ export async function submitLeave(actor: Actor, raw: unknown): Promise<LeaveDto>
   if (input.startDate < earliest) {
     throw Errors.validation(`Tanggal mulai terlalu lampau. Pengajuan hanya dapat diajukan paling lama ${settings.requestBackdateDays} hari ke belakang.`, { startDate: "Terlalu lampau" });
   }
-  const wd = await workingDaysOf(employeeId, input.startDate, input.endDate);
+  const wd = await workingDaysOf(employeeId, input.startDate, input.endDate, input.dayPart);
   if (wd.total === 0) {
     throw Errors.validation("Rentang tanggal tidak mencakup hari kerja terjadwal (semua hari libur/akhir pekan).", { startDate: "Tidak ada hari kerja" });
   }
@@ -224,20 +234,20 @@ export async function submitLeave(actor: Actor, raw: unknown): Promise<LeaveDto>
       for (const [year, days] of wd.byYear) {
         const b = await balanceOf(tx, employeeId, year);
         if (days > b.available) {
-          throw Errors.validation(`Saldo cuti ${year} tidak cukup: tersedia ${b.available} hari (saldo ${b.balance}, menunggu persetujuan ${b.reserved}), diminta ${days} hari kerja.`, { type: "Saldo cuti tidak cukup" });
+          throw Errors.validation(`Saldo cuti ${year} tidak cukup: tersedia ${formatDays(b.available)} hari (saldo ${formatDays(b.balance)}, menunggu persetujuan ${formatDays(b.reserved)}), diminta ${formatDays(days)} hari kerja.`, { type: "Saldo cuti tidak cukup" });
         }
       }
     }
     const created = await tx.leaveRequest.create({
       data: {
         employeeId, type: input.type, startDate: isoToDate(input.startDate), endDate: isoToDate(input.endDate), reason: input.reason,
-        attachmentFileId: input.attachmentFileId ?? null, workingDays: wd.total,
+        attachmentFileId: input.attachmentFileId ?? null, workingDays: wd.total, dayPart: input.dayPart,
       },
       include,
     });
     await writeAudit(tx, actor, {
       action: "leave.submit", entityType: "LeaveRequest", entityId: created.id,
-      summary: `${LEAVE_TYPE_LABEL[input.type]} ${formatDateRange(input.startDate, input.endDate)} (${wd.total} hari kerja) diajukan`, after: { type: input.type, startDate: input.startDate, endDate: input.endDate, workingDays: wd.total },
+      summary: `${LEAVE_TYPE_LABEL[input.type]} ${formatDateRange(input.startDate, input.endDate)}${input.dayPart === "FULL" ? "" : input.dayPart === "MORNING" ? " (setengah hari pagi)" : " (setengah hari siang)"} (${formatDays(wd.total)} hari kerja) diajukan`, after: { type: input.type, startDate: input.startDate, endDate: input.endDate, dayPart: input.dayPart, workingDays: wd.total },
     });
     await notifyUsers(tx, await reviewerUserIds(tx, actor.userId), {
       type: "leave.submitted", title: `Pengajuan ${LEAVE_TYPE_LABEL[input.type].toLowerCase()} baru`,
@@ -292,7 +302,7 @@ export async function reviewLeave(actor: Actor, id: string, raw: unknown): Promi
     throw Errors.forbidden("Anda tidak dapat memproses pengajuan Anda sendiri. Minta Super Admin untuk memprosesnya.");
   }
   const start = dateToIso(req0.startDate), end = dateToIso(req0.endDate);
-  const wd = input.decision === "APPROVE" ? await workingDaysOf(req0.employeeId, start, end) : null;
+  const wd = input.decision === "APPROVE" ? await workingDaysOf(req0.employeeId, start, end, req0.dayPart) : null;
   if (wd && wd.total === 0) throw Errors.validation("Rentang pengajuan tidak lagi mencakup hari kerja terjadwal (jadwal/kalender berubah). Tolak atau minta pengajuan ulang.");
   const settings = await getSettings();
 
@@ -310,13 +320,13 @@ export async function reviewLeave(actor: Actor, id: string, raw: unknown): Promi
           const b = await balanceOf(tx, req.employeeId, year);
           // Pengajuan ini sendiri sedang "menunggu" dan sudah tercadang di `reserved`; cek terhadap saldo riil.
           if (!settings.allowNegativeLeaveBalance && days > b.balance) {
-            throw Errors.validation(`Saldo cuti ${year} ${req.employee.fullName} tidak cukup: saldo ${b.balance} hari, diminta ${days} hari kerja. Atur saldo terlebih dulu atau tolak pengajuan.`);
+            throw Errors.validation(`Saldo cuti ${year} ${req.employee.fullName} tidak cukup: saldo ${formatDays(b.balance)} hari, diminta ${formatDays(days)} hari kerja. Atur saldo terlebih dulu atau tolak pengajuan.`);
           }
         }
         await tx.leaveBalanceEntry.createMany({
           data: [...wd!.byYear].map(([year, days]) => ({
             employeeId: req.employeeId, year, kind: "USAGE" as const, days: -days, requestId: id,
-            note: `Cuti ${formatDateRange(start, end)}`, createdById: actor.userId,
+            note: `Cuti ${formatDateRange(start, end)}${req.dayPart === "FULL" ? "" : " (setengah hari)"}`, createdById: actor.userId,
           })),
         });
       }

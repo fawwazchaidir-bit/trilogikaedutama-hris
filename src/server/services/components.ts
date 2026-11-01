@@ -25,6 +25,10 @@ export const componentSchema = z.object({
   effectiveFrom: isoDate,
   effectiveTo: isoDate.nullable().optional(),
   description: optionalText(300, "Keterangan"),
+  /** Pendapatan kena PPh 21 (bawaan: ya). Hanya berarti untuk komponen pendapatan. */
+  taxable: z.boolean().optional(),
+  /** Pendapatan masuk dasar upah BPJS (bawaan: gaji pokok & tunjangan jabatan). */
+  inBpjsBase: z.boolean().optional(),
 }).superRefine((v, ctx) => {
   if (v.calc === "PERCENT_OF_BASE") {
     if (v.percent === null || v.percent === undefined) ctx.addIssue({ code: "custom", path: ["percent"], message: "Isi persen dari gaji pokok" });
@@ -50,13 +54,19 @@ export interface ComponentDto {
   effectiveTo: string | null;
   description: string | null;
   isActive: boolean;
+  taxable: boolean;
+  inBpjsBase: boolean;
 }
+
+/** Bawaan dasar upah BPJS: gaji pokok & tunjangan jabatan (upah = gaji pokok + tunjangan tetap). */
+const defaultInBpjsBase = (category: ComponentCategory) => category === "BASE_SALARY" || category === "POSITION_ALLOWANCE";
 
 type Row = Prisma.SalaryComponentGetPayload<object>;
 const toDto = (c: Row): ComponentDto => ({
   id: c.id, employeeId: c.employeeId, kind: c.kind, category: c.category, categoryLabel: CATEGORY_LABEL[c.category], name: c.name, calc: c.calc,
   amount: Number(c.amount), percent: c.percentBp === null ? null : c.percentBp / 100, recurrence: c.recurrence,
   effectiveFrom: dateToIso(c.effectiveFrom), effectiveTo: c.effectiveTo ? dateToIso(c.effectiveTo) : null, description: c.description, isActive: c.isActive,
+  taxable: c.taxable, inBpjsBase: c.kind === "EARNING" ? c.inBpjsBase ?? defaultInBpjsBase(c.category) : false,
 });
 
 export async function listComponents(actor: Actor, employeeId: string): Promise<ComponentDto[]> {
@@ -65,8 +75,12 @@ export async function listComponents(actor: Actor, employeeId: string): Promise<
   return rows.map(toDto);
 }
 
-function toData(input: z.infer<typeof componentSchema>, actorId: string) {
+function toData(input: z.infer<typeof componentSchema>, actorId: string, existing?: { taxable: boolean; inBpjsBase: boolean | null }) {
+  const earning = (EARNING_CATEGORIES as string[]).includes(input.category);
   return {
+    taxable: earning ? input.taxable ?? existing?.taxable ?? true : true,
+    // NULL = ikut bawaan kategori (lihat defaultInBpjsBase) — tidak dikunci pada nilai bawaan saat ini.
+    inBpjsBase: earning ? input.inBpjsBase ?? existing?.inBpjsBase ?? null : null,
     employeeId: input.employeeId,
     kind: (EARNING_CATEGORIES as string[]).includes(input.category) ? ("EARNING" as const) : ("DEDUCTION" as const),
     category: input.category, name: input.name, calc: input.calc,
@@ -116,7 +130,7 @@ export async function updateComponent(actor: Actor, id: string, raw: unknown): P
     if (before.employeeId !== input.employeeId) throw Errors.validation("Komponen tidak dapat dipindahkan ke karyawan lain.");
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${"component:" + input.employeeId}))`;
     await assertNoBaseOverlap(tx, input, id);
-    const { createdById: _createdById, employeeId: _employeeId, ...data } = toData(input, actor.userId);
+    const { createdById: _createdById, employeeId: _employeeId, ...data } = toData(input, actor.userId, before);
     const c = await tx.salaryComponent.update({ where: { id }, data });
     await writeAudit(tx, actor, {
       action: "component.update", entityType: "SalaryComponent", entityId: id,

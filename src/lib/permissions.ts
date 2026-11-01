@@ -30,6 +30,8 @@ export const PERMISSIONS = [
   "leave:view_all",
   "leave:review",
   "leave_balance:manage",
+  "overtime:view_all",
+  "overtime:review",
   "recap:view_all",
   "recap:export",
   "payroll:components",      // komponen gaji per karyawan
@@ -42,6 +44,10 @@ export const PERMISSIONS = [
   "audit:view",
   "settings:view",
   "settings:manage",         // profil lembaga, logo, kebijakan absensi/cuti
+  "report:view",             // laporan & analisis lanjutan
+  "report:payroll",          // laporan biaya SDM / penggajian / kepatuhan BPJS & PPh 21
+  "location:review",         // meninjau penilaian risiko lokasi
+  "user:reset_2fa",          // mengatur ulang 2FA akun lain (Super Admin)
 ] as const;
 
 export type Permission = (typeof PERMISSIONS)[number];
@@ -55,10 +61,13 @@ export const ROLE_PERMISSIONS: Record<Role, ReadonlySet<Permission>> = {
     "schedule:manage",
     "attendance:view_all", "attendance:correct",
     "leave:view_all", "leave:review", "leave_balance:manage",
+    "overtime:view_all", "overtime:review",
     "recap:view_all", "recap:export",
     "payroll:components", "payroll:view", "payroll:prepare",
     "payslip:download_all",
-      "settings:view",
+    "settings:view",
+    "report:view", "report:payroll",
+    "location:review",
   ]),
   EMPLOYEE: new Set<Permission>([]),
 };
@@ -95,13 +104,18 @@ export const NAV_ITEMS: readonly NavItem[] = [
   { href: "/dashboard", label: "Dashboard", group: "umum" },
   { href: "/absensi-saya", label: "Absensi Saya", selfService: true, group: "saya" },
   { href: "/pengajuan-saya", label: "Pengajuan Saya", selfService: true, group: "saya" },
+  { href: "/lembur-saya", label: "Lembur Saya", selfService: true, group: "saya" },
   { href: "/slip-saya", label: "Slip Gaji Saya", selfService: true, group: "saya" },
   { href: "/profil", label: "Profil & Jadwal", selfService: true, group: "saya" },
+  { href: "/akun", label: "Keamanan & Notifikasi", group: "saya" },
   { href: "/karyawan", label: "Karyawan", anyOf: ["employee:view"], group: "sdm" },
   { href: "/jadwal", label: "Jadwal & Libur", anyOf: ["schedule:manage"], group: "sdm" },
   { href: "/absensi", label: "Absensi", anyOf: ["attendance:view_all"], group: "sdm" },
   { href: "/pengajuan", label: "Pengajuan & Cuti", anyOf: ["leave:view_all"], group: "sdm" },
+  { href: "/lembur", label: "Pengajuan Lembur", anyOf: ["overtime:view_all"], group: "sdm" },
+  { href: "/lokasi", label: "Tinjauan Lokasi", anyOf: ["location:review"], group: "sdm" },
   { href: "/rekap", label: "Rekap Absensi", anyOf: ["recap:view_all"], group: "sdm" },
+  { href: "/laporan", label: "Laporan & Analisis", anyOf: ["report:view"], group: "sdm" },
   { href: "/penggajian", label: "Penggajian", anyOf: ["payroll:view"], group: "gaji" },
   { href: "/audit-log", label: "Audit Log", anyOf: ["audit:view"], group: "sistem" },
   { href: "/pengaturan", label: "Pengaturan", anyOf: ["settings:view"], group: "sistem" },

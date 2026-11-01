@@ -50,7 +50,7 @@ export function SchedulesCard({ schedules }: { schedules: ScheduleDto[] }) {
           <tbody>{schedules.map((x) => (
             <tr key={x.id} className={x.isActive ? "" : "text-muted"}>
               <Td className="font-medium">{x.name}{x.isDefault && <Badge tone="blue" className="ml-2">Default</Badge>}{x.description && <span className="block text-xs font-normal text-muted">{x.description}</span>}</Td>
-              <Td>{daysText(x.workDays)}</Td><Td className="whitespace-nowrap">{dotTime(x.startTime)} – {dotTime(x.endTime)}</Td><Td align="right">{x.lateToleranceMinutes} mnt</Td><Td>{dotTime(x.absentCutoffTime)}</Td>
+              <Td>{daysText(x.workDays)}</Td><Td className="whitespace-nowrap">{dotTime(x.startTime)} – {dotTime(x.endTime)}{x.endTime < x.startTime && <Badge tone="blue" className="ml-2">+1 hari</Badge>}</Td><Td align="right">{x.lateToleranceMinutes} mnt</Td><Td>{dotTime(x.absentCutoffTime)}</Td>
               <Td>{x.isActive ? <Badge tone="green">Aktif</Badge> : <Badge>Nonaktif</Badge>}</Td>
               <Td align="right"><div className="flex justify-end gap-2">
                 <Button size="sm" onClick={() => open(x.id, { name: x.name, description: x.description ?? "", workDays: x.workDays, startTime: x.startTime, endTime: x.endTime, lateToleranceMinutes: String(x.lateToleranceMinutes), absentCutoffTime: x.absentCutoffTime, isDefault: x.isDefault })}>Ubah</Button>
@@ -74,10 +74,11 @@ export function SchedulesCard({ schedules }: { schedules: ScheduleDto[] }) {
               <label key={d} className={`inline-flex h-9 cursor-pointer items-center gap-2 rounded-md border px-3 text-sm ${f.workDays.includes(d) ? "border-brand-600 bg-brand-50 text-brand-700" : "border-line bg-white"}`}>
                 <input type="checkbox" className="sr-only" checked={f.workDays.includes(d)} onChange={(e) => set("workDays", e.target.checked ? [...f.workDays, d].sort() : f.workDays.filter((x) => x !== d))} />{WEEKDAYS_ID_SHORT[d]}
               </label>))}</div>{s.fe.workDays && <p role="alert" className="mt-1 text-xs font-medium text-brand-700">{s.fe.workDays}</p>}</fieldset>
+          {f.endTime < f.startTime && <div className="sm:col-span-2"><Notice tone="info">Shift lintas tengah malam: jam pulang jatuh pada <strong>hari berikutnya</strong>. Shift dihitung milik tanggal ia dimulai. Batas &quot;tidak hadir&quot; boleh dini hari berikutnya (mis. 02.00).</Notice></div>}
           <TextField label="Jam masuk" type="time" required value={f.startTime} onChange={(e) => set("startTime", e.target.value)} error={s.fe.startTime} />
           <TextField label="Jam pulang" type="time" required value={f.endTime} onChange={(e) => set("endTime", e.target.value)} error={s.fe.endTime} />
           <TextField label="Toleransi keterlambatan (menit)" type="number" min={0} max={240} required value={f.lateToleranceMinutes} onChange={(e) => set("lateToleranceMinutes", e.target.value)} error={s.fe.lateToleranceMinutes} hint="Check-in sampai jam masuk + toleransi masih tepat waktu." />
-          <TextField label="Batas jam 'tidak hadir'" type="time" required value={f.absentCutoffTime} onChange={(e) => set("absentCutoffTime", e.target.value)} error={s.fe.absentCutoffTime} hint="Tanpa check-in sampai jam ini, hari itu dinyatakan tidak hadir." />
+          <TextField label="Batas jam 'tidak hadir'" type="time" required value={f.absentCutoffTime} onChange={(e) => set("absentCutoffTime", e.target.value)} error={s.fe.absentCutoffTime} hint={f.endTime < f.startTime ? "Shift malam: bila lebih awal dari jam masuk, dihitung dini hari berikutnya." : "Tanpa check-in sampai jam ini, hari itu dinyatakan tidak hadir."} />
           <label className="flex items-center gap-2 text-sm sm:col-span-2"><input type="checkbox" checked={f.isDefault} onChange={(e) => set("isDefault", e.target.checked)} />Jadikan jadwal default (dipakai bila tidak ada penugasan lain)</label>
         </div>}
       </Dialog>

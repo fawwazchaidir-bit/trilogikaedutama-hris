@@ -1,4 +1,5 @@
 import { expect, type Page } from "@playwright/test";
+import { monthLabel } from "../../src/lib/format";
 
 export const E2E_PASSWORD = "Demo-E2E-Uji-2026!";
 export const USERS = {
@@ -48,3 +49,15 @@ export function workdayPlus(days: number): string {
     if (wd >= 1 && wd <= 5) return iso;
   }
 }
+
+/**
+ * Periode gaji pada data demo/dev (prisma/seed-demo.ts): bulan LALU = periode berjalan yang belum disetujui, dua bulan lalu = sudah
+ * terbit. Dihitung dari tanggal hari ini (WIB) — JANGAN menulis nama bulan secara tetap pada tes (berganti tiap pergantian bulan).
+ */
+export function demoPayrollMonths() {
+  const [y, m] = isoDatePlus(0).split("-").map(Number) as [number, number];
+  const ym = (back: number) => { const t = y * 12 + (m - 1) - back; return `${Math.floor(t / 12)}-${String((t % 12) + 1).padStart(2, "0")}`; };
+  const pending = ym(1), issued = ym(2);
+  return { pending, issued, pendingRun: `Gaji ${monthLabel(pending)}`, issuedRun: `Gaji ${monthLabel(issued)}` };
+}
+

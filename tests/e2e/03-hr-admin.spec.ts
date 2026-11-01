@@ -118,10 +118,11 @@ test.describe("HR — data karyawan", () => {
     await expect(alertWith(dlg, /gaji pokok aktif/i).first()).toBeVisible();
     await dlg.getByRole("button", { name: "Batal" }).click();
 
-    // BPJS: peringatan tarif tidak baku
+    // BPJS: peringatan — komponen manual menggantikan perhitungan otomatis (Tahap 2) dan nominal harus diverifikasi
     await page.getByRole("button", { name: "Tambah komponen" }).click();
     await dlg.getByLabel("Kategori").selectOption("BPJS");
-    await expect(dlg.getByText(/tidak menetapkan tarif BPJS\/pajak/)).toBeVisible();
+    await expect(dlg.getByText(/BPJS\/Pajak yang diisi manual\s+menggantikan/)).toBeVisible();
+    await expect(dlg.getByText(/verifikasi dengan pihak yang berwenang/)).toBeVisible();
     await dlg.getByRole("button", { name: "Batal" }).click();
 
     // ubah data
@@ -293,9 +294,9 @@ test.describe("Pengaturan & akun", () => {
     await form.getByLabel("Potongan keterlambatan").selectOption("PER_MINUTE");
     await form.getByLabel("Nominal per menit").fill("1000");
     await form.getByRole("button", { name: "Simpan aturan" }).click();
-    await expect(page.getByText(/Konfirmasi ulang diperlukan/)).toBeVisible();
+    await expect(page.getByText(/Konfirmasi ulang diperlukan/).first()).toBeVisible(); // toast sebelumnya bisa masih tampil bersamaan
     await form.getByRole("button", { name: "Saya sudah memverifikasi aturan ini" }).click();
-    await expect(page.getByText("Aturan penggajian dikonfirmasi.")).toBeVisible();
+    await expect(page.getByText("Aturan penggajian dikonfirmasi.").first()).toBeVisible();
   });
 
   test("HR membuat akun Karyawan; Super Admin membuat akun admin", async ({ page }) => {

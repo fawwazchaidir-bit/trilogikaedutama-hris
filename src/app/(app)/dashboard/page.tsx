@@ -8,7 +8,7 @@ import { Tile } from "@/components/ui/stat";
 import { Badge, PayrollStatusBadge, RequestStatusBadge } from "@/components/ui/badge";
 import { AttendancePanel } from "@/components/attendance-panel";
 import { can } from "@/lib/permissions";
-import { formatDateLong, formatDateRange, formatDuration, monthLabel } from "@/lib/format";
+import { formatDateLong, formatDateRange, formatDuration, monthLabel, formatDays } from "@/lib/format";
 import { formatRupiah } from "@/lib/money";
 import { LEAVE_TYPE_LABEL } from "@/lib/labels";
 
@@ -51,6 +51,7 @@ async function AdminView() {
         <Tile label="Pengajuan menunggu" value={d.pendingRequests} tone={d.pendingRequests ? "red" : undefined} hint={d.pendingRequests ? "Perlu persetujuan HR" : undefined} href="/pengajuan?status=PENDING" />
         <Tile label="Absensi belum lengkap" value={d.incomplete} tone={d.incomplete ? "red" : undefined} hint="Tanpa check-out, 31 hari terakhir" href="/absensi?status=BELUM_CHECKOUT" />
         <Tile label="Belum check-out hari ini" value={d.openCheckouts} hint="Informasi — belum dihitung tidak lengkap" />
+        {d.openLocationReviews !== null && d.openLocationReviews > 0 && <Tile label="Lokasi perlu ditinjau" value={d.openLocationReviews} tone="amber" hint="Absensi lokasi ditandai/ditolak" href="/lokasi" />}
       </section>
 
       <div className="grid gap-4 lg:grid-cols-2">
@@ -131,13 +132,13 @@ async function EmployeeView() {
           <Card>
             <CardHeader title={`Kehadiran ${monthLabel(d.month.label)}`} description="Ringkasan bulan berjalan (hari kerja terjadwal dihitung penuh satu bulan)." actions={<Link href="/absensi-saya" className="text-sm text-brand-700 hover:underline">Rincian</Link>} />
             <div className="grid grid-cols-2 gap-3 p-5 sm:grid-cols-4">
-              <Tile label="Hari kerja" value={t.scheduledDays} />
-              <Tile label="Hadir" value={t.presentDays} tone="green" />
+              <Tile label="Hari kerja" value={formatDays(t.scheduledDays)} />
+              <Tile label="Hadir" value={formatDays(t.presentDays)} tone="green" />
               <Tile label="Terlambat" value={t.lateCount} hint={t.lateCount ? formatDuration(t.lateMinutes) : undefined} tone={t.lateCount ? "amber" : undefined} />
-              <Tile label="Tidak hadir" value={t.absentDays} tone={t.absentDays ? "red" : undefined} />
-              <Tile label="Izin" value={t.izinDays} />
-              <Tile label="Sakit" value={t.sakitDays} />
-              <Tile label="Cuti" value={t.cutiDays} />
+              <Tile label="Tidak hadir" value={formatDays(t.absentDays)} tone={t.absentDays ? "red" : undefined} />
+              <Tile label="Izin" value={formatDays(t.izinDays)} />
+              <Tile label="Sakit" value={formatDays(t.sakitDays)} />
+              <Tile label="Cuti" value={formatDays(t.cutiDays)} />
               <Tile label="Belum lengkap" value={t.incompleteCount} tone={t.incompleteCount ? "amber" : undefined} />
             </div>
           </Card>

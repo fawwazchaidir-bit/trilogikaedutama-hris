@@ -17,6 +17,7 @@ export default defineConfig({
           name: "unit",
           include: ["tests/unit/**/*.test.ts"],
           environment: "node",
+          setupFiles: ["tests/helpers/fake-now.ts"],
         },
       },
       {
@@ -29,7 +30,7 @@ export default defineConfig({
           fileParallelism: false,
           testTimeout: 30_000,
           hookTimeout: 60_000,
-          setupFiles: ["tests/helpers/integration-env.ts"],
+          setupFiles: ["tests/helpers/integration-env.ts", "tests/helpers/fake-now.ts"],
           globalSetup: ["tests/helpers/migrate-test-db.ts"],
         },
       },
