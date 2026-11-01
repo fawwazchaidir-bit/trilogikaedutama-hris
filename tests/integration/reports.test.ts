@@ -14,6 +14,10 @@ import { setBalance } from "@/server/services/leave";
 import { defaultStatutoryConfig } from "@/lib/statutory";
 import { formatPercent } from "@/lib/analytics";
 import { addAttendance, addComponent, resetDb, seedFixtures, type Fixtures } from "../helpers/db";
+import { pinNow } from "../helpers/pin-now";
+
+// Tanggal tetap di masa lalu + aturan mundur 365 hari → titik awal waktu dipatok agar tes tidak membusuk (lihat helpers/pin-now.ts).
+pinNow();
 
 let fx: Fixtures;
 const fail = async (p: Promise<unknown>) => { try { await p; return null; } catch (e) { return e as AppError; } };

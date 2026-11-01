@@ -24,6 +24,10 @@ import { defaultStatutoryConfig } from "@/lib/statutory";
 import { totpAt } from "@/lib/totp";
 import { addDays, isoWeekday, todayIso } from "@/lib/time";
 import { addAttendance, addComponent, resetDb, seedFixtures, TEST_PASSWORD, type Fixtures } from "../helpers/db";
+import { pinNow } from "../helpers/pin-now";
+
+// Tanggal tetap di masa lalu + aturan mundur 365 hari → titik awal waktu dipatok agar tes tidak membusuk (lihat helpers/pin-now.ts).
+pinNow();
 
 let fx: Fixtures;
 const fail = async (p: Promise<unknown>) => { try { await p; return null; } catch (e) { return e as AppError; } };

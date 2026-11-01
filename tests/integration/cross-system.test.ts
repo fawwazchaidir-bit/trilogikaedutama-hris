@@ -279,8 +279,8 @@ describe("notifikasi & audit lengkap untuk setiap peristiwa", () => {
 
   it("audit log memuat tiap jenis peristiwa skenario; tidak dapat diubah", async () => {
     const actions = new Set((await prisma.auditLog.findMany({ select: { action: true } })).map((a) => a.action));
-    for (const a of ["attendance.check_in", "attendance.check_out", "leave.review", "overtime.review", "payroll.submit", "payroll.approve", "payroll.issue", "settings.attendance_policy_update"]) {
-      expect([...actions].some((x) => x === a || x.startsWith(a.split(".")[0] + ".") && x.includes(a.split(".")[1]!)), a).toBe(true);
+    for (const a of ["attendance.check_in", "attendance.check_out", "leave.submit", "leave.approve", "overtime.submit", "overtime.approve", "leave_balance.set", "payroll.create", "payroll.calculate", "payroll.submit", "payroll.approve", "payroll.issue", "settings.attendance_policy_update", "settings.payroll_rules_update", "settings.statutory_update"]) {
+      expect(actions.has(a), `audit "${a}" tidak ada`).toBe(true);
     }
     const n = await prisma.auditLog.count({ where: { action: "attendance.check_in" } });
     expect(n).toBe(await prisma.attendance.count());

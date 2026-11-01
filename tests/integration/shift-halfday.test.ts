@@ -8,6 +8,10 @@ import { createAssignment, createSchedule } from "@/server/services/schedules";
 import { updateAttendancePolicy } from "@/server/services/settings";
 import { isoToDate } from "@/server/json";
 import { resetDb, seedFixtures, type Fixtures } from "../helpers/db";
+import { pinNow } from "../helpers/pin-now";
+
+// Tanggal tetap di masa lalu + aturan mundur 365 hari → titik awal waktu dipatok agar tes tidak membusuk (lihat helpers/pin-now.ts).
+pinNow();
 
 let fx: Fixtures;
 let nightId: string;

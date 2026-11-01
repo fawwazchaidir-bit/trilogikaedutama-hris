@@ -8,7 +8,7 @@ import { PrismaClient } from "@prisma/client";
 
 const prisma = new PrismaClient();
 async function main() {
-  const tables = ["users", "employees", "attendances", "attendance_corrections", "leave_requests", "leave_balance_entries", "salary_components", "payroll_runs", "payroll_items", "payslips", "audit_logs"];
+  const tables = ["users", "employees", "attendances", "attendance_corrections", "attendance_photos", "stored_files", "leave_requests", "leave_balance_entries", "overtime_requests", "location_checks", "salary_components", "payroll_runs", "payroll_items", "payslips", "notification_deliveries", "audit_logs"];
   console.log("Jumlah baris:");
   for (const t of tables) {
     const rows = await prisma.$queryRawUnsafe<{ n: bigint }[]>(`SELECT count(*) AS n FROM "${t}"`);
@@ -19,8 +19,15 @@ async function main() {
   if (Number(orphan[0]!.n) > 0) problems.push("Ada slip aktif yang nilainya berbeda dari item penggajiannya.");
   const issuedNoSlip = await prisma.$queryRaw<{ n: bigint }[]>`SELECT count(*) AS n FROM payroll_items i JOIN payroll_runs r ON r.id = i."runId" LEFT JOIN payslips s ON s."itemId" = i.id WHERE r.status = 'ISSUED' AND s.id IS NULL`;
   if (Number(issuedNoSlip[0]!.n) > 0) problems.push("Ada item pada periode terbit yang tidak memiliki slip.");
-  const triggers = await prisma.$queryRaw<{ tgname: string }[]>`SELECT tgname FROM pg_trigger WHERE NOT tgisinternal AND tgname IN ('audit_logs_append_only','payslips_guard','payroll_runs_guard','leave_balance_entries_append_only','attendance_corrections_append_only')`;
-  if (triggers.length < 5) problems.push(`Trigger integritas tidak lengkap (${triggers.length}/5) — pemulihan harus menyertakan trigger.`);
+  const EXPECTED_TRIGGERS = ["audit_logs_append_only", "payslips_guard", "payroll_runs_guard", "payroll_items_guard", "payroll_item_lines_guard", "leave_balance_entries_append_only", "attendance_corrections_append_only", "leave_requests_guard", "overtime_requests_guard", "attendance_photos_guard"];
+  const present = new Set((await prisma.$queryRaw<{ tgname: string }[]>`SELECT tgname FROM pg_trigger WHERE NOT tgisinternal`).map((t) => t.tgname));
+  const missing = EXPECTED_TRIGGERS.filter((t) => !present.has(t));
+  if (missing.length) problems.push(`Trigger integritas tidak lengkap (hilang: ${missing.join(", ")}) — pemulihan harus menyertakan trigger.`);
+  // Foto absensi: tiap baris punya berkas ATAU sudah dihapus retensi (tidak keduanya, tidak tidak-keduanya); berkas foto tanpa catatan = yatim.
+  const photoState = await prisma.$queryRaw<{ n: bigint }[]>`SELECT count(*) AS n FROM attendance_photos WHERE ("purgedAt" IS NULL) <> ("fileId" IS NOT NULL)`;
+  if (Number(photoState[0]!.n) > 0) problems.push("Ada foto absensi dengan status berkas/retensi tidak konsisten.");
+  const orphanFiles = await prisma.$queryRaw<{ n: bigint }[]>`SELECT count(*) AS n FROM stored_files f WHERE f.kind = 'ATTENDANCE_PHOTO' AND NOT EXISTS (SELECT 1 FROM attendance_photos p WHERE p."fileId" = f.id)`;
+  if (Number(orphanFiles[0]!.n) > 0) problems.push("Ada berkas foto absensi tanpa catatan (yatim).");
   const sums = await prisma.$queryRaw<{ bad: bigint }[]>`SELECT count(*) AS bad FROM payroll_items WHERE "netPay" <> "totalEarnings" - "totalDeductions"`;
   if (Number(sums[0]!.bad) > 0) problems.push("Ada item dengan gaji bersih ≠ pendapatan − potongan.");
   if (problems.length) { console.error("\nMASALAH:\n- " + problems.join("\n- ")); process.exitCode = 1; } else console.log("\n✔ Pemeriksaan integritas lulus.");
