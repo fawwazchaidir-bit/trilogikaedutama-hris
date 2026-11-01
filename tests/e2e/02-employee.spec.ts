@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { USERS, alertWith, confirmDialog, login, workdayPlus } from "./helpers";
+import { USERS, alertWith, confirmDialog, demoPayrollMonths, login, workdayPlus } from "./helpers";
 
 test.describe.configure({ mode: "serial" });
 
@@ -95,9 +95,9 @@ test.describe("Karyawan — slip gaji", () => {
     await expect(page.getByRole("heading", { name: "Slip Gaji Saya" })).toBeVisible();
     const rows = page.locator("tbody tr");
     await expect(rows).toHaveCount(1);
-    await expect(rows.first()).toContainText("Gaji Agustus 2026");
+    await expect(rows.first()).toContainText(demoPayrollMonths().issuedRun);
     await rows.first().getByRole("link", { name: "Lihat" }).click();
-    await expect(page.getByRole("heading", { name: /Slip Gaji — Gaji Agustus 2026/ })).toBeVisible();
+    await expect(page.getByRole("heading", { name: new RegExp(`Slip Gaji — ${demoPayrollMonths().issuedRun}`) })).toBeVisible();
     await expect(page.getByText("Gaji bersih diterima")).toBeVisible();
     await expect(page.getByText("Budi Santoso").first()).toBeVisible();
     // rekening hanya 4 digit terakhir

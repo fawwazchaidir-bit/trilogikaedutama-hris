@@ -1,9 +1,9 @@
 import { expect, test } from "@playwright/test";
-import { USERS, alertWith, confirmDialog, login } from "./helpers";
+import { USERS, alertWith, confirmDialog, demoPayrollMonths, login } from "./helpers";
 
 test.describe.configure({ mode: "serial" });
 
-const RUN = "Gaji September 2026";
+const RUN = demoPayrollMonths().pendingRun;
 let runUrl = "";
 
 test.describe("Penggajian — alur persetujuan sampai slip", () => {
@@ -61,7 +61,7 @@ test.describe("Penggajian — alur persetujuan sampai slip", () => {
     await login(bp, USERS.budi);
     await bp.getByRole("link", { name: "Slip Gaji Saya" }).click();
     await expect(bp.locator("tbody tr")).toHaveCount(2);
-    await expect(bp.locator("tbody tr").first()).toContainText("Gaji September 2026");
+    await expect(bp.locator("tbody tr").first()).toContainText(RUN);
     // Karyawan tidak dapat memakai unduh massal
     expect((await bp.request.get((await all.getAttribute("href"))!)).status()).toBe(403);
     await ctx.close();
@@ -99,7 +99,7 @@ test.describe("Penggajian — alur persetujuan sampai slip", () => {
     await login(bp, USERS.budi);
     await bp.goto("/slip-saya");
     await expect(bp.locator("tbody tr")).toHaveCount(1);
-    await expect(bp.locator("tbody tr").first()).toContainText("Gaji Agustus 2026");
+    await expect(bp.locator("tbody tr").first()).toContainText(demoPayrollMonths().issuedRun);
     await ctx.close();
 
     const hr = await browser.newContext();
