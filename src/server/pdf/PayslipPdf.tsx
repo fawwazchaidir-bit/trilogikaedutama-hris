@@ -1,5 +1,6 @@
 import { Document, Font, Image, Page, StyleSheet, Text, View } from "@react-pdf/renderer";
 import { pdfSafe } from "./ReportPdf";
+import { SignerBlock } from "./shared";
 import type { PayslipLine, PayslipSnapshot } from "@/lib/payslip";
 import { formatRupiah } from "@/lib/money";
 import { terbilang } from "@/lib/terbilang";
@@ -65,12 +66,6 @@ const makeStyles = (t: Tier) => StyleSheet.create({
   catatanLabel: { fontFamily: "Helvetica-Bold", fontSize: 7.5, color: RED, marginBottom: 1.5 },
   catatanText: { fontSize: t.font },
   revision: { marginTop: 2, color: MUTED, fontSize: 7.5 },
-  signWrap: { marginTop: 8, alignItems: "flex-end" },
-  sign: { width: 190, alignItems: "center" },
-  signMeta: { fontSize: t.font },
-  signImg: { height: t.sig, width: 150, objectFit: "contain", marginTop: 2 },
-  signGap: { height: t.sig, marginTop: 2 },
-  signName: { fontFamily: "Helvetica-Bold", marginTop: 1, paddingTop: 2, borderTopWidth: 0.8, borderTopColor: INK, width: "100%", textAlign: "center" },
   footer: { position: "absolute", left: 40, right: 40, bottom: 22, fontSize: 7.5, color: MUTED, borderTopWidth: 0.5, borderTopColor: LINE, paddingTop: 4 },
   watermark: { position: "absolute", top: 330, left: 60, fontSize: 80, color: "#d8d4cd", transform: "rotate(-30deg)", fontFamily: "Helvetica-Bold", opacity: 0.55 },
 });
@@ -159,7 +154,6 @@ function SlipPage({ item }: { item: PayslipPdfItem }) {
   const tier = item.forceTier ?? pickTier(d);
   const s = STYLES[tier]!;
   const logoSrc = item.logo ? `data:${item.logo.mimeType};base64,${item.logo.data.toString("base64")}` : null;
-  const sigSrc = item.signature ? `data:${item.signature.mimeType};base64,${item.signature.data.toString("base64")}` : null;
   const sg = d.signer ?? null;
   return (
     <Page size="A4" style={s.page}>
@@ -240,17 +234,7 @@ function SlipPage({ item }: { item: PayslipPdfItem }) {
         {d.revisionNote && <Text style={s.revision}>{pdfSafe(d.revisionNote)}</Text>}
       </View>
 
-      {sg && (
-        <View style={s.signWrap} wrap={false}>
-          <View style={s.sign}>
-            <Text style={s.signMeta}>{pdfSafe([sg.place, formatDateLong(d.issueDate)].filter(Boolean).join(", "))}</Text>
-            {sg.title && <Text style={s.signMeta}>{pdfSafe(sg.title)}</Text>}
-            {/* eslint-disable-next-line jsx-a11y/alt-text -- <Image> milik react-pdf tidak punya atribut alt */}
-            {sigSrc ? <Image src={sigSrc} style={s.signImg} /> : <View style={s.signGap} />}
-            <Text style={s.signName}>{pdfSafe(sg.name)}</Text>
-          </View>
-        </View>
-      )}
+      {sg && <SignerBlock signer={sg} date={d.issueDate} signature={item.signature} font={TIERS[tier]!.font} sig={TIERS[tier]!.sig} />}
 
       <View style={s.footer} fixed>
         {d.footerNote && <Text>{pdfSafe(d.footerNote)}</Text>}

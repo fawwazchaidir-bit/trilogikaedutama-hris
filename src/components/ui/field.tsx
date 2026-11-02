@@ -1,5 +1,6 @@
 "use client";
-import { useId } from "react";
+import { useId, useState } from "react";
+import { Eye, EyeOff } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { CONTROL } from "./styles";
 
@@ -29,6 +30,32 @@ export function TextField({ label, error, hint, className, required, id, ...rest
   return (
     <Field label={label} error={error} hint={hint} required={required} htmlFor={fid} className={className}>
       <input id={fid} required={required} aria-invalid={!!error} className={cn(CONTROL, "h-10", error && "border-brand-600")} {...rest} />
+    </Field>
+  );
+}
+
+type PasswordProps = Omit<InputProps, "type">;
+
+/**
+ * Isian password dengan tombol tampil/sembunyi (ikon mata). Bawaan tersembunyi; tombol bertipe `button` agar tidak
+ * mengirim formulir, dan label ARIA berubah menurut keadaan (sengaja memakai kata "sandi" agar pencari label "Password" tetap menemukan tepat satu elemen). Dipakai di SEMUA isian password (masuk, atur ulang, ganti, akun).
+ */
+export function PasswordField({ label, error, hint, className, required, id, ...rest }: PasswordProps) {
+  const auto = useId();
+  const fid = id ?? auto;
+  const [shown, setShown] = useState(false);
+  return (
+    <Field label={label} error={error} hint={hint} required={required} htmlFor={fid} className={className}>
+      <div className="relative">
+        <input id={fid} required={required} type={shown ? "text" : "password"} aria-invalid={!!error} className={cn(CONTROL, "h-10 pr-11", error && "border-brand-600")} {...rest} />
+        <button
+          type="button" onClick={() => setShown((v) => !v)} aria-pressed={shown} aria-controls={fid}
+          aria-label={shown ? "Sembunyikan sandi" : "Tampilkan sandi"} title={shown ? "Sembunyikan sandi" : "Tampilkan sandi"}
+          className="absolute inset-y-0 right-0 grid w-10 place-items-center rounded-r-md text-muted hover:text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-600/40"
+        >
+          {shown ? <EyeOff className="size-4" aria-hidden /> : <Eye className="size-4" aria-hidden />}
+        </button>
+      </div>
     </Field>
   );
 }

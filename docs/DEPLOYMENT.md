@@ -12,10 +12,12 @@
 | `TRUST_PROXY_HOPS` | tidak | Jumlah proxy tepercaya di depan aplikasi (default `1`; Cloudflare → Nginx = `2`). Alamat klien diambil dari `X-Forwarded-For` sebanyak ini dari **kanan** — entri paling kiri dapat dikirim klien sendiri sehingga tidak pernah dipercaya. |
 | `LOGIN_MAX_ATTEMPTS` `LOGIN_WINDOW_MINUTES` `LOGIN_LOCKOUT_MINUTES` | tidak | Default 5 / 15 / 15. |
 | `SESSION_IDLE_HOURS` `SESSION_ABSOLUTE_DAYS` | tidak | Default 8 jam tak aktif / 7 hari. |
-| `MAX_UPLOAD_MB` | tidak | Default 3. |
+| `MAX_UPLOAD_MB` | tidak | Default 3 (logo, foto, lampiran). |
+| `MAX_DOCUMENT_UPLOAD_MB` | tidak | Default 10 (1–50): batas PDF **dokumen/kontrak**. Samakan dengan batas body reverse proxy — Nginx: `client_max_body_size 12m;` (lebih besar sedikit dari nilai ini) — kalau tidak, unggahan besar gagal di proxy sebelum sampai aplikasi. |
 | `SMTP_HOST` `SMTP_PORT` `SMTP_SECURE` `SMTP_USER` `SMTP_PASS` `MAIL_FROM` | tidak | Email (notifikasi & **lupa password mandiri**). Tanpa `SMTP_HOST`+`MAIL_FROM` fitur email nonaktif (notifikasi dalam aplikasi tetap jalan; reset oleh Admin/HR tetap ada). `SMTP_SECURE=true` untuk port 465; selain itu STARTTLS. |
 | `WHATSAPP_PROVIDER` `WHATSAPP_TOKEN` `WHATSAPP_API_URL` `WHATSAPP_PHONE_NUMBER_ID` `WHATSAPP_TEMPLATE_NAME` `WHATSAPP_TEMPLATE_LANG` | tidak | WhatsApp: `fonnte` (token), `cloud_api` (token + phone number id; template untuk pesan di luar jendela 24 jam), atau `webhook` (POST JSON `{channel,to,text,app}` ke URL Anda). Kosong = nonaktif. |
 | `RETENTION_WORKER` | tidak | `true` (default): pekerja retensi foto absensi di dalam aplikasi (2 menit setelah start lalu tiap 6 jam). `false` bila memakai `/api/internal/retention`. Aman di banyak instance. |
+| `CONTRACT_REMINDER_WORKER` | tidak | `true` (default): pekerja pengingat kontrak kerja di dalam aplikasi (3 menit setelah start lalu tiap 6 jam; idempoten & aman di banyak instance). `false` bila memakai `POST /api/internal/contract-reminders` (Bearer `CRON_SECRET`), mis. cron harian: `0 7 * * * curl -fsS -X POST -H "Authorization: Bearer $CRON_SECRET" https://hris.example.com/api/internal/contract-reminders`. |
 | `DELIVERY_WORKER` | tidak | `true` (default): pekerja pengiriman antrean di dalam aplikasi, tiap 30 detik. `false` bila memakai pemicu eksternal. |
 | `CRON_SECRET` | tidak | ≥ 16 karakter; mengaktifkan `POST /api/internal/deliveries` (Bearer) untuk cron/systemd timer. |
 | `PASSWORD_RESET_MINUTES` | tidak | Masa berlaku tautan lupa password; default 30. |

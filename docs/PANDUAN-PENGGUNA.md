@@ -17,6 +17,9 @@
 11. **Jadwal & Libur**: untuk shift malam buat jadwal dengan jam pulang lebih awal dari jam masuk (mis. 22.00–06.00) → tanda "+1 hari". Tugaskan ke karyawan/divisi yang bekerja malam.
 12. **Pengaturan → Kebijakan → Pencegahan lokasi palsu**: mulai dengan *Tandai saja*. **Foto absensi**: untuk karyawan dinas luar pilih *Wajib*, dan matikan radius lokasi — karyawan memotret langsung dari kamera saat Check-in/Check-out, server mencetak waktu server + koordinat pada foto, dan HR melihatnya di *Rekap → rincian karyawan* (kolom *Foto absensi*) atau di *Tinjauan Lokasi*. **Simpan foto absensi (bulan)**: bawaan 6; foto lebih tua dihapus otomatis & permanen (yang sedang ditinjau tidak ikut), tersisa jejak teks waktu/koordinat. Peringatan merah muncul bila Anda menurunkan angkanya. **Pengaturan → Pengiriman email & WhatsApp**: periksa status setelah SMTP/WhatsApp dikonfigurasi (lihat DEPLOYMENT).
 
+13. **Pengaturan → Slip gaji → Penanda tangan** (Super Admin): nama, jabatan, kota, dan gambar tanda tangan — dipakai bersama oleh **slip gaji, Surat Tugas, dan Bukti Penerimaan Uang Harian**. **Pengaturan → Kebijakan**: *Kuota cuti tahunan bawaan* dan *Masa kerja minimum sebelum berhak cuti* (bawaan 12 bulan); kebijakan tiap karyawan dapat dikhususkan di halaman karyawan.
+14. **Dokumen:** unggah PDF kontrak aktif tiap karyawan (isi tanggal berakhir) agar pengingat H-3 bulan ke pimpinan berjalan. Pastikan `MAX_DOCUMENT_UPLOAD_MB` (dan batas body reverse proxy) cukup untuk hasil pindai Anda.
+
 ## B. Karyawan
 
 - **Dashboard / Absensi Saya**: tombol **Check-in** saat mulai dan **Check-out** saat selesai. Jam yang tertera adalah jam server. Bila absensi lokasi aktif, izinkan akses lokasi di browser. Catatan boleh diisi.
@@ -30,6 +33,10 @@
 - **Pengajuan Saya**: pilih jenis, tanggal, alasan, lampiran (opsional). Status: Menunggu → Disetujui/Ditolak. Pengajuan *Menunggu* dapat dibatalkan sendiri. Cuti memakai saldo; tanggal akhir pekan/libur tidak dihitung.
 - **Slip Gaji Saya**: **Lihat** (layar, nyaman di ponsel) atau **PDF** (satu halaman: ringkasan kehadiran termasuk *Lembur dibayar*, kolom **Catatan** untuk motivasi/peringatan, dan tanda tangan di kanan bawah). Hanya slip yang sudah diterbitkan; slip yang dibatalkan hilang dari daftar Anda.
 - **Profil & Jadwal**: data Anda dan jadwal 14 hari. Ubah data lewat HR.
+- **Kebijakan cuti Anda** tampil di *Pengajuan Saya*: kuota per tahun dan tanggal Anda **mulai berhak** cuti. Selama belum berhak, pengajuan **cuti** ditolak sistem; **izin dan sakit** tetap dapat diajukan.
+- **Surat Tugas Saya**: surat tugas yang menugaskan Anda, **uang harian** yang menjadi hak Anda (hari × tarif), dan **Bukti Penerimaan Uang Harian** (PDF — cetak, tanda tangani basah pada kotak *Penerima*). Dokumen ini terpisah dari slip gaji.
+- **Dokumen Saya**: kontrak kerja dan dokumen kepegawaian Anda; klik **Lihat** untuk membuka PDF di aplikasi (di sebagian peramban ponsel gunakan *Buka di tab baru* / *Unduh PDF*).
+- **Tombol mata** pada isian password menampilkan/menyembunyikan isinya (pastikan tidak ada yang melihat layar Anda).
 
 ## C. Admin / HR
 
@@ -46,11 +53,14 @@
   3. **Ajukan persetujuan** → Pimpinan **Setujui** → HR **Terbitkan slip** (karyawan mendapat notifikasi).
   4. **Unduh semua slip** (1 PDF atau ZIP per karyawan).
   5. Salah? Hanya **Pimpinan** yang dapat *Batalkan penerbitan* (alasan wajib; slip jadi VOID) → HR *Buat revisi* → ulangi alur.
+- **Surat Tugas & Uang Harian** (HR atau Pimpinan): **Terbitkan Surat Tugas** → isi maksud, lokasi, tanggal, pilih karyawan dan **uang harian per hari** (kolom *Hari* kosong = seluruh lama penugasan, hari kalender). Karyawan diberi notifikasi. Setelah uang diserahkan (tunai/transfer), klik **Terbitkan bukti penerimaan** pada penerimanya → unduh PDF, cetak, penerima menandatangani basah. HR tidak dapat menugaskan/menerbitkan bukti untuk dirinya sendiri (Super Admin). Salah? Surat tugas dibatalkan beralasan (hanya bila tidak ada bukti aktif); **bukti** hanya dapat dibatalkan Super Admin, lalu boleh diterbitkan ulang. Uang harian **tidak masuk slip gaji**.
+- **Dokumen**: **Unggah dokumen** (PDF; kontrak wajib bertanggal mulai, tanggal berakhir kosong = tanpa batas waktu). Tab ringkasan menunjukkan *Perlu keputusan pimpinan*, *Menunggu kontrak perpanjangan*, dan *Segera berakhir*. Setelah pimpinan memutuskan **lanjut**, klik **Unggah perpanjangan** (kontrak lama ditandai *Sudah diperpanjang*). Salah unggah → **Arsipkan** (alasan wajib; berkas tetap tersimpan).
+- **Kebijakan cuti per karyawan**: *Karyawan → detail → Kebijakan cuti karyawan* → **Ubah kebijakan** (berhak sejak / kuota / saldo negatif; alasan wajib). **Beri kuota {tahun}** memberi saldo awal satu karyawan sesuai kebijakannya; *Pengajuan & Cuti → Terapkan kuota* melakukannya untuk semua karyawan aktif yang belum punya saldo awal — yang belum berhak dilewati dan disebutkan. Jalankan lagi saat ada karyawan yang baru berhak.
 - **Penting:** koreksi absensi *setelah* gaji terbit **tidak** mengubah slip; periode ditandai "Data berubah" sebagai pengingat.
 
 ## D. Super Admin / Pimpinan
 
-Semua fitur HR ditambah: **Setujui/Kembalikan** gaji, **Batalkan** periode disetujui/terbit, **Pengaturan** kebijakan & aturan, **Akun Pengguna** (semua peran), **Audit Log** (siapa mengubah apa dan kapan; tidak dapat diubah/dihapus).
+Semua fitur HR ditambah: **keputusan lanjut/tidak kontrak** (*Dokumen* → *Putuskan lanjut/tidak*; Anda menerima notifikasi H-3 bulan, H-1 bulan, H-14 hari sebelum kontrak berakhir), **membatalkan Bukti Penerimaan Uang Harian**, **Setujui/Kembalikan** gaji, **Batalkan** periode disetujui/terbit, **Pengaturan** kebijakan & aturan, **Akun Pengguna** (semua peran), **Audit Log** (siapa mengubah apa dan kapan; tidak dapat diubah/dihapus).
 
 ## E. Tanya-jawab singkat
 

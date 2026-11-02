@@ -2,7 +2,7 @@
   "name": "trilogika-hris",
   "version": "1.0.0",
   "private": true,
-  "description": "Mini HRIS — Trilogika Edutama (karyawan, absensi, rekap, penggajian, slip gaji)",
+  "description": "Internal Human Resources Information System — Trilogika Edutama (karyawan, absensi, rekap, penggajian, slip gaji, surat tugas, dokumen)",
   "engines": {
     "node": ">=20.9.0"
   },

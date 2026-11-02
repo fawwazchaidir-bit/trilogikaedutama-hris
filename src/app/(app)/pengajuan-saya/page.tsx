@@ -1,13 +1,13 @@
 import type { Metadata } from "next";
 import { requirePageSelf } from "@/server/auth/current";
-import { getBalance, getLedger, listMyLeaves } from "@/server/services/leave";
+import { getBalance, getLedger, getLeavePolicy, listMyLeaves } from "@/server/services/leave";
 import { getSettings } from "@/server/services/settings";
 import { env } from "@/server/env";
-import { Card, CardHeader, EmptyState, PageHeader } from "@/components/ui/card";
+import { Card, CardHeader, EmptyState, Notice, PageHeader } from "@/components/ui/card";
 import { Table, TableWrap, Td, Th } from "@/components/ui/table";
 import { Tile } from "@/components/ui/stat";
 import { LeaveForm, MyLeaveList } from "@/components/leave-forms";
-import { formatDateTime } from "@/lib/format";
+import { formatDateLong, formatDateTime } from "@/lib/format";
 import { LEDGER_KIND_LABEL } from "@/lib/labels";
 import { todayIso } from "@/lib/time";
 
@@ -18,10 +18,15 @@ export default async function MyLeavesPage() {
   const user = await requirePageSelf();
   const today = todayIso(env().APP_TIMEZONE);
   const year = Number(today.slice(0, 4));
-  const [items, settings, balance, ledger] = await Promise.all([listMyLeaves(user), getSettings(), getBalance(user, user.employeeId, year), getLedger(user, user.employeeId, year)]);
+  const [items, settings, balance, ledger, policy] = await Promise.all([listMyLeaves(user), getSettings(), getBalance(user, user.employeeId, year), getLedger(user, user.employeeId, year), getLeavePolicy(user, user.employeeId)]);
   return (
     <div>
       <PageHeader title="Pengajuan Saya" description="Ajukan izin, sakit, atau cuti dan pantau statusnya. Pengajuan yang disetujui otomatis memengaruhi rekap absensi." />
+      <div className="mb-4">
+        {policy.entitledNow
+          ? <Notice tone="info">Kebijakan cuti Anda: <strong>{policy.policy.quotaDays} hari/tahun</strong>, berhak sejak {formatDateLong(policy.policy.eligibleFrom)}{policy.policy.custom ? " (kebijakan khusus)" : ""}.</Notice>
+          : <Notice tone="warn">Anda <strong>belum berhak cuti tahunan</strong> — hak cuti Anda mulai {formatDateLong(policy.policy.eligibleFrom)}. Sampai saat itu, pengajuan cuti tidak dapat diproses; izin dan sakit tetap dapat diajukan.</Notice>}
+      </div>
       <div className="mb-4 grid gap-3 sm:grid-cols-4">
         <Tile label={`Saldo cuti ${year}`} value={`${balance.balance} hari`} />
         <Tile label="Menunggu persetujuan" value={`${balance.reserved} hari`} hint="dicadangkan dari saldo" tone={balance.reserved ? "amber" : undefined} />

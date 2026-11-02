@@ -34,7 +34,7 @@ function discover(): Ep[] {
 const ENDPOINTS = discover();
 
 /** Rute yang sengaja terbuka tanpa sesi (login/pemulihan/health/pemicu mesin). */
-const PUBLIC = new Set(["/api/health", "/api/auth/login", "/api/auth/2fa", "/api/auth/forgot", "/api/auth/reset", "/api/internal/deliveries", "/api/internal/retention"]);
+const PUBLIC = new Set(["/api/health", "/api/auth/login", "/api/auth/2fa", "/api/auth/forgot", "/api/auth/reset", "/api/internal/deliveries", "/api/internal/retention", "/api/internal/contract-reminders"]);
 /** Tidak disapu dengan `{}` karena `{}` SAH dan mengubah data / menutup sesi / mengirim pesan. */
 const NO_EMPTY_BODY = new Set([
   "/api/attendance/check-in", "/api/attendance/check-out", "/api/auth/logout", "/api/auth/password", "/api/leave-balance/grant-quota",
@@ -93,7 +93,7 @@ test("rute publik: health 200; login/forgot/reset/2fa menolak masukan kosong den
     expect(r.status(), u).toBeGreaterThanOrEqual(400);
     expect(r.status(), u).toBeLessThan(500);
   }
-  for (const u of ["/api/internal/deliveries", "/api/internal/retention"]) {
+  for (const u of ["/api/internal/deliveries", "/api/internal/retention", "/api/internal/contract-reminders"]) {
     expect((await send(ctxs.anon, "POST", u, { body: {}, origin: null })).status(), u).toBe(404);
   }
 });
@@ -145,10 +145,13 @@ test("batas hak akses: Karyawan ditolak di rute admin; HR ditolak di rute khusus
     ["POST", "/api/payroll"], ["POST", "/api/employees"], ["PUT", "/api/settings/attendance"], ["PUT", "/api/settings/security"], ["PUT", "/api/settings/statutory"],
     ["POST", `/api/payroll/${UUID}/approve`], ["POST", `/api/users/${UUID}/reset-2fa`], ["POST", `/api/location/${UUID}/review`], ["POST", `/api/overtime/${UUID}/review`], ["POST", `/api/leaves/${UUID}/review`],
     ["POST", "/api/attendance/correct"],
+    ["GET", "/api/documents"], ["GET", "/api/assignments"], ["POST", "/api/assignments"], ["POST", "/api/allowance-receipts"], ["POST", `/api/documents/${UUID}/decision`],
+    ["POST", `/api/documents/${UUID}/archive`], ["POST", "/api/documents"], ["PUT", `/api/employees/${UUID}/leave-policy`], ["GET", `/api/employees/${UUID}/leave-policy`],
   ];
   const HR_DENIED: [Method, string][] = [
     ["GET", "/api/audit-logs"], ["PUT", "/api/settings/attendance"], ["PUT", "/api/settings/payroll-rules"], ["PUT", "/api/settings/statutory"], ["PUT", "/api/settings/security"],
     ["POST", "/api/settings/payroll-rules/confirm"], ["POST", `/api/payroll/${UUID}/approve`], ["POST", `/api/users/${UUID}/reset-2fa`], ["POST", "/api/settings/logo"], ["POST", "/api/settings/signature"], ["DELETE", "/api/settings/signature"],
+    ["POST", `/api/documents/${UUID}/decision`], ["POST", `/api/allowance-receipts/${UUID}/void`],
   ];
   const known = new Set(ENDPOINTS.map((e) => `${e.method} ${e.route.replace(/\[[^\]]+\]/g, UUID)}`));
   const bad: string[] = [];
@@ -164,7 +167,7 @@ test("batas hak akses: Karyawan ditolak di rute admin; HR ditolak di rute khusus
   await run(ctxs.hr, "HR", HR_DENIED, [403]);
   expect(bad, bad.join("\n")).toEqual([]);
   // Super Admin boleh membaca rute-rute itu.
-  for (const u of ["/api/employees", "/api/payroll", "/api/audit-logs", "/api/users", "/api/settings", "/api/recap", "/api/location", "/api/overtime", "/api/reports/export?kind=kehadiran&format=csv"]) {
+  for (const u of ["/api/employees", "/api/payroll", "/api/audit-logs", "/api/users", "/api/settings", "/api/recap", "/api/location", "/api/overtime", "/api/reports/export?kind=kehadiran&format=csv", "/api/documents", "/api/assignments"]) {
     expect((await send(ctxs.admin, "GET", u)).status(), `Super Admin GET ${u}`).toBe(200);
   }
 });

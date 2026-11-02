@@ -5,7 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useState } from "react";
 import {
   Bell, CalendarDays, CircleUserRound, ClipboardCheck, ClipboardList, FileText, KeyRound, LayoutDashboard, LogOut, Menu,
-  ScrollText, Settings, ShieldCheck, TableProperties, Users, UserCog, Wallet, X, Clock, FilePlus2, Timer, BarChart3, ShieldEllipsis, MapPinned,
+  ScrollText, Settings, ShieldCheck, TableProperties, Users, UserCog, Wallet, X, Clock, FilePlus2, Timer, BarChart3, ShieldEllipsis, MapPinned, FolderOpen, Plane,
 } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { api } from "@/lib/api-client";
@@ -19,6 +19,10 @@ const ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
   "/slip-saya": FileText,
   "/lembur-saya": Timer,
   "/lembur": Timer,
+  "/dokumen": FolderOpen,
+  "/dokumen-saya": FolderOpen,
+  "/surat-tugas": Plane,
+  "/surat-tugas-saya": Plane,
   "/lokasi": MapPinned,
   "/laporan": BarChart3,
   "/akun": ShieldEllipsis,
@@ -64,7 +68,7 @@ export function AppShell({ user, nav, company, unread, pendingBadges, children }
         <Image src={company.logoUrl} alt="" width={40} height={40} unoptimized className="size-10 rounded-full bg-white/5 object-contain" />
         <div className="min-w-0">
           <p className="truncate text-sm font-semibold leading-tight text-white">{company.name}</p>
-          <p className="text-xs text-stone-400">Mini HRIS</p>
+          <p className="text-[11px] leading-snug text-stone-400">Internal Human Resources Information System</p>
         </div>
       </div>
       <nav aria-label="Menu utama" className="flex-1 space-y-4 overflow-y-auto px-3 py-2">

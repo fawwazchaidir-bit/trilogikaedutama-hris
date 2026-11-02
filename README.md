@@ -1,10 +1,10 @@
-# Trilogika HRIS — Mini HRIS Trilogika Edutama
+# Trilogika HRIS — Internal Human Resources Information System Trilogika Edutama
 
 Aplikasi web internal untuk **data karyawan, absensi, rekap otomatis, penggajian, dan slip gaji (PDF)** — Bahasa Indonesia,
 responsif (komputer & ponsel), tampilan mengikuti aplikasi invoice Trilogika agar familier.
 
-> **Bukan mockup.** Setiap tombol terhubung ke database PostgreSQL dan diuji: 568 tes unit/integrasi (terhadap PostgreSQL sungguhan)
-> dan 78 tes E2E di browser (login → absensi → pengajuan → persetujuan → penggajian → slip PDF → pembatalan/revisi → 2FA → lembur → laporan).
+> **Bukan mockup.** Setiap tombol terhubung ke database PostgreSQL dan diuji: 618 tes unit/integrasi (terhadap PostgreSQL sungguhan)
+> dan 92 tes E2E di browser (login → absensi → pengajuan → persetujuan → penggajian → slip PDF → pembatalan/revisi → 2FA → lembur → laporan → surat tugas & uang harian → dokumen kontrak → kebijakan cuti).
 > Data demo bersifat fiktif. **Baca [docs/KEPUTUSAN-BISNIS.md](docs/KEPUTUSAN-BISNIS.md) sebelum dipakai operasional.**
 
 ## Peran
@@ -45,6 +45,15 @@ responsif (komputer & ponsel), tampilan mengikuti aplikasi invoice Trilogika aga
 | **Pencegahan lokasi palsu** | Penilaian risiko berlapis (kesegaran, akurasi/presisi, titik pusat, koordinat berulang/bersama, perpindahan mustahil, perangkat) → tandai/tolak, antrean Tinjauan Lokasi (memuat tautan foto). **Tidak menjamin anti-manipulasi** — lihat batasan. |
 | **Laporan & analisis lanjutan** | `/laporan`: ringkasan eksekutif (KPI vs bulan lalu, tren, temuan), kehadiran, cuti & lembur, biaya SDM, rekap BPJS & PPh 21, headcount & turnover; ekspor Excel/CSV/PDF. |
 | Absensi berbasis lokasi · Impor karyawan | Sejak sebelumnya (titik + radius; impor Excel/CSV atomik). |
+
+## Fitur Tahap 3 (permintaan pimpinan — berfungsi, diuji)
+
+| Fitur | Isi |
+|---|---|
+| **Nama aplikasi & password** | Seluruh antarmuka memakai nama **Internal Human Resources Information System**. Semua isian password (masuk, atur ulang, ganti password, konfirmasi 2FA, password sementara akun) punya tombol **tampil/sembunyikan**; bawaan tersembunyi. |
+| **Surat Tugas & Bukti Penerimaan Uang Harian** | HR/Pimpinan menerbitkan **Surat Tugas** (nomor `001/ST/XI/2026`, tujuan, tanggal, karyawan yang ditunjuk + uang harian per orang) sebagai **dasar** uang harian. Untuk tiap penerima dan **tiap perjalanan** diterbitkan **Bukti Penerimaan Uang Harian** (`001/BPUH/XI/2026`) dengan **blok tanda tangan yang sama dengan slip gaji** + kotak tanda tangan basah penerima (dan kotak meterai bila > Rp 5 juta). **Berdiri sendiri di luar slip gaji**: tidak menyentuh komponen, perhitungan, maupun PDF slip. Dibekukan (snapshot + trigger), nomor per tahun, dibatalkan beralasan (bukti hanya Super Admin), karyawan melihat & mengunduh miliknya (*Surat Tugas Saya*). |
+| **Dokumen (kontrak kerja)** | Unggah **PDF kontrak bermaterai bertanda tangan basah** (hasil pindai, hanya PDF, ≤ `MAX_DOCUMENT_UPLOAD_MB`) per karyawan, **dilihat langsung di aplikasi** (penampil PDF dalam dialog / tab baru / unduh). Tanggal berakhir kosong = tanpa batas waktu. **Pimpinan diberi notifikasi H-3 bulan** sebelum kontrak berakhir (ditegaskan H-1 bulan & H-14 hari selama belum diputuskan) untuk memutuskan **lanjut / tidak** (Super Admin; tidak lanjut wajib beralasan). Lanjut → HR mengunggah kontrak perpanjangan (menutup pengingat kontrak lama). Dokumen tidak dihapus (arsip beralasan); karyawan melihat dokumennya sendiri (*Dokumen Saya*). |
+| **Kebijakan cuti per karyawan** | Tiap karyawan punya kebijakan cuti sendiri: **berhak sejak** (bawaan: mulai bekerja + masa kerja minimum, 12 bulan), **kuota/tahun**, dan **boleh saldo negatif** — masing-masing ikut bawaan lembaga atau **dikhususkan** (wajib alasan, diaudit, karyawan diberi tahu). Contoh: karyawan A bekerja > 1 tahun mendapat 12 hari; karyawan B baru 2 bulan **belum berhak** (pengajuan cuti ditolak dengan alasan jelas; izin/sakit tetap boleh). Pemberian kuota tahunan mengikuti kebijakan masing-masing (yang belum berhak dilewati). |
 
 Batasan yang jujur (lokasi palsu tidak 100% dapat dicegah di web, integrasi WhatsApp/email belum diuji ke penyedia sungguhan, tabel pajak wajib diverifikasi) ada di [docs/KEPUTUSAN-BISNIS.md](docs/KEPUTUSAN-BISNIS.md).
 

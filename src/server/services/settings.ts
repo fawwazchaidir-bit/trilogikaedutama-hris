@@ -68,7 +68,7 @@ export interface SettingsDto {
     locationRadiusMeters: number; locationMaxAccuracyMeters: number; requestBackdateDays: number; confirmedAt: string | null;
     locationSpoofMode: "OFF" | "FLAG" | "BLOCK"; photoMode: "OFF" | "OPTIONAL" | "REQUIRED"; photoRequireLocation: boolean; photoRetentionMonths: number;
   };
-  leave: { annualLeaveQuota: number; allowNegativeLeaveBalance: boolean };
+  leave: { annualLeaveQuota: number; allowNegativeLeaveBalance: boolean; minTenureMonths: number };
   payroll: FullPayrollRules & { confirmedAt: string | null };
   statutory: StatutoryConfig;
   security: { twoFactorRequiredForAdmins: boolean };
@@ -96,7 +96,7 @@ export async function getSettingsDto(actor: Actor): Promise<SettingsDto> {
       confirmedAt: s.attendancePolicyConfirmedAt?.toISOString() ?? null,
       locationSpoofMode: s.locationSpoofMode, photoMode: s.attendancePhotoMode, photoRequireLocation: s.attendancePhotoRequireLocation, photoRetentionMonths: s.attendancePhotoRetentionMonths,
     },
-    leave: { annualLeaveQuota: s.annualLeaveQuota, allowNegativeLeaveBalance: s.allowNegativeLeaveBalance },
+    leave: { annualLeaveQuota: s.annualLeaveQuota, allowNegativeLeaveBalance: s.allowNegativeLeaveBalance, minTenureMonths: s.leaveMinTenureMonths },
     payroll: { ...payrollRulesOf(s), confirmedAt: s.payrollRulesConfirmedAt?.toISOString() ?? null },
     statutory: statutoryConfigOf(s),
     security: { twoFactorRequiredForAdmins: s.twoFactorRequiredForAdmins },
@@ -177,6 +177,8 @@ export const attendancePolicySchema = z.object({
   requestBackdateDays: z.number().int().min(0).max(365),
   annualLeaveQuota: z.number().int().min(0).max(366),
   allowNegativeLeaveBalance: z.boolean(),
+  /** Masa kerja minimum (bulan) sebelum karyawan berhak cuti tahunan (kebijakan BAWAAN; dapat dikecualikan per karyawan). Tidak diisi = tidak diubah. */
+  leaveMinTenureMonths: z.number({ error: "Masa kerja minimum harus berupa angka" }).int("Masa kerja minimum harus bilangan bulat (bulan)").min(0, "Minimal 0 bulan").max(120, "Maksimal 120 bulan").optional(),
   // Integritas lokasi (opsional agar pemanggil lama tetap valid; tidak diisi = tidak diubah).
   locationSpoofMode: z.enum(["OFF", "FLAG", "BLOCK"]).optional(),
   /** Foto absensi bercap lokasi & waktu server: OFF = tanpa foto, OPTIONAL = boleh, REQUIRED = wajib pada check-in & check-out. */

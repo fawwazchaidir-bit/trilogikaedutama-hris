@@ -2,6 +2,8 @@ import "server-only";
 import { renderToBuffer } from "@react-pdf/renderer";
 import { ReportPdf } from "./ReportPdf";
 import { PayslipDocument, type PayslipPdfItem } from "./PayslipPdf";
+import { AssignmentDocument, ReceiptDocument } from "./AssignmentPdf";
+import type { AssignmentSnapshot, ReceiptSnapshot } from "../services/assignments";
 import type { ReportTable } from "../export";
 import { env } from "../env";
 import { readFileBytes } from "../services/files";
@@ -56,4 +58,21 @@ async function defaultLogo() {
     }
   }
   return defaultLogoCache;
+}
+
+type Img = Awaited<ReturnType<typeof readFileBytes>>;
+async function brandImages(logoFileId: string | null, signatureFileId: string | null | undefined): Promise<{ logo: Img; signature: Img }> {
+  return { logo: logoFileId ? await readFileBytes(logoFileId) : await defaultLogo(), signature: signatureFileId ? await readFileBytes(signatureFileId) : null };
+}
+
+/** Surat Tugas (PDF) dari snapshot terbit. */
+export async function renderAssignmentPdf(snapshot: AssignmentSnapshot, cancelled: boolean): Promise<Buffer> {
+  const { logo, signature } = await brandImages(snapshot.company.logoFileId, snapshot.signer?.signatureFileId);
+  return renderToBuffer(<AssignmentDocument item={{ snapshot, logo, signature, cancelled, printedAt: formatDateTime(new Date(), env().APP_TIMEZONE) }} />);
+}
+
+/** Bukti Penerimaan Uang Harian (PDF) dari snapshot terbit — penanda tangan resmi sama dengan slip gaji. */
+export async function renderReceiptPdf(snapshot: ReceiptSnapshot, voided: boolean): Promise<Buffer> {
+  const { logo, signature } = await brandImages(snapshot.company.logoFileId, snapshot.signer?.signatureFileId);
+  return renderToBuffer(<ReceiptDocument item={{ snapshot, logo, signature, voided, printedAt: formatDateTime(new Date(), env().APP_TIMEZONE) }} />);
 }

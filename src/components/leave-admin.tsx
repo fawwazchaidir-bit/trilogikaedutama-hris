@@ -83,21 +83,24 @@ export function GrantQuota({ year, quota }: { year: number; quota: number }) {
   const toast = useToast();
   const [y, setY] = useState(String(year));
   const [busy, setBusy] = useState(false);
+  const [skipped, setSkipped] = useState<string[]>([]);
   async function grant() {
     setBusy(true);
     try {
-      const r = await api<{ granted: number; skipped: number; quota: number }>("/api/leave-balance/grant-quota", { body: { year: Number(y) } });
-      toast.success(r.granted ? `Kuota ${r.quota} hari diterapkan ke ${r.granted} karyawan.` : "Tidak ada karyawan yang perlu diberi kuota (semua sudah punya saldo awal atau kuota 0).");
+      const r = await api<{ granted: number; skipped: number; notEntitled: number; notEntitledNames: string[]; quota: number }>("/api/leave-balance/grant-quota", { body: { year: Number(y) } });
+      setSkipped(r.notEntitledNames);
+      toast.success(r.granted ? `Kuota cuti ${y} diberikan ke ${r.granted} karyawan menurut kebijakan masing-masing${r.notEntitled ? `; ${r.notEntitled} belum berhak` : ""}.` : r.notEntitled ? `Tidak ada saldo diberikan: ${r.notEntitled} karyawan belum berhak cuti.` : "Tidak ada karyawan yang perlu diberi kuota (semua sudah punya saldo awal).");
       router.refresh();
     } catch (e) { toast.error(errorMessage(e)); } finally { setBusy(false); }
   }
   return (
     <Card className="mb-4">
-      <CardHeader title="Kuota cuti tahunan" description={`Kebijakan saat ini: ${quota} hari/tahun (ubah di Pengaturan). Diterapkan hanya ke karyawan aktif yang belum punya saldo awal; aman dijalankan ulang.`} />
+      <CardHeader title="Kuota cuti tahunan" description={`Diberikan menurut kebijakan cuti MASING-MASING karyawan (bawaan lembaga: ${quota} hari/tahun, berhak setelah masa kerja minimum; dapat dikhususkan per karyawan di halaman karyawan). Karyawan yang belum berhak tidak diberi saldo. Hanya untuk karyawan aktif yang belum punya saldo awal; aman dijalankan ulang.`} />
       <div className="flex flex-wrap items-end gap-3 p-5">
         <SelectField label="Tahun" value={y} onChange={(e) => setY(e.target.value)} className="w-32">{[year - 1, year, year + 1].map((v) => <option key={v} value={v}>{v}</option>)}</SelectField>
-        <Button variant="primary" loading={busy} onClick={grant}>Terapkan kuota {quota} hari</Button>
+        <Button variant="primary" loading={busy} onClick={grant}>Terapkan kuota {y}</Button>
       </div>
+      {skipped.length > 0 && <div className="px-5 pb-5"><Notice tone="info">Belum berhak / kuota 0 pada {y}: {skipped.join(", ")}. Atur kebijakan khusus di halaman karyawan bila perlu.</Notice></div>}
     </Card>
   );
 }

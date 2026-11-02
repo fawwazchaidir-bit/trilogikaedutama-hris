@@ -6,7 +6,7 @@ import { Errors } from "../errors";
 import { writeAudit } from "../audit";
 import { actorCan, type Actor } from "../actor";
 
-export type FileKind = "LOGO" | "EMPLOYEE_PHOTO" | "LEAVE_ATTACHMENT" | "ATTENDANCE_PHOTO" | "SIGNATURE";
+export type FileKind = "LOGO" | "EMPLOYEE_PHOTO" | "LEAVE_ATTACHMENT" | "ATTENDANCE_PHOTO" | "SIGNATURE" | "DOCUMENT";
 
 /** Tipe yang diizinkan, diverifikasi dari MAGIC BYTES (bukan dari ekstensi / Content-Type kiriman klien). SVG sengaja ditolak (risiko XSS). */
 const SIGNATURES: { mime: string; ext: string; test: (b: Uint8Array) => boolean }[] = [
@@ -23,6 +23,8 @@ const ALLOWED: Record<FileKind, string[]> = {
   ATTENDANCE_PHOTO: ["image/jpeg"],
   // Hanya PNG hasil normalisasi server (lihat photo/signature.ts).
   SIGNATURE: ["image/png"],
+  // Kontrak kerja bermaterai yang ditandatangani basah (hasil pindai) — hanya PDF.
+  DOCUMENT: ["application/pdf"],
 };
 
 export function sniffMime(bytes: Uint8Array): { mime: string; ext: string } | null {
@@ -46,9 +48,11 @@ export async function storeFile(
   if (kind === "EMPLOYEE_PHOTO" && !actorCan(actor, "employee:manage")) throw Errors.forbidden();
   if (kind === "LEAVE_ATTACHMENT" && !actor.employeeId && !actorCan(actor, "leave:review")) throw Errors.forbidden();
   if (kind === "ATTENDANCE_PHOTO" && !actor.employeeId) throw Errors.forbidden();
-  const maxBytes = env().MAX_UPLOAD_MB * 1024 * 1024;
+  if (kind === "DOCUMENT" && !actorCan(actor, "document:manage")) throw Errors.forbidden();
+  const maxMb = kind === "DOCUMENT" ? env().MAX_DOCUMENT_UPLOAD_MB : env().MAX_UPLOAD_MB;
+  const maxBytes = maxMb * 1024 * 1024;
   if (input.bytes.byteLength === 0) throw Errors.validation("File kosong.");
-  if (input.bytes.byteLength > maxBytes) throw Errors.validation(`Ukuran file maksimal ${env().MAX_UPLOAD_MB} MB.`);
+  if (input.bytes.byteLength > maxBytes) throw Errors.validation(`Ukuran file maksimal ${maxMb} MB.`);
   const sniffed = sniffMime(input.bytes);
   if (!sniffed || !ALLOWED[kind].includes(sniffed.mime)) {
     const allowed = ALLOWED[kind].map((m) => m.split("/")[1]?.toUpperCase()).join(", ");
@@ -75,6 +79,7 @@ export async function storeFile(
  *  - EMPLOYEE_PHOTO: admin (employee:view) atau karyawan pemilik foto itu sendiri.
  *  - LEAVE_ATTACHMENT: peninjau pengajuan (leave:view_all) atau pengunggahnya.
  *  - ATTENDANCE_PHOTO: peninjau absensi (attendance:view_all) atau karyawan pemilik foto itu; pembukaan oleh peninjau dicatat di audit.
+ *  - DOCUMENT: pengelola dokumen (document:view_all) atau karyawan pemilik dokumen (yang belum diarsipkan); pembukaan oleh pengelola dicatat di audit.
  * Karyawan TIDAK dapat membuka berkas milik karyawan lain.
  */
 export async function readFileForActor(actor: Actor, id: string) {
@@ -97,6 +102,11 @@ export async function readFileForActor(actor: Actor, id: string) {
     const own = actor.employeeId ? (await prisma.attendancePhoto.count({ where: { fileId: id, employeeId: actor.employeeId } })) > 0 : false;
     ok = own || actorCan(actor, "attendance:view_all");
     if (ok && !own) await writeAudit(prisma, actor, { action: "file.view", entityType: "StoredFile", entityId: id, summary: "Foto absensi dibuka" });
+  }
+  if (file.kind === "DOCUMENT") {
+    const own = actor.employeeId ? (await prisma.employeeDocument.count({ where: { fileId: id, employeeId: actor.employeeId, archivedAt: null } })) > 0 : false;
+    ok = own || actorCan(actor, "document:view_all");
+    if (ok && !own) await writeAudit(prisma, actor, { action: "file.view", entityType: "StoredFile", entityId: id, summary: "Dokumen kepegawaian dibuka" });
   }
   if (!ok) throw Errors.forbidden();
   return file;

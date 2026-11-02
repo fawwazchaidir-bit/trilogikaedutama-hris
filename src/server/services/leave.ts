@@ -13,9 +13,10 @@ import { employeeLite, loadRangeContext } from "./context";
 import { getSettings } from "./settings";
 import { notifyUsers, reviewerUserIds } from "./notifications";
 import { diffDays, rangesOverlap, todayIso } from "@/lib/time";
+import { effectiveLeavePolicy, isEntitledOn, quotaForYear, type EffectiveLeavePolicy, type LeaveDefaults } from "@/lib/leave-policy";
 import { isoDate, optionalText, requiredText, uuid } from "@/lib/validation/common";
 import { LEAVE_TYPE_LABEL, type LeaveType, type RequestStatus } from "@/lib/labels";
-import { formatDateRange, formatDays } from "@/lib/format";
+import { formatDateLong, formatDateRange, formatDays } from "@/lib/format";
 import type { Paged } from "@/lib/types";
 
 export const MAX_LEAVE_RANGE_DAYS = 90;
@@ -100,6 +101,107 @@ async function workingDaysOf(employeeId: string, start: string, end: string, day
 
 const isHalfStep = (n: number) => Number.isFinite(n) && Number.isInteger(n * 2);
 
+// ─────────────────────────── Kebijakan cuti PER KARYAWAN ───────────────────────────
+
+type SettingsLeave = { annualLeaveQuota: number; allowNegativeLeaveBalance: boolean; leaveMinTenureMonths: number };
+type PolicyRow = { joinDate: Date; leaveQuotaDays: number | null; leaveEligibleFrom: Date | null; leaveAllowNegative: boolean | null; leavePolicyNote: string | null };
+const policySelect = { joinDate: true, leaveQuotaDays: true, leaveEligibleFrom: true, leaveAllowNegative: true, leavePolicyNote: true } as const;
+
+export const leaveDefaultsOf = (s: SettingsLeave): LeaveDefaults => ({ annualQuota: s.annualLeaveQuota, allowNegative: s.allowNegativeLeaveBalance, minTenureMonths: s.leaveMinTenureMonths });
+
+/** Kebijakan cuti efektif satu karyawan = kebijakan khususnya, atau bawaan lembaga bila tidak ada. */
+export function policyOfEmployee(e: PolicyRow, defaults: LeaveDefaults): EffectiveLeavePolicy {
+  return effectiveLeavePolicy(dateToIso(e.joinDate), {
+    quotaDays: e.leaveQuotaDays, eligibleFrom: e.leaveEligibleFrom ? dateToIso(e.leaveEligibleFrom) : null, allowNegative: e.leaveAllowNegative, note: e.leavePolicyNote,
+  }, defaults);
+}
+
+export interface LeavePolicyDto {
+  employeeId: string;
+  employeeName: string;
+  joinDate: string;
+  today: string;
+  year: number;
+  policy: EffectiveLeavePolicy;
+  /** Kebijakan bawaan lembaga (Pengaturan) — dasar bagi karyawan tanpa kebijakan khusus. */
+  defaults: LeaveDefaults;
+  /** Sudah berhak mengambil cuti tahunan hari ini? */
+  entitledNow: boolean;
+  /** Kuota yang berlaku untuk tahun berjalan (0 bila belum berhak sampai akhir tahun). */
+  quotaThisYear: number;
+  /** Saldo awal (kuota) tahun berjalan sudah diberikan? */
+  grantedThisYear: boolean;
+}
+
+export async function getLeavePolicy(actor: Actor, employeeId: string): Promise<LeavePolicyDto> {
+  if (actor.employeeId !== employeeId) assertCan(actor, "leave:view_all");
+  const [emp, settings] = await Promise.all([
+    prisma.employee.findUnique({ where: { id: employeeId }, select: { fullName: true, ...policySelect } }),
+    getSettings(),
+  ]);
+  if (!emp) throw Errors.notFound("Karyawan");
+  const today = todayIso(env().APP_TIMEZONE);
+  const year = Number(today.slice(0, 4));
+  const defaults = leaveDefaultsOf(settings);
+  const policy = policyOfEmployee(emp, defaults);
+  const granted = await prisma.leaveBalanceEntry.count({ where: { employeeId, year, kind: "GRANT" } });
+  return {
+    employeeId, employeeName: emp.fullName, joinDate: dateToIso(emp.joinDate), today, year, policy, defaults,
+    entitledNow: isEntitledOn(policy, today), quotaThisYear: quotaForYear(policy, year), grantedThisYear: granted > 0,
+  };
+}
+
+export const leavePolicySchema = z.object({
+  /** null = ikut kebijakan bawaan. */
+  quotaDays: z.number({ error: "Kuota harus berupa angka" }).int("Kuota harus bilangan bulat (hari)").min(0, "Kuota minimal 0 hari").max(366, "Kuota maksimal 366 hari").nullable(),
+  eligibleFrom: isoDate.nullable(),
+  allowNegative: z.boolean().nullable(),
+  note: optionalText(300, "Alasan"),
+}).superRefine((v, ctx) => {
+  const custom = v.quotaDays !== null || v.eligibleFrom !== null || v.allowNegative !== null;
+  if (custom && (!v.note || v.note.length < 5)) ctx.addIssue({ code: "custom", path: ["note"], message: "Alasan kebijakan khusus wajib diisi (minimal 5 karakter)" });
+});
+
+/**
+ * Atur kebijakan cuti KHUSUS satu karyawan. Isian `null` = kembali mengikuti kebijakan bawaan; semua `null` = hapus kebijakan khusus.
+ * Kebijakan khusus wajib beralasan, tercatat di audit (sebelum/sesudah), dan karyawan diberi tahu. Tidak mengubah buku saldo yang sudah ada.
+ * Admin/HR tidak boleh mengubah kebijakan cuti dirinya sendiri (hanya Super Admin).
+ */
+export async function setLeavePolicy(actor: Actor, employeeId: string, raw: unknown): Promise<LeavePolicyDto> {
+  assertCan(actor, "leave_policy:manage");
+  const input = parseInput(leavePolicySchema, raw);
+  if (employeeId === actor.employeeId && actor.role !== "SUPER_ADMIN") throw Errors.forbidden("Anda tidak dapat mengubah kebijakan cuti Anda sendiri. Minta Super Admin untuk mengubahnya.");
+  const settings = await getSettings();
+  const defaults = leaveDefaultsOf(settings);
+  await transaction(async (tx) => {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${"leave:" + employeeId}))`;
+    const emp = await tx.employee.findUnique({ where: { id: employeeId }, select: { fullName: true, userId: true, ...policySelect } });
+    if (!emp) throw Errors.notFound("Karyawan");
+    const before = policyOfEmployee(emp, defaults);
+    const custom = input.quotaDays !== null || input.eligibleFrom !== null || input.allowNegative !== null;
+    const data = {
+      leaveQuotaDays: input.quotaDays, leaveEligibleFrom: input.eligibleFrom ? isoToDate(input.eligibleFrom) : null,
+      leaveAllowNegative: input.allowNegative, leavePolicyNote: custom ? input.note : null,
+    };
+    const updated = await tx.employee.update({ where: { id: employeeId }, data, select: policySelect });
+    const after = policyOfEmployee(updated, defaults);
+    const pick = (p: EffectiveLeavePolicy) => ({ quotaDays: p.quotaDays, eligibleFrom: p.eligibleFrom, allowNegative: p.allowNegative, custom: p.custom });
+    if (JSON.stringify(pick(before)) === JSON.stringify(pick(after)) && before.note === after.note) throw Errors.validation("Kebijakan cuti sudah sama dengan nilai tersebut.");
+    await writeAudit(tx, actor, {
+      action: "leave_policy.set", entityType: "Employee", entityId: employeeId,
+      summary: `Kebijakan cuti ${emp.fullName}: ${custom ? "KHUSUS" : "mengikuti bawaan"} — kuota ${after.quotaDays} hari/tahun, berhak sejak ${formatDateLong(after.eligibleFrom)}${after.allowNegative ? ", saldo negatif diizinkan" : ""}`,
+      before: pick(before), after: pick(after), reason: custom ? input.note : "Kebijakan khusus dihapus (kembali ke bawaan lembaga)",
+    });
+    if (emp.userId) {
+      await notifyUsers(tx, [emp.userId], {
+        type: "leave.policy", title: "Kebijakan cuti Anda diperbarui",
+        body: `Kuota ${after.quotaDays} hari/tahun · berhak cuti sejak ${formatDateLong(after.eligibleFrom)}`, href: "/pengajuan-saya",
+      });
+    }
+  });
+  return getLeavePolicy(actor, employeeId);
+}
+
 // ─────────────────────────── Saldo cuti ───────────────────────────
 
 export interface BalanceDto {
@@ -175,25 +277,56 @@ export async function setBalance(actor: Actor, raw: unknown): Promise<BalanceDto
   });
 }
 
-/** Terapkan kuota tahunan (kebijakan) ke semua karyawan aktif yang BELUM punya saldo awal tahun tsb. Aman dijalankan ulang. */
-export async function grantAnnualQuota(actor: Actor, raw: unknown): Promise<{ granted: number; skipped: number; quota: number }> {
+const grantSchema = z.object({ year: z.number().int().min(2000).max(2200), employeeId: uuid.optional() });
+
+export interface GrantQuotaResult {
+  /** Jumlah karyawan yang baru diberi saldo awal. */
+  granted: number;
+  /** Sudah punya saldo awal tahun itu (tidak diubah). */
+  skipped: number;
+  /** Belum berhak cuti sampai akhir tahun itu (menurut kebijakan masing-masing) atau kuotanya 0 — tidak diberi saldo. */
+  notEntitled: number;
+  /** Nama karyawan yang belum berhak (maks. 20) untuk ditampilkan. */
+  notEntitledNames: string[];
+  /** Kuota BAWAAN lembaga (kuota tiap karyawan dapat berbeda). */
+  quota: number;
+}
+
+/**
+ * Terapkan kuota cuti tahunan menurut KEBIJAKAN MASING-MASING KARYAWAN ke karyawan aktif yang BELUM punya saldo awal tahun itu
+ * (atau hanya satu karyawan bila `employeeId` diberikan). Karyawan yang belum berhak sampai akhir tahun itu (mis. masa kerja belum
+ * cukup) tidak diberi saldo. Aman dijalankan ulang: yang sudah punya saldo awal tidak disentuh.
+ */
+export async function grantAnnualQuota(actor: Actor, raw: unknown): Promise<GrantQuotaResult> {
   assertCan(actor, "leave_balance:manage");
-  const { year } = parseInput(z.object({ year: z.number().int().min(2000).max(2200) }), raw);
+  const { year, employeeId } = parseInput(grantSchema, raw);
   const settings = await getSettings();
-  const quota = settings.annualLeaveQuota;
+  const defaults = leaveDefaultsOf(settings);
   return transaction(async (tx) => {
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('leave:grant'))`;
-    const emps = await tx.employee.findMany({ where: { isActive: true }, select: { id: true } });
+    const emps = await tx.employee.findMany({ where: { isActive: true, ...(employeeId ? { id: employeeId } : {}) }, select: { id: true, fullName: true, ...policySelect }, orderBy: { fullName: "asc" } });
+    if (employeeId && emps.length === 0) throw Errors.notFound("Karyawan aktif");
     const have = await tx.leaveBalanceEntry.findMany({ where: { year, kind: "GRANT", employeeId: { in: emps.map((e) => e.id) } }, select: { employeeId: true } });
     const haveSet = new Set(have.map((h) => h.employeeId));
-    const todo = emps.filter((e) => !haveSet.has(e.id));
-    if (quota > 0 && todo.length) {
-      await tx.leaveBalanceEntry.createMany({
-        data: todo.map((e) => ({ employeeId: e.id, year, kind: "GRANT" as const, days: quota, note: `Kuota cuti tahunan ${year} (kebijakan: ${quota} hari)`, createdById: actor.userId })),
+    const rows: { employeeId: string; year: number; kind: "GRANT"; days: number; note: string; createdById: string }[] = [];
+    const notEntitled: string[] = [];
+    for (const e of emps) {
+      if (haveSet.has(e.id)) continue;
+      const policy = policyOfEmployee(e, defaults);
+      const q = quotaForYear(policy, year);
+      if (q <= 0) { notEntitled.push(e.fullName); continue; }
+      rows.push({
+        employeeId: e.id, year, kind: "GRANT", days: q, createdById: actor.userId,
+        note: `Kuota cuti tahunan ${year} (${q} hari${policy.custom ? ", kebijakan khusus karyawan" : ""}; berhak sejak ${formatDateLong(policy.eligibleFrom)})`,
       });
     }
-    await writeAudit(tx, actor, { action: "leave_balance.grant_annual", entityType: "LeaveBalance", summary: `Kuota cuti ${year} (${quota} hari) diterapkan ke ${quota > 0 ? todo.length : 0} karyawan`, after: { year, quota, granted: todo.length } });
-    return { granted: quota > 0 ? todo.length : 0, skipped: haveSet.size, quota };
+    if (rows.length) await tx.leaveBalanceEntry.createMany({ data: rows });
+    await writeAudit(tx, actor, {
+      action: "leave_balance.grant_annual", entityType: "LeaveBalance", entityId: employeeId ?? null,
+      summary: `Kuota cuti ${year} menurut kebijakan per karyawan: ${rows.length} diberi saldo, ${notEntitled.length} belum berhak/kuota 0${employeeId ? ` (${emps[0]?.fullName})` : ""}`,
+      after: { year, granted: rows.length, notEntitled: notEntitled.length, skipped: haveSet.size },
+    });
+    return { granted: rows.length, skipped: haveSet.size, notEntitled: notEntitled.length, notEntitledNames: notEntitled.slice(0, 20), quota: defaults.annualQuota };
   });
 }
 
@@ -218,6 +351,13 @@ export async function submitLeave(actor: Actor, raw: unknown): Promise<LeaveDto>
     const emp = await tx.employee.findUnique({ where: { id: employeeId } });
     if (!emp || !emp.isActive) throw Errors.forbidden("Data karyawan Anda nonaktif.");
     if (input.startDate < dateToIso(emp.joinDate)) throw Errors.validation("Tanggal mulai sebelum tanggal Anda mulai bekerja.", { startDate: "Sebelum tanggal mulai bekerja" });
+    const policy = policyOfEmployee(emp, leaveDefaultsOf(settings));
+    if (input.type === "CUTI" && !isEntitledOn(policy, input.startDate)) {
+      throw Errors.validation(
+        `Anda belum berhak cuti tahunan pada tanggal tersebut. Hak cuti Anda mulai ${formatDateLong(policy.eligibleFrom)}${policy.source.eligibleFrom === "DEFAULT" ? ` (masa kerja minimum ${settings.leaveMinTenureMonths} bulan)` : ""}.`,
+        { type: "Belum berhak cuti tahunan" },
+      );
+    }
     // Kunci per-karyawan: dua pengajuan bersamaan tidak boleh sama-sama lolos cek tumpang tindih/saldo.
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${"leave:" + employeeId}))`;
 
@@ -230,7 +370,7 @@ export async function submitLeave(actor: Actor, raw: unknown): Promise<LeaveDto>
       const f = await tx.storedFile.findUnique({ where: { id: input.attachmentFileId }, select: { kind: true, uploadedById: true } });
       if (!f || f.kind !== "LEAVE_ATTACHMENT" || f.uploadedById !== actor.userId) throw Errors.validation("Lampiran tidak valid.", { attachmentFileId: "Lampiran tidak valid" });
     }
-    if (input.type === "CUTI" && !settings.allowNegativeLeaveBalance) {
+    if (input.type === "CUTI" && !policy.allowNegative) {
       for (const [year, days] of wd.byYear) {
         const b = await balanceOf(tx, employeeId, year);
         if (days > b.available) {
@@ -316,10 +456,15 @@ export async function reviewLeave(actor: Actor, id: string, raw: unknown): Promi
       const others = await tx.leaveRequest.findMany({ where: { employeeId: req.employeeId, status: "APPROVED", id: { not: id } }, select: { startDate: true, endDate: true } });
       if (others.some((o) => rangesOverlap(dateToIso(o.startDate), dateToIso(o.endDate), start, end))) throw Errors.conflict("Bertabrakan dengan pengajuan lain yang sudah disetujui.");
       if (req.type === "CUTI") {
+        const emp = await tx.employee.findUniqueOrThrow({ where: { id: req.employeeId }, select: policySelect });
+        const policy = policyOfEmployee(emp, leaveDefaultsOf(settings));
+        if (!isEntitledOn(policy, start)) {
+          throw Errors.validation(`${req.employee.fullName} belum berhak cuti tahunan pada ${formatDateLong(start)} (berhak mulai ${formatDateLong(policy.eligibleFrom)}). Ubah kebijakan cuti karyawan ini atau tolak pengajuan.`);
+        }
         for (const [year, days] of wd!.byYear) {
           const b = await balanceOf(tx, req.employeeId, year);
           // Pengajuan ini sendiri sedang "menunggu" dan sudah tercadang di `reserved`; cek terhadap saldo riil.
-          if (!settings.allowNegativeLeaveBalance && days > b.balance) {
+          if (!policy.allowNegative && days > b.balance) {
             throw Errors.validation(`Saldo cuti ${year} ${req.employee.fullName} tidak cukup: saldo ${formatDays(b.balance)} hari, diminta ${formatDays(days)} hari kerja. Atur saldo terlebih dulu atau tolak pengajuan.`);
           }
         }

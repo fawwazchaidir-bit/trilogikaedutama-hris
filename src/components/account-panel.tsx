@@ -6,7 +6,7 @@ import { Copy, KeyRound, ShieldCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardHeader, Notice } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { TextField } from "@/components/ui/field";
+import { PasswordField, TextField } from "@/components/ui/field";
 import { useToast } from "@/components/ui/toast";
 import { api, ApiClientError, errorMessage } from "@/lib/api-client";
 import { formatDateTime } from "@/lib/format";
@@ -77,7 +77,7 @@ export function TwoFactorCard({ account, forced }: { account: AccountDto; forced
 
         {step === "password" && (
           <form className="max-w-sm space-y-3" onSubmit={(e) => { e.preventDefault(); void f.run(() => api<TwoFactorSetup>("/api/account/2fa/setup", { body: { password } }), undefined, (r) => { setSetup(r); setStep("scan"); setPassword(""); }); }}>
-            <TextField label="Konfirmasi dengan password Anda" type="password" autoComplete="current-password" required autoFocus value={password} onChange={(e) => setPassword(e.target.value)} error={f.fe.password} />
+            <PasswordField label="Konfirmasi dengan password Anda" autoComplete="current-password" required autoFocus value={password} onChange={(e) => setPassword(e.target.value)} error={f.fe.password} />
             <div className="flex gap-2"><Button type="submit" variant="primary" loading={f.busy}>Lanjut</Button><Button onClick={reset} disabled={f.busy}>Batal</Button></div>
           </form>
         )}
@@ -107,7 +107,7 @@ export function TwoFactorCard({ account, forced }: { account: AccountDto; forced
             else void f.run(() => api<{ recoveryCodes: string[] }>("/api/account/2fa/recovery", { body: { password, code } }), "Kode pemulihan baru dibuat.", (r) => { setCodes(r.recoveryCodes); setStep("codes"); setPassword(""); setCode(""); });
           }}>
             <Notice tone="info">{step === "disable" ? "Masukkan password dan kode dari aplikasi autentikator untuk mematikan 2FA." : "Kode pemulihan lama akan hangus. Masukkan password dan kode dari aplikasi autentikator."}</Notice>
-            <TextField label="Password" type="password" autoComplete="current-password" required value={password} onChange={(e) => setPassword(e.target.value)} error={f.fe.password} />
+            <PasswordField label="Password" autoComplete="current-password" required value={password} onChange={(e) => setPassword(e.target.value)} error={f.fe.password} />
             <TextField label="Kode 6 digit" inputMode="numeric" autoComplete="one-time-code" required value={code} onChange={(e) => setCode(e.target.value)} error={f.fe.code} />
             <div className="flex gap-2"><Button type="submit" variant={step === "disable" ? "danger" : "primary"} loading={f.busy}>{step === "disable" ? "Matikan 2FA" : "Buat ulang"}</Button><Button onClick={reset} disabled={f.busy}>Batal</Button></div>
           </form>

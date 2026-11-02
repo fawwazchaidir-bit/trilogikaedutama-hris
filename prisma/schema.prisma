@@ -1,4 +1,4 @@
-// Trilogika Edutama — Mini HRIS
+// Trilogika Edutama — Internal Human Resources Information System
 //
 // Prinsip desain skema (lihat docs/ARCHITECTURE.md):
 //  * Uang = bilangan bulat Rupiah (BigInt). Tidak ada float untuk nominal.
@@ -138,6 +138,8 @@ enum FileKind {
   ATTENDANCE_PHOTO
   /// Gambar tanda tangan penanda tangan slip gaji (PNG hasil normalisasi server).
   SIGNATURE
+  /// PDF dokumen kepegawaian (mis. kontrak kerja bermaterai yang ditandatangani basah, hasil pindai).
+  DOCUMENT
 }
 
 enum LateDeductionMode {
@@ -187,6 +189,34 @@ enum TaxStatus {
   K1
   K2
   K3
+}
+
+/// Jenis dokumen kepegawaian. Hanya KONTRAK yang punya tanggal berakhir & pengingat keputusan pimpinan.
+enum DocumentKind {
+  CONTRACT
+  OTHER
+}
+
+/// Keputusan pimpinan atas kontrak yang mendekati berakhir.
+enum RenewalDecision {
+  PENDING
+  CONTINUE
+  DISCONTINUE
+}
+
+enum AssignmentStatus {
+  ISSUED
+  CANCELLED
+}
+
+enum AllowanceMethod {
+  CASH
+  TRANSFER
+}
+
+enum ReceiptStatus {
+  ACTIVE
+  VOIDED
 }
 
 enum DeliveryChannel {
@@ -398,12 +428,23 @@ model Employee {
   bpjsHealthEnrolled     Boolean   @default(true)
   bpjsEmploymentEnrolled Boolean   @default(true)
 
+  // Kebijakan cuti PER KARYAWAN. NULL = ikut kebijakan bawaan lembaga (Pengaturan). Nilai terisi = kebijakan khusus karyawan ini
+  // (wajib disertai catatan alasan). Lihat src/lib/leave-policy.ts untuk perhitungan kebijakan efektif.
+  /// Kuota cuti tahunan (hari) khusus karyawan ini.
+  leaveQuotaDays     Int?
+  /// Tanggal mulai berhak cuti. NULL = tanggal mulai bekerja + masa kerja minimum (kebijakan bawaan).
+  leaveEligibleFrom  DateTime? @db.Date
+  /// Boleh saldo cuti negatif? NULL = ikut kebijakan bawaan.
+  leaveAllowNegative Boolean?
+  /// Alasan kebijakan khusus (wajib bila salah satu kolom di atas terisi).
+  leavePolicyNote    String?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  user           User?                  @relation(fields: [userId], references: [id], onDelete: Restrict)
-  division       Division?              @relation(fields: [divisionId], references: [id], onDelete: Restrict)
-  photo          StoredFile?            @relation("EmployeePhoto", fields: [photoFileId], references: [id], onDelete: Restrict)
+  user           User?                   @relation(fields: [userId], references: [id], onDelete: Restrict)
+  division       Division?               @relation(fields: [divisionId], references: [id], onDelete: Restrict)
+  photo          StoredFile?             @relation("EmployeePhoto", fields: [photoFileId], references: [id], onDelete: Restrict)
   attendances    Attendance[]
   corrections    AttendanceCorrection[]
   leaves         LeaveRequest[]
@@ -415,6 +456,9 @@ model Employee {
   overtimes      OvertimeRequest[]
   locationChecks LocationCheck[]
   photos         AttendancePhoto[]
+  documents      EmployeeDocument[]
+  assignees      AssignmentAssignee[]
+  allowances     DailyAllowanceReceipt[]
 
   @@index([divisionId])
   @@index([isActive])
@@ -795,9 +839,11 @@ model CompanySettings {
   /// Admin & Super Admin wajib mengaktifkan 2FA.
   twoFactorRequiredForAdmins     Boolean             @default(false)
 
-  // Kebijakan cuti
+  // Kebijakan cuti BAWAAN (dipakai karyawan yang tidak punya kebijakan khusus; lihat kolom leave* pada Employee)
   annualLeaveQuota          Int     @default(12)
   allowNegativeLeaveBalance Boolean @default(false)
+  /// Masa kerja minimum (bulan, dihitung dari tanggal mulai bekerja) sebelum berhak cuti tahunan. 0 = langsung berhak.
+  leaveMinTenureMonths      Int     @default(12)
 
   // Aturan penggajian (TIDAK ada tarif baku — semua nol/nonaktif sampai dikonfigurasi & diverifikasi)
   lateDeductionMode         LateDeductionMode    @default(NONE)
@@ -842,9 +888,10 @@ model StoredFile {
   uploadedById String   @db.Uuid
   createdAt    DateTime @default(now())
 
-  photoOf     Employee[]       @relation("EmployeePhoto")
-  attachments LeaveRequest[]   @relation("LeaveAttachment")
+  photoOf     Employee[]         @relation("EmployeePhoto")
+  attachments LeaveRequest[]     @relation("LeaveAttachment")
   punchPhoto  AttendancePhoto?
+  documents   EmployeeDocument[]
 
   @@index([kind])
   @@map("stored_files")
@@ -983,6 +1030,139 @@ model LocationCheck {
   @@index([decision, reviewStatus])
   @@index([createdAt])
   @@map("location_checks")
+}
+
+// ───────────────────────────── Dokumen kepegawaian (kontrak kerja) ─────────────────────────────
+
+/// Dokumen kepegawaian. KONTRAK = PDF kontrak bermaterai yang ditandatangani basah (hasil pindai) + tanggal mulai/berakhir.
+/// Dua bulan menjelang berakhir (H-3 bulan, lalu H-1 bulan & H-14 hari bila belum diputuskan) pimpinan diingatkan untuk memutuskan
+/// lanjut/tidak (`renewalDecision`). Dokumen tidak pernah dihapus: salah unggah → diarsipkan dengan alasan; berkas lama tetap tersimpan.
+model EmployeeDocument {
+  id               String          @id @default(uuid()) @db.Uuid
+  employeeId       String          @db.Uuid
+  kind             DocumentKind
+  title            String
+  documentNo       String?
+  /// Kontrak: wajib. Dokumen lain: opsional.
+  startDate        DateTime?       @db.Date
+  /// Kontrak: tanggal berakhir. NULL = tanpa batas waktu (PKWTT) → tidak ada pengingat.
+  endDate          DateTime?       @db.Date
+  fileId           String          @db.Uuid
+  note             String?
+  renewalDecision  RenewalDecision @default(PENDING)
+  decidedById      String?         @db.Uuid
+  decidedAt        DateTime?
+  decisionNote     String?
+  /// Pengingat yang sudah dikirim ("M3" = H-3 bulan, "M1" = H-1 bulan, "D14" = H-14 hari) — mencegah pengiriman ganda.
+  remindersSent    String[]        @default([])
+  /// Dokumen ini adalah perpanjangan/pengganti kontrak lain (menghentikan pengingat kontrak yang digantikan).
+  renewsDocumentId String?         @db.Uuid
+  archivedAt       DateTime?
+  archivedById     String?         @db.Uuid
+  archiveReason    String?
+  uploadedById     String          @db.Uuid
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+
+  employee  Employee           @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  file      StoredFile         @relation(fields: [fileId], references: [id], onDelete: Restrict)
+  renews    EmployeeDocument?  @relation("DocumentRenewal", fields: [renewsDocumentId], references: [id], onDelete: Restrict)
+  renewedBy EmployeeDocument[] @relation("DocumentRenewal")
+
+  @@index([employeeId, kind])
+  @@index([kind, endDate])
+  @@map("employee_documents")
+}
+
+// ───────────────────────────── Surat Tugas & Bukti Penerimaan Uang Harian ─────────────────────────────
+
+/// Surat Tugas dari HR / Pimpinan kepada karyawan yang ditunjuk — DASAR pemberian Uang Harian. Isi (lembaga, penanda tangan, penerima
+/// tugas) dibekukan di `snapshot` saat terbit. Berdiri sendiri: tidak ada hubungannya dengan penggajian / slip gaji.
+model AssignmentLetter {
+  id            String           @id @default(uuid()) @db.Uuid
+  /// Penomoran per tahun terbit: "001/ST/XI/2026". (seqYear, seqNo) unik.
+  seqYear       Int
+  seqNo         Int
+  number        String           @unique
+  status        AssignmentStatus @default(ISSUED)
+  purpose       String
+  destination   String
+  startDate     DateTime         @db.Date
+  endDate       DateTime         @db.Date
+  details       String?
+  issueDate     DateTime         @db.Date
+  snapshot      Json
+  issuedById    String           @db.Uuid
+  issuedAt      DateTime         @default(now())
+  cancelledAt   DateTime?
+  cancelledById String?          @db.Uuid
+  cancelReason  String?
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+
+  assignees AssignmentAssignee[]
+  receipts  DailyAllowanceReceipt[]
+
+  @@unique([seqYear, seqNo])
+  @@index([status, startDate])
+  @@index([issueDate])
+  @@map("assignment_letters")
+}
+
+/// Karyawan yang ditugaskan + uang harian yang menjadi haknya untuk perjalanan ini (hari × tarif per hari).
+model AssignmentAssignee {
+  id         String   @id @default(uuid()) @db.Uuid
+  letterId   String   @db.Uuid
+  employeeId String   @db.Uuid
+  /// Jumlah hari yang dibayar (1 … lama perjalanan, hari kalender).
+  days       Int
+  /// Rupiah per hari.
+  dailyRate  BigInt
+  total      BigInt
+  createdAt  DateTime @default(now())
+
+  letter   AssignmentLetter        @relation(fields: [letterId], references: [id], onDelete: Restrict)
+  employee Employee                @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  receipts DailyAllowanceReceipt[]
+
+  @@unique([letterId, employeeId])
+  @@index([employeeId])
+  @@map("assignment_assignees")
+}
+
+/// Bukti Penerimaan Uang Harian — satu dokumen per perjalanan per penerima, berdiri sendiri DI LUAR slip gaji. Snapshot terkunci (trigger);
+/// hanya ACTIVE → VOIDED yang diizinkan. Paling banyak satu bukti ACTIVE per penerima (indeks unik parsial pada migrasi).
+model DailyAllowanceReceipt {
+  id         String          @id @default(uuid()) @db.Uuid
+  seqYear    Int
+  seqNo      Int
+  number     String          @unique
+  letterId   String          @db.Uuid
+  assigneeId String          @db.Uuid
+  employeeId String          @db.Uuid
+  status     ReceiptStatus   @default(ACTIVE)
+  days       Int
+  dailyRate  BigInt
+  total      BigInt
+  /// Tanggal uang diserahkan (juga tanggal pada blok tanda tangan).
+  paidDate   DateTime        @db.Date
+  method     AllowanceMethod
+  note       String?
+  snapshot   Json
+  issuedById String          @db.Uuid
+  issuedAt   DateTime        @default(now())
+  voidedAt   DateTime?
+  voidedById String?         @db.Uuid
+  voidReason String?
+
+  letter   AssignmentLetter   @relation(fields: [letterId], references: [id], onDelete: Restrict)
+  assignee AssignmentAssignee @relation(fields: [assigneeId], references: [id], onDelete: Restrict)
+  employee Employee           @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+
+  @@unique([seqYear, seqNo])
+  @@index([employeeId, paidDate])
+  @@index([letterId])
+  @@map("daily_allowance_receipts")
 }
 
 model AuditLog {

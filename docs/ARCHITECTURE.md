@@ -70,7 +70,9 @@ Syarat ajukan: ada karyawan, tidak ada gaji bersih negatif, periode absensi suda
 `attendances` (unik per karyawan-hari) · `attendance_corrections` (append-only) · `leave_requests` (+`dayPart`) · `leave_balance_entries` (append-only, pecahan 0,5) · `overtime_requests` ·
 `location_checks` · `attendance_photos` · `notification_deliveries` · `two_factor_recovery_codes` · `login_challenges` · `password_reset_tokens` ·
 `salary_components` · `payroll_runs` · `payroll_items` · `payroll_item_lines` · `payslips` (snapshot, terkunci) · `company_settings` (singleton) ·
-`stored_files` · `notifications` · `audit_logs` (append-only) · `rate_limit_buckets`.
+`stored_files` (+ jenis `DOCUMENT` = PDF kontrak) · `notifications` · `audit_logs` (append-only) · `rate_limit_buckets` ·
+`employee_documents` (kontrak/dokumen, keputusan lanjut/tidak, `remindersSent`) · `assignment_letters` · `assignment_assignees` · `daily_allowance_receipts` (Surat Tugas & Uang Harian, **tanpa kaitan ke tabel penggajian**).
+Kebijakan cuti per karyawan = kolom `leaveQuotaDays` / `leaveEligibleFrom` / `leaveAllowNegative` / `leavePolicyNote` pada `employees` (NULL = ikut bawaan `company_settings`: `annualLeaveQuota`, `allowNegativeLeaveBalance`, `leaveMinTenureMonths`); kebijakan efektif dihitung murni di `src/lib/leave-policy.ts`.
 
 ### Penjagaan di level database (migrasi `integrity_guards`)
 - Trigger append-only: `audit_logs`, `attendance_corrections`, `leave_balance_entries`.
@@ -80,6 +82,7 @@ Syarat ajukan: ada karyawan, tidak ada gaji bersih negatif, periode absensi suda
 - `leave_requests`: setelah diputuskan, isi beku (hanya `APPROVED → CANCELLED`).
 - `CHECK`: jam valid, check-out > check-in, tanggal tidak terbalik, nominal ≥ 0, identitas gaji bersih, persen komponen, dll.
 - Unik tanpa membedakan huruf: nomor induk, nama divisi, nama jadwal; tepat satu jadwal default.
+- Migrasi `documents_assignments_leave_policy`: `employee_documents` tidak dapat dihapus/diganti karyawan & jenisnya; `assignment_letters` & `daily_allowance_receipts` terkunci (hanya pembatalan beralasan); `assignment_assignees` tidak dapat diubah/dihapus; `CHECK total = hari × tarif`; satu bukti `ACTIVE` per penerima (indeks unik parsial); kebijakan cuti khusus wajib bercatatan.
 Pesan trigger diawali `HRIS-GUARD:` dan ditampilkan apa adanya ke pengguna.
 
 ## Konkurensi
