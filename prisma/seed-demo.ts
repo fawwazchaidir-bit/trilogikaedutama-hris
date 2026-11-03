@@ -11,6 +11,7 @@ import { confirmPayrollRules, updateAttendancePolicy, updatePayrollRules } from 
 import { createRun, approveRun, issueRun, submitRun } from "../src/server/services/payroll";
 import { reviewLeave, submitLeave } from "../src/server/services/leave";
 import { addDays, isoWeekday, monthRange, todayIso, localMinutes } from "../src/lib/time";
+import { effectiveLeavePolicy, quotaForYear } from "../src/lib/leave-policy";
 import { monthLabel } from "../src/lib/format";
 
 const D = (iso: string) => new Date(`${iso}T00:00:00.000Z`);
@@ -130,8 +131,13 @@ export async function seedDemo(prisma: PrismaClient, opts: { password: string; n
   // Pengajuan disetujui (riwayat) — dipilih acak tanpa tumpang tindih.
   const leaveDays = new Map<string, Set<string>>();
   const grantYears = new Set([Number(rangeStart.slice(0, 4)), Number(today.slice(0, 4))]);
-  for (const e of emps) for (const y of grantYears) {
-    await prisma.leaveBalanceEntry.create({ data: { employeeId: e.id, year: y, kind: "GRANT", days: 12, note: `Kuota cuti tahunan ${y} (demo)`, createdById: hr.userId } });
+  // Kuota cuti menurut kebijakan PER KARYAWAN: bawaan 12 hari, berhak setelah 12 bulan bekerja (karyawan baru, mis. Joko, belum berhak → tanpa saldo).
+  for (const e of emps) {
+    const policy = effectiveLeavePolicy(e.joinDate.toISOString().slice(0, 10), { quotaDays: null, eligibleFrom: null, allowNegative: null, note: null }, { annualQuota: 12, allowNegative: false, minTenureMonths: 12 });
+    for (const y of grantYears) {
+      const days = quotaForYear(policy, y);
+      if (days > 0) await prisma.leaveBalanceEntry.create({ data: { employeeId: e.id, year: y, kind: "GRANT", days, note: `Kuota cuti tahunan ${y} (demo; berhak sejak ${policy.eligibleFrom})`, createdById: hr.userId } });
+    }
   }
   const types: ("SAKIT" | "IZIN" | "CUTI")[] = ["SAKIT", "IZIN", "CUTI", "CUTI", "SAKIT"];
   for (let i = 0; i < emps.length; i++) {

@@ -97,6 +97,19 @@ export function addDays(iso: string, n: number): string {
   return fromMs(toMs(iso) + n * MS_DAY);
 }
 
+/**
+ * Tambah `n` bulan kalender (boleh negatif). Hari dipertahankan; bila bulan tujuan lebih pendek, dipangkas ke hari terakhir
+ * bulan itu (31 Jan + 1 bln = 28/29 Feb). Dipakai untuk "berhak cuti setelah N bulan" dan pengingat kontrak "H-3 bulan".
+ */
+export function addMonths(iso: string, n: number): string {
+  const [y, m, d] = iso.split("-").map(Number) as [number, number, number];
+  const idx = (y * 12 + (m - 1)) + n;
+  const ny = Math.floor(idx / 12);
+  const nm = idx - ny * 12; // 0..11
+  const last = new Date(Date.UTC(ny, nm + 1, 0)).getUTCDate();
+  return `${String(ny).padStart(4, "0")}-${String(nm + 1).padStart(2, "0")}-${String(Math.min(d, last)).padStart(2, "0")}`;
+}
+
 export function diffDays(a: string, b: string): number {
   return Math.round((toMs(a) - toMs(b)) / MS_DAY);
 }

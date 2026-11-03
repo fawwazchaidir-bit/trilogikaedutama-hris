@@ -5,7 +5,7 @@ import { Camera, Eye, KeyRound, Pencil, Plus, UserCheck, UserX } from "lucide-re
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { Notice } from "@/components/ui/card";
-import { SelectField, TextAreaField, TextField } from "@/components/ui/field";
+import { PasswordField, SelectField, TextAreaField, TextField } from "@/components/ui/field";
 import { useToast } from "@/components/ui/toast";
 import { api, ApiClientError, errorMessage } from "@/lib/api-client";
 import { uploadFile } from "@/components/upload";
@@ -158,7 +158,7 @@ export function EmployeeActions({ employee, divisions, today, canManage, canCrea
         footer={<><Button onClick={close} disabled={busy}>Batal</Button><Button variant="primary" loading={busy} onClick={() => void run(() => api("/api/users", { body: { email: acct.email, name: employee.fullName, role: "EMPLOYEE", password: acct.password, employeeId: employee.id } }), "Akun login dibuat.")}>Buat akun</Button></>}>
         <div className="space-y-4">{error && <Notice tone="danger">{error}</Notice>}
           <TextField label="Email login" type="email" required value={acct.email} onChange={(e) => setAcct({ ...acct, email: e.target.value })} error={fe.email} />
-          <TextField label="Password sementara" autoComplete="off" required value={acct.password} onChange={(e) => setAcct({ ...acct, password: e.target.value })} error={fe.password} hint="Minimal 12 karakter. Sampaikan lewat kanal aman." /></div>
+          <PasswordField label="Password sementara" autoComplete="new-password" required value={acct.password} onChange={(e) => setAcct({ ...acct, password: e.target.value })} error={fe.password} hint="Minimal 12 karakter. Sampaikan lewat kanal aman." /></div>
       </Dialog>
 
       <Dialog open={dlg === "bank" && !!bank} onClose={close} size="sm" title="Rekening pembayaran gaji" description="Pembukaan nomor lengkap dicatat di audit log. Jangan dibagikan."

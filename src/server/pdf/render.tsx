@@ -2,6 +2,8 @@ import "server-only";
 import { renderToBuffer } from "@react-pdf/renderer";
 import { ReportPdf } from "./ReportPdf";
 import { PayslipDocument, type PayslipPdfItem } from "./PayslipPdf";
+import { AssignmentDocument, ReceiptDocument } from "./AssignmentPdf";
+import type { AssignmentSnapshot, ReceiptSnapshot } from "../services/assignments";
 import type { ReportTable } from "../export";
 import { env } from "../env";
 import { readFileBytes } from "../services/files";
@@ -14,11 +16,11 @@ export async function renderReportPdf(table: ReportTable, ctx: { companyName: st
   return renderToBuffer(<ReportPdf data={{ companyName: ctx.companyName, table, printedBy: ctx.printedBy, printedAt }} />);
 }
 
-export interface SlipForRender { snapshot: PayslipSnapshot; voided: boolean }
+export interface SlipForRender { snapshot: PayslipSnapshot; voided: boolean; /** Hanya untuk uji: paksa tingkat kepadatan. */ forceTier?: number }
 
 /**
- * Render satu atau banyak slip (satu halaman per slip) DARI SNAPSHOT. Logo dibaca dari berkas yang dirujuk snapshot
- * (berkas tidak pernah ditimpa, sehingga logo slip lama tetap sama).
+ * Render satu atau banyak slip (satu halaman per slip) DARI SNAPSHOT. Logo & gambar tanda tangan dibaca dari berkas yang dirujuk
+ * snapshot (berkas tidak pernah ditimpa, sehingga slip lama tetap sama).
  */
 export async function renderPayslipsPdf(slips: SlipForRender[]): Promise<Buffer> {
   const logoCache = new Map<string, Awaited<ReturnType<typeof readFileBytes>>>();
@@ -33,7 +35,13 @@ export async function renderPayslipsPdf(slips: SlipForRender[]): Promise<Buffer>
     } else {
       logo = await defaultLogo();
     }
-    items.push({ snapshot: sl.snapshot, logo, voided: sl.voided, printedAt });
+    const sigId = sl.snapshot.signer?.signatureFileId ?? null;
+    let signature: Awaited<ReturnType<typeof readFileBytes>> = null;
+    if (sigId) {
+      if (!logoCache.has(sigId)) logoCache.set(sigId, await readFileBytes(sigId));
+      signature = logoCache.get(sigId) ?? null;
+    }
+    items.push({ snapshot: sl.snapshot, logo, signature, voided: sl.voided, printedAt, forceTier: sl.forceTier });
   }
   return renderToBuffer(<PayslipDocument items={items} />);
 }
@@ -50,4 +58,21 @@ async function defaultLogo() {
     }
   }
   return defaultLogoCache;
+}
+
+type Img = Awaited<ReturnType<typeof readFileBytes>>;
+async function brandImages(logoFileId: string | null, signatureFileId: string | null | undefined): Promise<{ logo: Img; signature: Img }> {
+  return { logo: logoFileId ? await readFileBytes(logoFileId) : await defaultLogo(), signature: signatureFileId ? await readFileBytes(signatureFileId) : null };
+}
+
+/** Surat Tugas (PDF) dari snapshot terbit. */
+export async function renderAssignmentPdf(snapshot: AssignmentSnapshot, cancelled: boolean): Promise<Buffer> {
+  const { logo, signature } = await brandImages(snapshot.company.logoFileId, snapshot.signer?.signatureFileId);
+  return renderToBuffer(<AssignmentDocument item={{ snapshot, logo, signature, cancelled, printedAt: formatDateTime(new Date(), env().APP_TIMEZONE) }} />);
+}
+
+/** Bukti Penerimaan Uang Harian (PDF) dari snapshot terbit — penanda tangan resmi sama dengan slip gaji. */
+export async function renderReceiptPdf(snapshot: ReceiptSnapshot, voided: boolean): Promise<Buffer> {
+  const { logo, signature } = await brandImages(snapshot.company.logoFileId, snapshot.signer?.signatureFileId);
+  return renderToBuffer(<ReceiptDocument item={{ snapshot, logo, signature, voided, printedAt: formatDateTime(new Date(), env().APP_TIMEZONE) }} />);
 }

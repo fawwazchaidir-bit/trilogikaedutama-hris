@@ -34,7 +34,8 @@ const check = (label: string, checked: boolean, on: (v: boolean) => void, disabl
 export function CompanyForm({ s, canEdit }: { s: SettingsDto; canEdit: boolean }) {
   const f = useForm();
   const [v, setV] = useState({ name: s.company.name, legalName: s.company.legalName ?? "", tagline: s.company.tagline ?? "", address: s.company.address ?? "", phone: s.company.phone ?? "", email: s.company.email ?? "", website: s.company.website ?? "",
-    slipShowAttendance: s.slip.showAttendance, slipFooterNote: s.slip.footerNote ?? "", slipNumberPrefix: s.slip.numberPrefix });
+    slipShowAttendance: s.slip.showAttendance, slipFooterNote: s.slip.footerNote ?? "", slipNumberPrefix: s.slip.numberPrefix,
+    slipSignerName: s.slip.signer.name ?? "", slipSignerTitle: s.slip.signer.title ?? "", slipSignerPlace: s.slip.signer.place ?? "" });
   const set = <K extends keyof typeof v>(k: K, x: (typeof v)[K]) => setV((p) => ({ ...p, [k]: x }));
   const d = !canEdit || f.busy;
   return (
@@ -52,8 +53,39 @@ export function CompanyForm({ s, canEdit }: { s: SettingsDto; canEdit: boolean }
         <TextField label="Awalan nomor slip" disabled={d} value={v.slipNumberPrefix} onChange={(e) => set("slipNumberPrefix", e.target.value)} error={f.fe.slipNumberPrefix} hint="Contoh hasil: SG-202610-R01-001" />
         <div className="sm:col-span-2">{check("Tampilkan ringkasan kehadiran pada slip gaji", v.slipShowAttendance, (x) => set("slipShowAttendance", x), d)}</div>
         <div className="sm:col-span-2"><TextAreaField label="Catatan kaki slip (opsional)" rows={2} disabled={d} value={v.slipFooterNote} onChange={(e) => set("slipFooterNote", e.target.value)} error={f.fe.slipFooterNote} /></div>
+        <fieldset className="grid gap-4 rounded-md border border-line p-4 sm:col-span-2 sm:grid-cols-3">
+          <legend className="px-1 text-sm font-medium text-ink-soft">Penanda tangan slip gaji</legend>
+          <TextField label="Nama penanda tangan" disabled={d} value={v.slipSignerName} onChange={(e) => set("slipSignerName", e.target.value)} error={f.fe.slipSignerName} placeholder="mis. Fawwaz Chaidir, S.Psi." />
+          <TextField label="Jabatan" disabled={d} value={v.slipSignerTitle} onChange={(e) => set("slipSignerTitle", e.target.value)} error={f.fe.slipSignerTitle} placeholder="mis. Chief Executive Officer" />
+          <TextField label="Kota (opsional)" disabled={d} value={v.slipSignerPlace} onChange={(e) => set("slipSignerPlace", e.target.value)} error={f.fe.slipSignerPlace} placeholder="mis. Yogyakarta" hint="Tampil sebelum tanggal terbit." />
+          <p className="text-xs text-muted sm:col-span-3">Tampil di kanan bawah slip. Kosongkan nama untuk tidak menampilkan blok tanda tangan. Berlaku untuk slip yang terbit <strong>setelah</strong> disimpan; slip yang sudah terbit tidak berubah. Gambar tanda tangan diunggah pada kartu di bawah.</p>
+        </fieldset>
         {canEdit && <div className="sm:col-span-2"><Button type="submit" variant="primary" loading={f.busy}>Simpan</Button></div>}
       </form>
+    </Card>
+  );
+}
+
+export function SignatureCard({ signatureUrl, signerName, canEdit }: { signatureUrl: string | null; signerName: string | null; canEdit: boolean }) {
+  const f = useForm();
+  return (
+    <Card>
+      <CardHeader title="Gambar tanda tangan slip" description="PNG atau JPG (maks. 3 MB), latar putih/transparan. Dikecilkan & disimpan sebagai PNG. Opsional: tanpa gambar, slip menyisakan ruang untuk tanda tangan basah." />
+      <div className="flex flex-wrap items-center gap-5 p-5">
+        {signatureUrl
+          // eslint-disable-next-line @next/next/no-img-element
+          ? <img src={signatureUrl} alt={`Tanda tangan ${signerName ?? "penanda tangan"} saat ini`} className="h-20 w-48 rounded-lg border border-line bg-white object-contain p-1" />
+          : <div className="grid h-20 w-48 place-items-center rounded-lg border border-dashed border-line text-xs text-muted">Belum ada gambar</div>}
+        {canEdit && (
+          <div className="space-y-1.5">
+            <label htmlFor="signature-file" className="block text-sm font-medium text-ink-soft">Unggah tanda tangan baru</label>
+            <input id="signature-file" type="file" accept="image/png,image/jpeg" disabled={f.busy} onChange={(e) => { const file = e.target.files?.[0]; if (file) void f.run(() => uploadFile("/api/settings/signature", file), "Gambar tanda tangan diperbarui."); e.target.value = ""; }} className="block text-sm file:mr-3 file:rounded-md file:border file:border-line file:bg-white file:px-3 file:py-1.5 hover:file:bg-canvas" />
+            {signatureUrl && <Button size="sm" variant="danger" disabled={f.busy} onClick={() => void f.run(() => api("/api/settings/signature", { method: "DELETE" }), "Gambar tanda tangan dicabut.")}>Cabut gambar</Button>}
+            {!signerName && signatureUrl && <p className="text-xs text-amber-700">Isi nama penanda tangan agar blok tanda tangan tampil pada slip.</p>}
+            {f.error && <p role="alert" className="text-xs font-medium text-brand-700">{f.error}</p>}
+          </div>
+        )}
+      </div>
     </Card>
   );
 }
@@ -80,7 +112,7 @@ export function PolicyForm({ s, canEdit }: { s: SettingsDto; canEdit: boolean })
   const [v, setV] = useState({
     lateMinutesAfterTolerance: a.lateMinutesAfterTolerance, locationEnabled: a.locationEnabled, locationName: a.locationName ?? "", locationLat: a.locationLat === null ? "" : String(a.locationLat),
     locationLng: a.locationLng === null ? "" : String(a.locationLng), locationRadiusMeters: String(a.locationRadiusMeters), locationMaxAccuracyMeters: String(a.locationMaxAccuracyMeters),
-    requestBackdateDays: String(a.requestBackdateDays), annualLeaveQuota: String(s.leave.annualLeaveQuota), allowNegativeLeaveBalance: s.leave.allowNegativeLeaveBalance,
+    requestBackdateDays: String(a.requestBackdateDays), annualLeaveQuota: String(s.leave.annualLeaveQuota), leaveMinTenureMonths: String(s.leave.minTenureMonths), allowNegativeLeaveBalance: s.leave.allowNegativeLeaveBalance,
     locationSpoofMode: a.locationSpoofMode, photoMode: a.photoMode, photoRequireLocation: a.photoRequireLocation, photoRetentionMonths: String(a.photoRetentionMonths),
   });
   const set = <K extends keyof typeof v>(k: K, x: (typeof v)[K]) => setV((p) => ({ ...p, [k]: x }));
@@ -88,13 +120,14 @@ export function PolicyForm({ s, canEdit }: { s: SettingsDto; canEdit: boolean })
   const num = (x: string) => (x.trim() === "" ? null : Number(x.replace(",", ".")));
   return (
     <Card>
-      <CardHeader title="Kebijakan absensi & cuti" description="Berlaku untuk seluruh karyawan. Hanya Super Admin yang dapat mengubah." actions={a.confirmedAt ? <Badge tone="green">Dikonfirmasi {formatDateTime(a.confirmedAt)}</Badge> : <Badge tone="amber">Nilai awal — perlu dikonfirmasi</Badge>} />
-      <form className="grid gap-4 p-5 sm:grid-cols-2" aria-label="Form kebijakan" onSubmit={(e) => { e.preventDefault(); void f.run(() => api("/api/settings/attendance", { method: "PUT", body: { lateMinutesAfterTolerance: v.lateMinutesAfterTolerance, locationEnabled: v.locationEnabled, locationName: v.locationName, locationLat: num(v.locationLat), locationLng: num(v.locationLng), locationRadiusMeters: Number(v.locationRadiusMeters), locationMaxAccuracyMeters: Number(v.locationMaxAccuracyMeters), requestBackdateDays: Number(v.requestBackdateDays), annualLeaveQuota: Number(v.annualLeaveQuota), allowNegativeLeaveBalance: v.allowNegativeLeaveBalance, locationSpoofMode: v.locationSpoofMode, attendancePhotoMode: v.photoMode, attendancePhotoRequireLocation: v.photoRequireLocation, attendancePhotoRetentionMonths: Number(v.photoRetentionMonths) } }), "Kebijakan disimpan dan dikonfirmasi."); }}>
+      <CardHeader title="Kebijakan absensi & cuti (bawaan)" description="Berlaku untuk seluruh karyawan; kebijakan cuti dapat dikhususkan per karyawan di halaman karyawan. Hanya Super Admin yang dapat mengubah bawaan ini." actions={a.confirmedAt ? <Badge tone="green">Dikonfirmasi {formatDateTime(a.confirmedAt)}</Badge> : <Badge tone="amber">Nilai awal — perlu dikonfirmasi</Badge>} />
+      <form className="grid gap-4 p-5 sm:grid-cols-2" aria-label="Form kebijakan" onSubmit={(e) => { e.preventDefault(); void f.run(() => api("/api/settings/attendance", { method: "PUT", body: { lateMinutesAfterTolerance: v.lateMinutesAfterTolerance, locationEnabled: v.locationEnabled, locationName: v.locationName, locationLat: num(v.locationLat), locationLng: num(v.locationLng), locationRadiusMeters: Number(v.locationRadiusMeters), locationMaxAccuracyMeters: Number(v.locationMaxAccuracyMeters), requestBackdateDays: Number(v.requestBackdateDays), annualLeaveQuota: Number(v.annualLeaveQuota), leaveMinTenureMonths: Number(v.leaveMinTenureMonths), allowNegativeLeaveBalance: v.allowNegativeLeaveBalance, locationSpoofMode: v.locationSpoofMode, attendancePhotoMode: v.photoMode, attendancePhotoRequireLocation: v.photoRequireLocation, attendancePhotoRetentionMonths: Number(v.photoRetentionMonths) } }), "Kebijakan disimpan dan dikonfirmasi."); }}>
         {f.error && <div className="sm:col-span-2"><Notice tone="danger">{f.error}</Notice></div>}
         <div className="sm:col-span-2">{check("Hitung menit keterlambatan setelah toleransi", v.lateMinutesAfterTolerance, (x) => set("lateMinutesAfterTolerance", x), d, "Nonaktif (default): menit terlambat dihitung dari jam masuk, mis. masuk 08.21 dengan jam 08.00 = 21 menit. Aktif: dihitung dari batas toleransi.")}</div>
-        <TextField label="Kuota cuti tahunan (hari)" type="number" min={0} max={366} disabled={d} value={v.annualLeaveQuota} onChange={(e) => set("annualLeaveQuota", e.target.value)} error={f.fe.annualLeaveQuota} hint="Contoh 12. Sesuaikan dengan kebijakan perusahaan & ketentuan yang berlaku." />
+        <TextField label="Kuota cuti tahunan bawaan (hari)" type="number" min={0} max={366} disabled={d} value={v.annualLeaveQuota} onChange={(e) => set("annualLeaveQuota", e.target.value)} error={f.fe.annualLeaveQuota} hint="Contoh 12. Bawaan untuk karyawan tanpa kebijakan khusus — kuota tiap karyawan dapat dikhususkan di halaman karyawan." />
+        <TextField label="Masa kerja minimum sebelum berhak cuti (bulan)" type="number" min={0} max={120} disabled={d} value={v.leaveMinTenureMonths} onChange={(e) => set("leaveMinTenureMonths", e.target.value)} error={f.fe.leaveMinTenureMonths} hint="Contoh 12 = berhak cuti tahunan setelah 12 bulan bekerja. 0 = langsung berhak. Dapat dikecualikan per karyawan." />
         <TextField label="Batas pengajuan mundur (hari)" type="number" min={0} max={365} disabled={d} value={v.requestBackdateDays} onChange={(e) => set("requestBackdateDays", e.target.value)} error={f.fe.requestBackdateDays} hint="Izin/sakit/cuti boleh diajukan sampai sekian hari ke belakang." />
-        <div className="sm:col-span-2">{check("Izinkan saldo cuti menjadi negatif", v.allowNegativeLeaveBalance, (x) => set("allowNegativeLeaveBalance", x), d)}</div>
+        <div className="sm:col-span-2">{check("Izinkan saldo cuti menjadi negatif (bawaan)", v.allowNegativeLeaveBalance, (x) => set("allowNegativeLeaveBalance", x), d)}</div>
         <fieldset className="grid gap-4 rounded-md border border-line p-4 sm:col-span-2 sm:grid-cols-2">
           <legend className="px-1 text-sm font-medium text-ink-soft">Absensi berbasis lokasi (opsional)</legend>
           <div className="sm:col-span-2">{check("Aktifkan absensi berbasis lokasi", v.locationEnabled, (x) => set("locationEnabled", x), d, "Karyawan diminta izin lokasi satu kali saat check-in/out. Lokasi perangkat hanya alat bantu dan tidak menjamin pencegahan manipulasi sepenuhnya; tidak ada pelacakan terus-menerus.")}</div>

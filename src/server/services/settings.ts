@@ -1,7 +1,7 @@
 import "server-only";
 import { z } from "zod";
 import type { CompanySettings, Prisma } from "@prisma/client";
-import { prisma, transaction } from "../db";
+import { prisma, transaction, type Tx } from "../db";
 import { Errors } from "../errors";
 import { parseInput } from "../validate";
 import { assertCan, type Actor } from "../actor";
@@ -62,13 +62,13 @@ export function geoPolicyOf(s: CompanySettings): GeoPolicy {
 
 export interface SettingsDto {
   company: { name: string; legalName: string | null; tagline: string | null; address: string | null; phone: string | null; email: string | null; website: string | null; logoUrl: string | null };
-  slip: { showAttendance: boolean; footerNote: string | null; numberPrefix: string };
+  slip: { showAttendance: boolean; footerNote: string | null; numberPrefix: string; signer: { name: string | null; title: string | null; place: string | null; signatureUrl: string | null } };
   attendance: {
     lateMinutesAfterTolerance: boolean; locationEnabled: boolean; locationName: string | null; locationLat: number | null; locationLng: number | null;
     locationRadiusMeters: number; locationMaxAccuracyMeters: number; requestBackdateDays: number; confirmedAt: string | null;
     locationSpoofMode: "OFF" | "FLAG" | "BLOCK"; photoMode: "OFF" | "OPTIONAL" | "REQUIRED"; photoRequireLocation: boolean; photoRetentionMonths: number;
   };
-  leave: { annualLeaveQuota: number; allowNegativeLeaveBalance: boolean };
+  leave: { annualLeaveQuota: number; allowNegativeLeaveBalance: boolean; minTenureMonths: number };
   payroll: FullPayrollRules & { confirmedAt: string | null };
   statutory: StatutoryConfig;
   security: { twoFactorRequiredForAdmins: boolean };
@@ -85,7 +85,10 @@ export async function getSettingsDto(actor: Actor): Promise<SettingsDto> {
   const s = await getSettings();
   return {
     company: { name: s.name, legalName: s.legalName, tagline: s.tagline, address: s.address, phone: s.phone, email: s.email, website: s.website, logoUrl: s.logoFileId ? `/api/files/${s.logoFileId}` : null },
-    slip: { showAttendance: s.slipShowAttendance, footerNote: s.slipFooterNote, numberPrefix: s.slipNumberPrefix },
+    slip: {
+      showAttendance: s.slipShowAttendance, footerNote: s.slipFooterNote, numberPrefix: s.slipNumberPrefix,
+      signer: { name: s.slipSignerName, title: s.slipSignerTitle, place: s.slipSignerPlace, signatureUrl: s.slipSignatureFileId ? `/api/files/${s.slipSignatureFileId}` : null },
+    },
     attendance: {
       lateMinutesAfterTolerance: s.lateMinutesAfterTolerance, locationEnabled: s.locationEnabled, locationName: s.locationName,
       locationLat: s.locationLat, locationLng: s.locationLng, locationRadiusMeters: s.locationRadiusMeters,
@@ -93,7 +96,7 @@ export async function getSettingsDto(actor: Actor): Promise<SettingsDto> {
       confirmedAt: s.attendancePolicyConfirmedAt?.toISOString() ?? null,
       locationSpoofMode: s.locationSpoofMode, photoMode: s.attendancePhotoMode, photoRequireLocation: s.attendancePhotoRequireLocation, photoRetentionMonths: s.attendancePhotoRetentionMonths,
     },
-    leave: { annualLeaveQuota: s.annualLeaveQuota, allowNegativeLeaveBalance: s.allowNegativeLeaveBalance },
+    leave: { annualLeaveQuota: s.annualLeaveQuota, allowNegativeLeaveBalance: s.allowNegativeLeaveBalance, minTenureMonths: s.leaveMinTenureMonths },
     payroll: { ...payrollRulesOf(s), confirmedAt: s.payrollRulesConfirmedAt?.toISOString() ?? null },
     statutory: statutoryConfigOf(s),
     security: { twoFactorRequiredForAdmins: s.twoFactorRequiredForAdmins },
@@ -112,6 +115,9 @@ export const companySchema = z.object({
   website: optionalText(160, "Situs web"),
   slipShowAttendance: z.boolean(),
   slipFooterNote: optionalText(400, "Catatan kaki slip"),
+  slipSignerName: optionalText(120, "Nama penanda tangan"),
+  slipSignerTitle: optionalText(120, "Jabatan penanda tangan"),
+  slipSignerPlace: optionalText(80, "Kota"),
   slipNumberPrefix: z.string().trim().regex(/^[A-Za-z0-9]{1,8}$/, "Awalan nomor slip: 1–8 huruf/angka").transform((v) => v.toUpperCase()),
 });
 
@@ -126,14 +132,35 @@ export async function updateCompany(actor: Actor, raw: unknown): Promise<void> {
   });
 }
 
-export async function setLogo(actor: Actor, fileId: string): Promise<void> {
+/**
+ * `tx`: WAJIB diteruskan bila berkas baru dibuat di transaksi yang sama (rute unggah) — transaksi baru tidak dapat melihat
+ * baris yang belum di-commit, sehingga berkas dianggap "tidak valid". Tanpa `tx`, fungsi membuka transaksinya sendiri.
+ */
+export async function setLogo(actor: Actor, fileId: string, outer?: Tx): Promise<void> {
   assertCan(actor, "settings:manage");
-  await transaction(async (tx) => {
+  await (outer ? (fn: (t: Tx) => Promise<void>) => fn(outer) : transaction)(async (tx) => {
     const f = await tx.storedFile.findUnique({ where: { id: fileId }, select: { kind: true } });
     if (f?.kind !== "LOGO") throw Errors.validation("File logo tidak valid.");
     const before = await tx.companySettings.findUniqueOrThrow({ where: { id: 1 }, select: { logoFileId: true } });
     await tx.companySettings.update({ where: { id: 1 }, data: { logoFileId: fileId } });
     await writeAudit(tx, actor, { action: "settings.logo_update", entityType: "CompanySettings", entityId: "1", summary: "Logo diganti", before: { logoFileId: before.logoFileId }, after: { logoFileId: fileId } });
+  });
+}
+
+/** Pasang gambar tanda tangan (file jenis SIGNATURE) atau cabut (null). Slip yang sudah terbit tidak berubah (snapshot). */
+export async function setSignature(actor: Actor, fileId: string | null, outer?: Tx): Promise<void> {
+  assertCan(actor, "settings:manage");
+  await (outer ? (fn: (t: Tx) => Promise<void>) => fn(outer) : transaction)(async (tx) => {
+    if (fileId) {
+      const f = await tx.storedFile.findUnique({ where: { id: fileId }, select: { kind: true } });
+      if (f?.kind !== "SIGNATURE") throw Errors.validation("File tanda tangan tidak valid.");
+    }
+    const before = await tx.companySettings.findUniqueOrThrow({ where: { id: 1 }, select: { slipSignatureFileId: true } });
+    await tx.companySettings.update({ where: { id: 1 }, data: { slipSignatureFileId: fileId } });
+    await writeAudit(tx, actor, {
+      action: fileId ? "settings.signature_update" : "settings.signature_remove", entityType: "CompanySettings", entityId: "1",
+      summary: fileId ? "Gambar tanda tangan slip diganti" : "Gambar tanda tangan slip dicabut", before: { slipSignatureFileId: before.slipSignatureFileId }, after: { slipSignatureFileId: fileId },
+    });
   });
 }
 
@@ -150,6 +177,8 @@ export const attendancePolicySchema = z.object({
   requestBackdateDays: z.number().int().min(0).max(365),
   annualLeaveQuota: z.number().int().min(0).max(366),
   allowNegativeLeaveBalance: z.boolean(),
+  /** Masa kerja minimum (bulan) sebelum karyawan berhak cuti tahunan (kebijakan BAWAAN; dapat dikecualikan per karyawan). Tidak diisi = tidak diubah. */
+  leaveMinTenureMonths: z.number({ error: "Masa kerja minimum harus berupa angka" }).int("Masa kerja minimum harus bilangan bulat (bulan)").min(0, "Minimal 0 bulan").max(120, "Maksimal 120 bulan").optional(),
   // Integritas lokasi (opsional agar pemanggil lama tetap valid; tidak diisi = tidak diubah).
   locationSpoofMode: z.enum(["OFF", "FLAG", "BLOCK"]).optional(),
   /** Foto absensi bercap lokasi & waktu server: OFF = tanpa foto, OPTIONAL = boleh, REQUIRED = wajib pada check-in & check-out. */

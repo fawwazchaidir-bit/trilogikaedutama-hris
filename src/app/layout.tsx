@@ -3,7 +3,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: { default: "Trilogika HRIS", template: "%s · Trilogika HRIS" },
-  description: "Mini HRIS internal Trilogika Edutama — karyawan, absensi, rekap, penggajian, dan slip gaji",
+  description: "Internal Human Resources Information System Trilogika Edutama — karyawan, absensi, rekap, penggajian, slip gaji, surat tugas, dan dokumen",
   robots: { index: false, follow: false },
 };
 

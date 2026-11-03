@@ -21,6 +21,8 @@ const snap: PayslipSnapshot = {
   deductions: [{ name: "Koreksi kasbon", category: "OTHER_DEDUCTION", amount: 100_000, formula: "Penyesuaian manual", note: "Sesuai surat pernyataan", manual: true }],
   totalEarnings: 5_340_000, totalDeductions: 100_000, netPay: 5_240_000,
   attendance: { scheduledDays: 21, presentDays: 17, onTimeDays: 16, lateDays: 1, lateCount: 1, lateMinutes: 20, izinDays: 1, sakitDays: 2, cutiDays: 0, absentDays: 1, pendingDays: 0, incompleteCount: 1, workedMinutes: 7655, offDayAttendance: 0, offDays: 10 },
+  overtimePaidMinutes: 150,
+  signer: { name: "Fawwaz Chaidir, S.Psi.", title: "Chief Executive Officer", place: "Yogyakarta", signatureFileId: null },
   note: "Terima kasih atas kontribusinya.", footerNote: "Slip ini rahasia.", revisionNote: null,
 };
 
@@ -40,7 +42,8 @@ describe("slip gaji PDF (dari snapshot)", () => {
     expect(pdf.subarray(0, 5).toString()).toBe("%PDF-");
     const t = text(pdf, "a.pdf", ["-layout"]);
     for (const s of ["SLIP GAJI", "TRILOGIKA EDUTAMA", "Ayu Lestari", "TE-001", "Operasional", "PENDAPATAN", "POTONGAN", "Total Pendapatan", "Total Potongan",
-      "Rp 5.000.000", "Rp 340.000", "17 hari hadir × Rp 20.000", "Rp 5.240.000", "GAJI BERSIH DITERIMA", "RINGKASAN KEHADIRAN", "Terima kasih atas kontribusinya.", "1 Februari 2026", "0123"]) {
+      "Rp 5.000.000", "Rp 340.000", "17 hari hadir × Rp 20.000", "Rp 5.240.000", "GAJI BERSIH DITERIMA", "RINGKASAN KEHADIRAN", "CATATAN", "Terima kasih atas kontribusinya.", "1 Februari 2026", "0123", "Lembur dibayar", "2 j 30 m",
+      "Yogyakarta, 1 Februari 2026", "Chief Executive Officer", "Fawwaz Chaidir, S.Psi."]) {
       expect(t, s).toContain(s);
     }
     expect(t).toContain("Terbilang: Lima Juta Dua Ratus Empat Puluh Ribu Rupiah");

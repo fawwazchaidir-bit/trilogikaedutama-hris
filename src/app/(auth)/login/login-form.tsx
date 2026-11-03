@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { api, ApiClientError } from "@/lib/api-client";
 import { Button } from "@/components/ui/button";
-import { TextField } from "@/components/ui/field";
+import { PasswordField, TextField } from "@/components/ui/field";
 import { Notice } from "@/components/ui/card";
 
 type LoginResponse = { requiresTwoFactor: true; challenge: string } | { requiresTwoFactor: false; user: { mustChangePassword: boolean } };
@@ -48,7 +48,7 @@ export function LoginForm({ canReset }: { canReset: boolean }) {
         <Image src="/brand/logo.png" alt="Trilogika Edutama" width={72} height={72} priority unoptimized />
         <div>
           <h1 className="text-xl font-semibold text-ink">Trilogika Edutama</h1>
-          <p className="text-sm text-muted">Mini HRIS · Absensi &amp; Penggajian</p>
+          <p className="text-sm text-muted">Internal Human Resources Information System</p>
         </div>
       </div>
       {error && <Notice tone="danger">{error}</Notice>}
@@ -62,7 +62,7 @@ export function LoginForm({ canReset }: { canReset: boolean }) {
       ) : (
         <>
           <TextField label="Email" type="email" name="email" autoComplete="username" required autoFocus value={email} onChange={(e) => setEmail(e.target.value)} />
-          <TextField label="Password" type="password" name="password" autoComplete="current-password" required value={password} onChange={(e) => setPassword(e.target.value)} />
+          <PasswordField label="Password" name="password" autoComplete="current-password" required value={password} onChange={(e) => setPassword(e.target.value)} />
           <Button type="submit" variant="primary" loading={loading} className="w-full">Masuk</Button>
           <p className="text-center text-xs text-muted">
             {canReset ? <>Lupa password? <Link href="/lupa-password" className="font-medium text-brand-700 underline">Atur ulang lewat email</Link>.</> : "Lupa password? Hubungi Admin/HR perusahaan Anda."}

@@ -1,7 +1,7 @@
 import "server-only";
 import { z } from "zod";
 import { Prisma } from "@prisma/client";
-import { prisma, transaction } from "../db";
+import { prisma, transaction, type Tx } from "../db";
 import { Errors } from "../errors";
 import { parseInput } from "../validate";
 import { actorCan, assertCan, type Actor } from "../actor";
@@ -282,9 +282,10 @@ export async function updateEmployee(actor: Actor, id: string, raw: unknown): Pr
   });
 }
 
-export async function setEmployeePhoto(actor: Actor, id: string, fileId: string): Promise<void> {
+/** `outer`: transaksi rute unggah (berkas baru belum ter-commit) — lihat catatan pada `setLogo`. */
+export async function setEmployeePhoto(actor: Actor, id: string, fileId: string, outer?: Tx): Promise<void> {
   assertCan(actor, "employee:manage");
-  await transaction(async (tx) => {
+  await (outer ? (fn: (t: Tx) => Promise<void>) => fn(outer) : transaction)(async (tx) => {
     const f = await tx.storedFile.findUnique({ where: { id: fileId }, select: { kind: true } });
     if (f?.kind !== "EMPLOYEE_PHOTO") throw Errors.validation("File foto tidak valid.");
     const e = await tx.employee.findUnique({ where: { id }, select: { fullName: true } });

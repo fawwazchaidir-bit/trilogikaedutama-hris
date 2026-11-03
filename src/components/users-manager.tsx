@@ -5,7 +5,7 @@ import { Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardHeader, EmptyState, Notice } from "@/components/ui/card";
 import { Dialog } from "@/components/ui/dialog";
-import { SelectField, TextField } from "@/components/ui/field";
+import { PasswordField, SelectField, TextField } from "@/components/ui/field";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableWrap, Td, Th } from "@/components/ui/table";
 import { useToast } from "@/components/ui/toast";
@@ -66,12 +66,12 @@ export function UsersManager({ items, selfId, roles, freeEmployees }: { items: U
           {create.role !== "EMPLOYEE" && !create.employeeId && freeEmployees.length > 0 && <button type="button" className="text-sm text-brand-700 underline" onClick={() => setCreate({ ...create, employeeId: freeEmployees[0]!.id })}>Tautkan juga ke data karyawan (agar admin ini dapat absen)</button>}
           <TextField label="Nama" required value={create.name} onChange={(e) => setCreate({ ...create, name: e.target.value })} error={fe.name} />
           <TextField label="Email" type="email" required value={create.email} onChange={(e) => setCreate({ ...create, email: e.target.value })} error={fe.email} />
-          <TextField label="Password sementara" autoComplete="off" required value={create.password} onChange={(e) => setCreate({ ...create, password: e.target.value })} error={fe.password} hint="Minimal 12 karakter. Sampaikan lewat kanal aman; wajib diganti pada login pertama." />
+          <PasswordField label="Password sementara" autoComplete="new-password" required value={create.password} onChange={(e) => setCreate({ ...create, password: e.target.value })} error={fe.password} hint="Minimal 12 karakter. Sampaikan lewat kanal aman; wajib diganti pada login pertama." />
         </div>}
       </Dialog>
       <Dialog open={!!reset} onClose={() => !busy && setReset(null)} title={`Reset password — ${reset?.name ?? ""}`} size="sm"
         footer={<><Button onClick={() => setReset(null)} disabled={busy}>Batal</Button><Button variant="primary" loading={busy} onClick={() => reset && void submit(() => api(`/api/users/${reset.id}/password`, { body: { password: reset.password } }), "Password direset. Sesi pengguna diakhiri.", () => setReset(null))}>Reset</Button></>}>
-        {reset && <div className="space-y-4">{error && <Notice tone="danger">{error}</Notice>}<TextField label="Password sementara baru" autoComplete="off" required value={reset.password} onChange={(e) => setReset({ ...reset, password: e.target.value })} error={fe.password} hint="Pengguna wajib menggantinya saat login berikutnya." /></div>}
+        {reset && <div className="space-y-4">{error && <Notice tone="danger">{error}</Notice>}<PasswordField label="Password sementara baru" autoComplete="new-password" required value={reset.password} onChange={(e) => setReset({ ...reset, password: e.target.value })} error={fe.password} hint="Pengguna wajib menggantinya saat login berikutnya." /></div>}
       </Dialog>
     </Card>
   );

@@ -647,6 +647,8 @@ export async function issueRun(actor: Actor, runId: string, raw: unknown = {}): 
         totalEarnings: Number(it.totalEarnings), totalDeductions: Number(it.totalDeductions), netPay: Number(it.netPay),
         attendance: settings.slipShowAttendance ? (it.attendanceSummary as unknown as { totals: RecapTotals }).totals : null,
         ...employerLinesOf(it.statutory, run.rulesSnapshot),
+        overtimePaidMinutes: (it.attendanceSummary as unknown as { overtime?: { paidMinutes: number } | null }).overtime?.paidMinutes ?? null,
+        signer: settings.slipSignerName ? { name: settings.slipSignerName, title: settings.slipSignerTitle, place: settings.slipSignerPlace, signatureFileId: settings.slipSignatureFileId } : null,
         note: it.slipNote, footerNote: settings.slipFooterNote,
         revisionNote: run.revisionOfId ? `Slip ini merupakan revisi dari periode "${run.revisionOf?.label ?? "sebelumnya"}"${priorNo.get(it.employeeId) ? ` (menggantikan slip ${priorNo.get(it.employeeId)})` : ""}.` : null,
       };

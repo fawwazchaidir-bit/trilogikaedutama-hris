@@ -30,6 +30,7 @@ export const PERMISSIONS = [
   "leave:view_all",
   "leave:review",
   "leave_balance:manage",
+  "leave_policy:manage",     // kebijakan cuti PER KARYAWAN (kuota, tanggal mulai berhak, saldo negatif)
   "overtime:view_all",
   "overtime:review",
   "recap:view_all",
@@ -48,6 +49,12 @@ export const PERMISSIONS = [
   "report:payroll",          // laporan biaya SDM / penggajian / kepatuhan BPJS & PPh 21
   "location:review",         // meninjau penilaian risiko lokasi
   "user:reset_2fa",          // mengatur ulang 2FA akun lain (Super Admin)
+  "document:view_all",       // melihat dokumen kepegawaian (kontrak kerja) seluruh karyawan
+  "document:manage",         // unggah / arsipkan dokumen kepegawaian
+  "document:decide",         // memutuskan kontrak dilanjutkan atau tidak (pimpinan)
+  "assignment:view_all",     // melihat Surat Tugas & Bukti Penerimaan Uang Harian
+  "assignment:manage",       // menerbitkan / membatalkan surat tugas, menerbitkan bukti penerimaan uang harian
+  "assignment:revoke",       // membatalkan bukti penerimaan uang harian yang sudah terbit (pimpinan)
 ] as const;
 
 export type Permission = (typeof PERMISSIONS)[number];
@@ -60,7 +67,7 @@ export const ROLE_PERMISSIONS: Record<Role, ReadonlySet<Permission>> = {
     "user:manage_employee",
     "schedule:manage",
     "attendance:view_all", "attendance:correct",
-    "leave:view_all", "leave:review", "leave_balance:manage",
+    "leave:view_all", "leave:review", "leave_balance:manage", "leave_policy:manage",
     "overtime:view_all", "overtime:review",
     "recap:view_all", "recap:export",
     "payroll:components", "payroll:view", "payroll:prepare",
@@ -68,6 +75,8 @@ export const ROLE_PERMISSIONS: Record<Role, ReadonlySet<Permission>> = {
     "settings:view",
     "report:view", "report:payroll",
     "location:review",
+    "document:view_all", "document:manage",
+    "assignment:view_all", "assignment:manage",
   ]),
   EMPLOYEE: new Set<Permission>([]),
 };
@@ -106,6 +115,8 @@ export const NAV_ITEMS: readonly NavItem[] = [
   { href: "/pengajuan-saya", label: "Pengajuan Saya", selfService: true, group: "saya" },
   { href: "/lembur-saya", label: "Lembur Saya", selfService: true, group: "saya" },
   { href: "/slip-saya", label: "Slip Gaji Saya", selfService: true, group: "saya" },
+  { href: "/surat-tugas-saya", label: "Surat Tugas Saya", selfService: true, group: "saya" },
+  { href: "/dokumen-saya", label: "Dokumen Saya", selfService: true, group: "saya" },
   { href: "/profil", label: "Profil & Jadwal", selfService: true, group: "saya" },
   { href: "/akun", label: "Keamanan & Notifikasi", group: "saya" },
   { href: "/karyawan", label: "Karyawan", anyOf: ["employee:view"], group: "sdm" },
@@ -114,6 +125,8 @@ export const NAV_ITEMS: readonly NavItem[] = [
   { href: "/pengajuan", label: "Pengajuan & Cuti", anyOf: ["leave:view_all"], group: "sdm" },
   { href: "/lembur", label: "Pengajuan Lembur", anyOf: ["overtime:view_all"], group: "sdm" },
   { href: "/lokasi", label: "Tinjauan Lokasi", anyOf: ["location:review"], group: "sdm" },
+  { href: "/surat-tugas", label: "Surat Tugas", anyOf: ["assignment:view_all"], group: "sdm" },
+  { href: "/dokumen", label: "Dokumen", anyOf: ["document:view_all"], group: "sdm" },
   { href: "/rekap", label: "Rekap Absensi", anyOf: ["recap:view_all"], group: "sdm" },
   { href: "/laporan", label: "Laporan & Analisis", anyOf: ["report:view"], group: "sdm" },
   { href: "/penggajian", label: "Penggajian", anyOf: ["payroll:view"], group: "gaji" },

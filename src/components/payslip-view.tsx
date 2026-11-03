@@ -70,15 +70,34 @@ export function PayslipView({ s, voided }: { s: PayslipSnapshot; voided?: boolea
           <CardHeader title="Ringkasan kehadiran" description={formatDateRange(s.attendanceBasis.start, s.attendanceBasis.end)} />
           <dl className="grid grid-cols-2 gap-3 p-5 text-sm sm:grid-cols-4">
             {[["Hari kerja terjadwal", formatDays(a.scheduledDays)], ["Hadir", formatDays(a.presentDays)], ["Terlambat", `${a.lateCount}x (${formatDuration(a.lateMinutes)})`], ["Tidak hadir", formatDays(a.absentDays)],
-              ["Izin", formatDays(a.izinDays)], ["Sakit", formatDays(a.sakitDays)], ["Cuti", formatDays(a.cutiDays)], ["Jam kerja tercatat", formatDuration(a.workedMinutes)]].map(([k, v]) => (
+              ["Izin", formatDays(a.izinDays)], ["Sakit", formatDays(a.sakitDays)], ["Cuti", formatDays(a.cutiDays)], ["Jam kerja tercatat", formatDuration(a.workedMinutes)],
+              ...(s.overtimePaidMinutes != null ? [["Lembur dibayar", s.overtimePaidMinutes > 0 ? formatDuration(s.overtimePaidMinutes) : "-"]] : [])].map(([k, v]) => (
               <div key={String(k)}><dt className="text-xs text-muted">{k}</dt><dd className="font-semibold">{v}</dd></div>
             ))}
           </dl>
         </Card>
       )}
-      {(s.note || s.revisionNote || s.footerNote) && (
-        <Card><div className="space-y-1 p-5 text-sm">{s.note && <p><span className="text-muted">Catatan:</span> {s.note}</p>}{s.revisionNote && <p className="text-muted">{s.revisionNote}</p>}{s.footerNote && <p className="text-xs text-muted">{s.footerNote}</p>}</div></Card>
+      <Card>
+        <div className="space-y-1 border-l-4 border-brand-600 p-5 text-sm" aria-label="Catatan">
+          <p className="text-xs font-semibold uppercase tracking-wide text-brand-700">Catatan</p>
+          <p>{s.note ? s.note : "-"}</p>
+          {s.revisionNote && <p className="text-xs text-muted">{s.revisionNote}</p>}
+        </div>
+      </Card>
+      {s.signer && (
+        <div className="flex justify-end" aria-label="Penanda tangan">
+          <div className="w-60 text-center text-sm">
+            <p>{[s.signer.place, formatDateLong(s.issueDate)].filter(Boolean).join(", ")}</p>
+            {s.signer.title && <p>{s.signer.title}</p>}
+            {s.signer.signatureFileId
+              // eslint-disable-next-line @next/next/no-img-element
+              ? <img src={`/api/files/${s.signer.signatureFileId}`} alt={`Tanda tangan ${s.signer.name}`} className="mx-auto my-1 h-16 object-contain" />
+              : <div className="h-16" />}
+            <p className="border-t border-ink pt-0.5 font-semibold">{s.signer.name}</p>
+          </div>
+        </div>
       )}
+      {s.footerNote && <p className="text-xs text-muted">{s.footerNote}</p>}
     </div>
   );
 }

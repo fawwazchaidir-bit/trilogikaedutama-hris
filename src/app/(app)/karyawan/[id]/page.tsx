@@ -7,7 +7,7 @@ import { actorCan } from "@/server/actor";
 import { AppError } from "@/server/errors";
 import { getEmployee, listDivisions } from "@/server/services/employees";
 import { listComponents } from "@/server/services/components";
-import { getBalance, getLedger } from "@/server/services/leave";
+import { getBalance, getLedger, getLeavePolicy } from "@/server/services/leave";
 import { listCorrections } from "@/server/services/attendance";
 import { env } from "@/server/env";
 import { Card, CardHeader, EmptyState, PageHeader } from "@/components/ui/card";
@@ -15,6 +15,7 @@ import { Badge } from "@/components/ui/badge";
 import { EmployeeActions } from "@/components/employee-forms";
 import { ComponentsManager } from "@/components/components-manager";
 import { BalanceCard } from "@/components/balance-card";
+import { LeavePolicyCard } from "@/components/leave-policy-card";
 import { formatClock, formatDateLong, formatDateTime } from "@/lib/format";
 import { EMPLOYMENT_LABEL } from "@/lib/labels";
 import { todayIso } from "@/lib/time";
@@ -31,11 +32,12 @@ export default async function EmployeeDetailPage({ params }: { params: Promise<{
   try { e = await getEmployee(user, id); } catch (err) { if (err instanceof AppError) notFound(); throw err; }
   const today = todayIso(env().APP_TIMEZONE);
   const year = Number(today.slice(0, 4));
-  const [divisions, comps, balance, ledger, corrections] = await Promise.all([
+  const [divisions, comps, balance, ledger, leavePolicy, corrections] = await Promise.all([
     listDivisions(user),
     actorCan(user, "payroll:components") ? listComponents(user, id) : Promise.resolve(null),
     actorCan(user, "leave:view_all") ? getBalance(user, id, year) : Promise.resolve(null),
     actorCan(user, "leave:view_all") ? getLedger(user, id, year) : Promise.resolve([]),
+    actorCan(user, "leave:view_all") ? getLeavePolicy(user, id) : Promise.resolve(null),
     actorCan(user, "attendance:view_all") ? listCorrections(user, { employeeId: id, limit: 10 }) : Promise.resolve([]),
   ]);
   const row = (k: string, v: React.ReactNode) => (<div className="grid grid-cols-[9rem_1fr] gap-2 py-2 text-sm"><dt className="text-muted">{k}</dt><dd className="font-medium">{v || "—"}</dd></div>);
@@ -58,6 +60,7 @@ export default async function EmployeeDetailPage({ params }: { params: Promise<{
         </dl>
       </Card>
       {comps && <ComponentsManager employeeId={id} items={comps} today={today} />}
+      {leavePolicy && <LeavePolicyCard policy={leavePolicy} canManage={actorCan(user, "leave_policy:manage") && !(user.employeeId === id && user.role !== "SUPER_ADMIN")} canGrant={actorCan(user, "leave_balance:manage")} />}
       {balance && <BalanceCard employeeId={id} balance={balance} ledger={ledger} canManage={actorCan(user, "leave_balance:manage")} />}
       {actorCan(user, "attendance:view_all") && (
         <Card>

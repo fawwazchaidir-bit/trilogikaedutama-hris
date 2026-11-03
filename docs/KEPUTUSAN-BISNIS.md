@@ -21,9 +21,13 @@ Aplikasi sengaja **tidak mengunci** kebijakan perusahaan. Semua di bawah ini ada
 ## 2. Cuti
 | # | Keputusan | Nilai awal |
 |---|---|---|
-| 10 | ⚠ Kuota cuti tahunan | 12 hari (contoh) — sesuaikan dengan kebijakan & ketentuan berlaku |
-| 11 | Hak cuti karyawan baru/kontrak/magang, masa tunggu, sisa cuti tahun lalu (carry-over), cuti khusus (menikah, melahirkan, dll.) | **Tidak otomatis** — atur saldo per karyawan (Atur saldo, boleh kelipatan 0,5). Tidak ada carry-over otomatis. |
-| 12 | Saldo boleh minus? | Tidak |
+| 10 | ⚠ **Kuota cuti tahunan BAWAAN** (karyawan tanpa kebijakan khusus) | 12 hari (contoh) — sesuaikan dengan kebijakan & ketentuan berlaku |
+| 10b | ⚠ **Masa kerja minimum sebelum berhak cuti** (bawaan lembaga) | 12 bulan. Dapat dikecualikan per karyawan. Selama belum berhak, **pengajuan cuti ditolak** sistem (izin/sakit tetap boleh) |
+| 10c | **Kebijakan cuti PER KARYAWAN** (berhak sejak, kuota/tahun, saldo negatif) — dikhususkan oleh HR/pimpinan di halaman karyawan, **alasan wajib**, diaudit, karyawan diberi tahu. HR tidak dapat mengubah kebijakan cutinya sendiri | Ikut bawaan |
+| 10d | ⚠ **Aturan tahun pertama:** karyawan yang berhak di tahun Y (mis. berhak 1 Sep 2027) mendapat **kuota penuh tahun Y**, tetapi cuti baru **boleh dipakai sejak tanggal berhaknya**; yang belum berhak sampai akhir tahun Y tidak mendapat kuota tahun Y. **Tidak ada prorata** otomatis — bila kebijakan Anda prorata, gunakan *kuota khusus* atau *Atur saldo*. Cocokkan dengan perjanjian kerja/peraturan perusahaan Anda | Penuh, bukan prorata |
+| 10e | **Migrasi data lama:** karyawan yang sudah punya saldo awal cuti sebelum fitur ini diberi kebijakan khusus "berhak sejak tanggal mulai bekerja" (catatan: *dipertahankan dari kebijakan sebelumnya*) agar hak yang sudah ada tidak hilang mendadak. **Tinjau & rapikan** per karyawan | — |
+| 11 | Sisa cuti tahun lalu (carry-over), cuti khusus (menikah, melahirkan, dll.) | **Tidak otomatis** — atur saldo per karyawan (Atur saldo, boleh kelipatan 0,5). Tidak ada carry-over otomatis. Pemberian kuota tahunan **tidak otomatis**: jalankan *Terapkan kuota* tiap tahun dan saat ada karyawan yang baru berhak |
+| 12 | Saldo boleh minus? | Tidak (bawaan; dapat dikhususkan per karyawan) |
 | 13 | Izin & sakit memotong saldo cuti? | Tidak (hanya cuti yang memotong) |
 | 14 | **Setengah hari** (izin/sakit/cuti, pagi atau siang): batas pagi/siang = **titik tengah jam kerja** (08.00–16.00 → 12.00). Dihitung 0,5 hari pengajuan + 0,5 hari kerja; bila separuh lainnya tanpa check-in → 0,5 tidak hadir. Satu pengajuan terbuka per tanggal (tidak bisa pagi + siang terpisah — ajukan sehari penuh) | Tersedia |
 
@@ -42,6 +46,29 @@ Aplikasi sengaja **tidak mengunci** kebijakan perusahaan. Semua di bawah ini ada
 | 24 | Periode gaji & cut-off absensi, tanggal pembayaran | Dibuat per periode |
 | 25 | Siapa yang menyetujui gaji | Super Admin (satu-satunya yang dapat menyetujui/membatalkan) |
 | 26 | Format nomor slip | `SG-YYYYMM-Rnn-nnn` (awalan dapat diubah) |
+| 26a | **Penanda tangan slip** (nama, jabatan, kota, gambar tanda tangan opsional) — siapa yang menandatangani slip atas nama perusahaan. Dibekukan pada slip saat terbit. **Ini gambar tanda tangan + nama tercetak, BUKAN tanda tangan elektronik tersertifikasi** (yang memerlukan penyelenggara sertifikasi elektronik); bila perlu kekuatan pembuktian lebih, minta pendapat hukum | Kosong (tanpa blok tanda tangan) | Pengaturan → Profil lembaga & slip |
+| 26b | **Catatan slip** per karyawan (motivasi / peringatan, maks. 400 karakter), diisi HR sebelum periode diajukan. Isi catatan tercetak pada slip dan dilihat karyawan — jaga nada dan hindari data sensitif | Kosong ("-") | Penggajian → rincian karyawan |
+
+## 3b. Surat Tugas & Uang Harian (di luar slip gaji)
+| # | Keputusan | Nilai awal |
+|---|---|---|
+| 34 | **Tarif uang harian** — tidak ada tarif baku; diisi per orang pada tiap surat tugas oleh HR/pimpinan. Tentukan pedoman (per golongan/jabatan/kota tujuan) dan siapa yang berwenang menetapkan | Diisi manual |
+| 35 | Hari yang dibayar = **hari kalender** lama penugasan (boleh dikurangi per orang). Aturan setengah hari/hari perjalanan/akhir pekan ditentukan sendiri lewat kolom *Hari* | Seluruh lama penugasan |
+| 36 | ⚠ **Perlakuan pajak/BPJS uang harian** — karena berdiri sendiri **di luar slip gaji, aplikasi TIDAK memasukkannya ke perhitungan PPh 21/BPJS**. Tentukan dengan konsultan pajak apakah/bagaimana uang harian diperhitungkan | Tidak dihitung |
+| 37 | ⚠ **Bea meterai** — PDF menampilkan kotak *Meterai Rp 10.000* bila nilai penerimaan **> Rp 5.000.000** (konstanta `MATERAI_THRESHOLD`). Itu hanya penanda; verifikasi ketentuan bea meterai yang berlaku. Tidak ada e-meterai | > Rp 5 juta |
+| 38 | **Pemisahan tugas:** HR tidak dapat menugaskan dirinya sendiri atau menerbitkan bukti untuk dirinya (Super Admin). Pembatalan **bukti** hanya Super Admin. Surat tugas & bukti tidak dapat diubah setelah terbit (koreksi = batalkan + terbitkan baru; nomor tidak dipakai ulang) | Aktif |
+| 39 | Blok tanda tangan resmi = **penanda tangan slip gaji** (Pengaturan). Bila belum diatur, PDF memuat ruang kosong `( ............ )` untuk tanda tangan basah | Pengaturan slip |
+| 40 | Yang tercantum pada Surat Tugas (PDF) termasuk **uang harian rekan setugas** — karyawan yang ditugaskan bersama dapat melihatnya. Pisahkan surat tugas bila tarif tidak boleh saling diketahui | Terlihat |
+
+## 3c. Dokumen & kontrak kerja
+| # | Keputusan | Nilai awal |
+|---|---|---|
+| 41 | **Siapa menerima pengingat** — hanya **Super Admin/pimpinan** (notifikasi dalam aplikasi + email/WhatsApp sesuai preferensi masing-masing). HR melihat status & lencana menu | Pimpinan |
+| 42 | **Tonggak pengingat:** H-3 bulan (utama), ditegaskan H-1 bulan dan H-14 hari **selama belum diputuskan**. Tidak diingatkan lagi setelah diputuskan, diperpanjang, atau berakhir. Kontrak yang diunggah saat sudah di dalam jendela langsung memicu satu pengingat terbaru | Aktif |
+| 43 | **Keputusan** lanjut/tidak hanya Super Admin; tidak lanjut **wajib alasan**. Keputusan **tidak** menonaktifkan karyawan otomatis dan karyawan **tidak** diberi tahu otomatis — HR menindaklanjuti (surat, penonaktifan pada tanggal berhenti) | Manual |
+| 44 | ⚠ Aplikasi menyimpan & menampilkan **hasil pindai**; ia **tidak dapat memverifikasi** keaslian tanda tangan basah atau meterai. Simpan dokumen asli sesuai kebijakan arsip Anda | — |
+| 45 | **Batas unggah** `MAX_DOCUMENT_UPLOAD_MB` (bawaan 10 MB) dan batas body reverse proxy (Nginx `client_max_body_size`) harus cukup; hanya PDF diterima. Berkas disimpan di database (ikut cadangan) | 10 MB |
+| 46 | **Retensi dokumen** (kontrak = data pribadi): dokumen **tidak pernah dihapus** aplikasi (hanya diarsipkan beralasan) dan ikut cadangan. Tentukan masa simpan setelah karyawan berhenti dan prosedur penghapusan sesuai kewajiban pelindungan data pribadi | Tanpa batas |
 
 ## 4. Akses, privasi, notifikasi & operasional
 | # | Keputusan |
@@ -74,6 +101,7 @@ Mengubah konfigurasi **mencabut konfirmasi aturan penggajian**; gaji tidak dapat
 - **Foto absensi = bukti untuk ditinjau manusia, bukan jaminan keaslian.** Server mencetak waktu server & koordinat pada foto dan membuang EXIF, tetapi tidak dapat tahu apakah kamera diarahkan ke orang/tempat yang sebenarnya (mis. memotret layar atau foto lain, kamera virtual) maupun apakah koordinat dari perangkat itu benar. Foto memuat wajah karyawan (data pribadi): beri tahu karyawan, tentukan retensi (poin 30), dan batasi peninjau ke HR/Super Admin (pembukaan foto oleh peninjau tercatat di audit).
 - **Notifikasi WhatsApp/email belum diuji terhadap penyedia sungguhan** di lingkungan pengembangan (tidak ada kredensial): pembentukan permintaan, antrean, percobaan ulang, dan pencatatan galat diuji dengan pengirim tiruan. Uji dengan "Kirim email/WhatsApp uji" di *Keamanan & Notifikasi* sebelum diandalkan. WhatsApp Cloud API memerlukan template yang disetujui Meta untuk pesan di luar jendela 24 jam.
 - Pekerja pengiriman berjalan di dalam proses aplikasi (tiap 30 detik); untuk beberapa instance aman (SKIP LOCKED). Lonjakan besar notifikasi (ratusan karyawan sekaligus saat slip terbit) terkirim bertahap.
+- **Penampil PDF dalam aplikasi** memakai penampil bawaan peramban. Sebagian peramban ponsel (mis. Chrome Android, iOS Safari) tidak menampilkan PDF di dalam bingkai atau hanya halaman pertama — gunakan *Buka di tab baru* / *Unduh PDF* (selalu tersedia). Diuji: respons PDF `inline` + header yang benar; tampilan di dalam bingkai tidak dapat diuji otomatis di peramban tanpa kepala.
 - **Belum ada:** SSO, edit profil oleh karyawan, multi-lokasi kantor, pengenalan wajah/pencocokan wajah otomatis pada foto absensi (foto hanya ditinjau manusia), pelacakan sisa pinjaman (kasbon hanya potongan berjangka), carry-over cuti otomatis, prorata gaji otomatis, PPh 21 untuk penghasilan tidak teratur/pesangon/THR dengan tarif khusus (gunakan komponen sekali + verifikasi manual), PPh 21 ditanggung perusahaan (gross-up), K/I (penghasilan istri digabung), kategori TER harian.
 - **Lembur:** satu pengajuan terbuka per karyawan per tanggal; pengali jam per hari (bukan per hari libur/kerja berbeda seperti ketentuan lembur hari libur) — untuk lembur hari libur dengan tarif berbeda, gunakan komponen/penyesuaian manual.
 - **Penyesuaian pendapatan manual** tidak ikut dasar PPh 21/BPJS otomatis (peringatan ditampilkan); catat bonus sebagai komponen sekali (ONE_TIME) agar ikut terhitung.

@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { api, ApiClientError } from "@/lib/api-client";
 import { Button } from "@/components/ui/button";
-import { TextField } from "@/components/ui/field";
+import { PasswordField } from "@/components/ui/field";
 import { Notice } from "@/components/ui/card";
 
 export function ChangePasswordForm({ forced }: { forced: boolean }) {
@@ -45,11 +45,11 @@ export function ChangePasswordForm({ forced }: { forced: boolean }) {
         </p>
       </div>
       {message && <Notice tone="danger">{message}</Notice>}
-      <TextField label="Password saat ini" type="password" autoComplete="current-password" required value={form.currentPassword}
+      <PasswordField label="Password saat ini" autoComplete="current-password" required value={form.currentPassword}
         onChange={(e) => setForm({ ...form, currentPassword: e.target.value })} error={errors.currentPassword} />
-      <TextField label="Password baru" type="password" autoComplete="new-password" required minLength={12} value={form.newPassword}
+      <PasswordField label="Password baru" autoComplete="new-password" required minLength={12} value={form.newPassword}
         onChange={(e) => setForm({ ...form, newPassword: e.target.value })} error={errors.newPassword} hint="Minimal 12 karakter, bukan password umum." />
-      <TextField label="Ulangi password baru" type="password" autoComplete="new-password" required value={form.confirm}
+      <PasswordField label="Ulangi password baru" autoComplete="new-password" required value={form.confirm}
         onChange={(e) => setForm({ ...form, confirm: e.target.value })} error={errors.confirm} />
       <div className="flex gap-2">
         <Button type="submit" variant="primary" loading={loading} className="flex-1">Simpan</Button>

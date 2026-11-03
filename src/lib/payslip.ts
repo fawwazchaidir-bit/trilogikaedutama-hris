@@ -40,6 +40,10 @@ export interface PayslipSnapshot {
   attendance: RecapTotals | null;
   /** Beban perusahaan (BPJS porsi pemberi kerja) — informasi, TIDAK mengurangi gaji bersih. */
   employerContributions?: { name: string; amount: number }[];
+  /** Lembur yang DIBAYAR pada periode ini (menit, sesuai bukti absensi); null = tidak ada/tidak dihitung otomatis. */
+  overtimePaidMinutes?: number | null;
+  /** Penanda tangan slip saat terbit (diatur Super Admin). Slip lama tanpa bidang ini tidak menampilkan blok tanda tangan. */
+  signer?: { name: string; title: string | null; place: string | null; signatureFileId: string | null } | null;
   note: string | null;
   footerNote: string | null;
   /** Jejak revisi: nomor slip pada periode yang dibatalkan dan digantikan oleh slip ini. */
