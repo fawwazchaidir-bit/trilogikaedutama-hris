@@ -102,13 +102,13 @@ test.describe("Surat Tugas & Bukti Penerimaan Uang Harian", () => {
   test("Karyawan tidak melihat menu/halaman admin; HR menerbitkan surat tugas untuk Ayu", async ({ page }) => {
     await login(page, USERS.ayu);
     await expect(page.getByRole("link", { name: "Surat Tugas Saya" })).toBeVisible();
-    await expect(page.getByRole("link", { name: /Surat Tugas & Uang Harian/ })).toHaveCount(0);
+    await expect(page.getByRole("link", { name: /^Surat Tugas( \d+ menunggu)?$/ })).toHaveCount(0); // menu admin; "Surat Tugas Saya" tetap ada
     expect((await page.goto("/surat-tugas"))?.status()).toBe(404);
     await page.goto("/dashboard"); // halaman 404 tidak memuat rangka aplikasi (tombol Keluar)
     await logout(page);
 
     await login(page, USERS.hr);
-    await page.getByRole("link", { name: /Surat Tugas & Uang Harian/ }).click();
+    await page.getByRole("link", { name: /^Surat Tugas( \d+ menunggu)?$/ }).click();
     await page.getByRole("button", { name: /Terbitkan Surat Tugas/ }).click();
     const dlg = page.getByRole("dialog");
     await dlg.getByLabel("Maksud / tujuan penugasan").fill("Pendampingan pelatihan Training of Trainers");
