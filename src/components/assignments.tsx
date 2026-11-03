@@ -153,11 +153,15 @@ export function AssignmentList({ items, today, canManage, canRevoke, selfEmploye
                     <Td align="right">{a.days}</Td><Td align="right">{formatRupiah(a.dailyRate)}</Td><Td align="right" className="font-medium">{formatRupiah(a.total)}</Td>
                     <Td>
                       {a.receipt ? (
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span className="font-mono text-[13px]">{a.receipt.number}</span>
-                          <span className="text-xs text-muted">{formatDateLong(a.receipt.paidDate)} · {METHOD[a.receipt.method]}</span>
-                          <a href={`/api/allowance-receipts/${a.receipt.id}/pdf`} className={btn}><Download className="size-4" />PDF</a>
-                          {canRevoke && <Button size="sm" variant="danger" onClick={() => setDlg({ kind: "VOID", letter: l, r: a.receipt! })}>Batalkan</Button>}
+                        <div className="flex flex-col items-start gap-1.5">
+                          <div className="flex flex-wrap items-baseline gap-x-2">
+                            <span className="font-mono text-[13px]">{a.receipt.number}</span>
+                            <span className="text-xs text-muted">{formatDateLong(a.receipt.paidDate)} · {METHOD[a.receipt.method]}</span>
+                          </div>
+                          <div className="flex gap-2">
+                            <a href={`/api/allowance-receipts/${a.receipt.id}/pdf`} className={btn}><Download className="size-4" />PDF</a>
+                            {canRevoke && <Button size="sm" variant="danger" onClick={() => setDlg({ kind: "VOID", letter: l, r: a.receipt! })}>Batalkan</Button>}
+                          </div>
                         </div>
                       ) : l.status === "ISSUED" && canManage ? (
                         own ? <span className="text-xs text-muted">Diterbitkan Super Admin</span>
