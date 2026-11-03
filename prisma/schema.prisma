@@ -140,6 +140,8 @@ enum FileKind {
   SIGNATURE
   /// PDF dokumen kepegawaian (mis. kontrak kerja bermaterai yang ditandatangani basah, hasil pindai).
   DOCUMENT
+  /// Dokumen proyek Training & Operations (privat; hanya diakses lewat API yang memeriksa lingkup proyek).
+  TRAINING_DOCUMENT
 }
 
 enum LateDeductionMode {
@@ -304,6 +306,8 @@ model User {
   loginChallenges LoginChallenge[]
   passwordResets  PasswordResetToken[]
   deliveries      NotificationDelivery[]
+  /// Level akses modul Training & Operations (opsional; tanpa baris = tanpa level modul).
+  trainingAccess  TrainingAccess?
 
   @@map("users")
 }
@@ -459,6 +463,13 @@ model Employee {
   documents      EmployeeDocument[]
   assignees      AssignmentAssignee[]
   allowances     DailyAllowanceReceipt[]
+
+  // Training & Operations (relasi balik saja; tidak ada kolom baru pada tabel employees).
+  trainingMemberships      TrainingProjectMember[]
+  trainingTasks            TrainingTask[]
+  trainingChecklistItems   TrainingProjectChecklistItem[]
+  trainingInstructorEntry  TrainingInstructor?
+  trainingScheduleIncharge TrainingSchedule[]
 
   @@index([divisionId])
   @@index([isActive])
@@ -888,10 +899,11 @@ model StoredFile {
   uploadedById String   @db.Uuid
   createdAt    DateTime @default(now())
 
-  photoOf     Employee[]         @relation("EmployeePhoto")
-  attachments LeaveRequest[]     @relation("LeaveAttachment")
-  punchPhoto  AttendancePhoto?
-  documents   EmployeeDocument[]
+  photoOf          Employee[]               @relation("EmployeePhoto")
+  attachments      LeaveRequest[]           @relation("LeaveAttachment")
+  punchPhoto       AttendancePhoto?
+  documents        EmployeeDocument[]
+  trainingDocument TrainingProjectDocument?
 
   @@index([kind])
   @@map("stored_files")
@@ -1100,8 +1112,10 @@ model AssignmentLetter {
   createdAt     DateTime         @default(now())
   updatedAt     DateTime         @updatedAt
 
-  assignees AssignmentAssignee[]
-  receipts  DailyAllowanceReceipt[]
+  assignees     AssignmentAssignee[]
+  receipts      DailyAllowanceReceipt[]
+  /// Tautan referensi ke proyek pelatihan (dimiliki modul Training & Operations; surat tugas tetap beku).
+  trainingLinks TrainingProjectAssignmentLink[]
 
   @@unique([seqYear, seqNo])
   @@index([status, startDate])
@@ -1189,4 +1203,475 @@ model AuditLog {
   @@index([actorId])
   @@index([action])
   @@map("audit_logs")
+}
+
+// ═════════════════════════════ Training & Operations ═════════════════════════════
+//
+// Modul operasional pelatihan di dalam Trilogika Internal Portal. Prinsip (lihat docs/TRAINING-OPS.md):
+//  * Hanya tabel `training_*` baru. TIDAK ada kolom baru pada tabel HRIS; pengguna & karyawan memakai `users`/`employees` existing.
+//  * Hak akses = (role global HRIS tidak diubah) + level modul (`training_access`) + peran proyek (`training_project_members`).
+//    Jabatan (`employees.position`) hanya teks informasi dan TIDAK PERNAH dipakai untuk menentukan izin.
+//  * Audit memakai `audit_logs` existing (entityType = "TrainingProject", entityId = id proyek untuk semua kejadian dalam proyek).
+//  * Relasi `Restrict`: riwayat proyek tidak hilang karena cascade. Proyek tidak dihapus; ia diselesaikan atau dibatalkan.
+
+enum TrainingLevel {
+  /// Pemantau: melihat seluruh proyek & laporan, tanpa hak mengubah (mis. Direktur, Manajer Marketing & Relations).
+  VIEWER
+  /// Admin Program: boleh membuat proyek; mengelola proyek yang ia ikuti sesuai peran proyeknya.
+  ADMIN_PROGRAM
+  /// Manajer Program: mengelola seluruh proyek, tim, tugas, program, template, penutupan.
+  MANAGER
+}
+
+enum TrainingActivityKind {
+  REGULAR
+  CERTIFICATION
+  IN_HOUSE
+  OTHER
+}
+
+enum TrainingDeliveryMode {
+  ONSITE
+  ONLINE
+  HYBRID
+}
+
+enum TrainingProjectStatus {
+  DRAFT
+  PREPARATION
+  RUNNING
+  COMPLETED
+  CANCELLED
+}
+
+enum TrainingProjectRole {
+  PROJECT_MANAGER
+  ADMIN_PROGRAM
+  PARTICIPANT_OWNER
+  MATERIAL_OWNER
+  DOCUMENTATION_OWNER
+  STAFF
+}
+
+enum TrainingTaskStatus {
+  TODO
+  IN_PROGRESS
+  /// Hanya untuk tugas yang `requiresReview`: menunggu diperiksa orang yang berwenang (bukan penanggung jawabnya).
+  IN_REVIEW
+  DONE
+  CANCELLED
+}
+
+enum TrainingTaskPriority {
+  LOW
+  NORMAL
+  HIGH
+  URGENT
+}
+
+enum TrainingChecklistPhase {
+  PREPARATION
+  EXECUTION
+  CLOSING
+}
+
+enum TrainingScheduleStatus {
+  PLANNED
+  CONFIRMED
+  DONE
+  CANCELLED
+}
+
+enum TrainingParticipantStatus {
+  REGISTERED
+  INCOMPLETE_DOCS
+  READY
+  ATTENDING
+  COMPLETED
+  CANCELLED
+}
+
+enum TrainingInstructorKind {
+  INSTRUCTOR
+  ASSESSOR
+  SPEAKER
+  FACILITATOR
+}
+
+enum TrainingConfirmation {
+  PENDING
+  CONFIRMED
+  DECLINED
+}
+
+enum TrainingDocCategory {
+  PROPOSAL
+  INVITATION
+  MATERIAL
+  ATTENDANCE
+  PARTICIPANT_DOC
+  DOCUMENTATION
+  FINAL_REPORT
+  OTHER
+}
+
+enum TrainingExternalSystem {
+  WEBSITE
+  HALOAI
+  FINANCE
+}
+
+/// Level modul per akun. Tanpa baris = tidak ada level (akun tetap dapat melihat proyek tempat ia menjadi anggota).
+model TrainingAccess {
+  id          String        @id @default(uuid()) @db.Uuid
+  userId      String        @unique @db.Uuid
+  level       TrainingLevel
+  note        String?
+  grantedById String        @db.Uuid
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@map("training_access")
+}
+
+/// Master program: jenis pelatihan yang dapat dilaksanakan berkali-kali (batch).
+model TrainingProgram {
+  id          String               @id @default(uuid()) @db.Uuid
+  name        String
+  kind        TrainingActivityKind @default(REGULAR)
+  description String?
+  isActive    Boolean              @default(true)
+  createdById String               @db.Uuid
+  createdAt   DateTime             @default(now())
+  updatedAt   DateTime             @updatedAt
+
+  projects TrainingProject[]
+
+  @@map("training_programs")
+}
+
+/// Satu pelaksanaan/batch pelatihan. Kode "TRN-2026-0001": (seqYear, seqNo) unik, dibuat di bawah advisory lock.
+model TrainingProject {
+  id                    String                @id @default(uuid()) @db.Uuid
+  seqYear               Int
+  seqNo                 Int
+  code                  String                @unique
+  name                  String
+  programId             String?               @db.Uuid
+  kind                  TrainingActivityKind  @default(REGULAR)
+  clientName            String?
+  deliveryMode          TrainingDeliveryMode  @default(ONSITE)
+  /// Alamat/kota (tatap muka) atau nama platform (daring). Bukan kredensial.
+  location              String?
+  startDate             DateTime?             @db.Date
+  endDate               DateTime?             @db.Date
+  status                TrainingProjectStatus @default(DRAFT)
+  description           String?
+  notes                 String?
+  /// Nama template checklist yang dipakai saat dibuat (catatan saja; item checklist disalin menjadi milik proyek).
+  checklistTemplateName String?
+
+  // Penutupan / pembatalan (dikunci oleh CHECK konsistensi status).
+  closedAt              DateTime?
+  closedById            String?   @db.Uuid
+  /// Catatan hasil pelaksanaan.
+  closureSummary        String?
+  /// Permasalahan & tindak lanjut.
+  closureFollowUp       String?
+  /// Terisi bila proyek ditutup padahal ada checklist wajib belum selesai (pengecualian beralasan oleh Manajer Program).
+  closureOverrideReason String?
+  cancelledAt           DateTime?
+  cancelledById         String?   @db.Uuid
+  cancelReason          String?
+
+  createdById String   @db.Uuid
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  program         TrainingProgram?                @relation(fields: [programId], references: [id], onDelete: Restrict)
+  members         TrainingProjectMember[]
+  tasks           TrainingTask[]
+  checklist       TrainingProjectChecklistItem[]
+  schedules       TrainingSchedule[]
+  participants    TrainingParticipant[]
+  instructors     TrainingProjectInstructor[]
+  documents       TrainingProjectDocument[]
+  externalRefs    TrainingExternalRef[]
+  assignmentLinks TrainingProjectAssignmentLink[]
+
+  @@unique([seqYear, seqNo])
+  @@index([status, startDate])
+  @@index([programId])
+  @@index([startDate])
+  @@map("training_projects")
+}
+
+/// Penugasan karyawan pada proyek. Peran proyek TIDAK mengubah role global HRIS. Mengakhiri penugasan = `endedAt`.
+/// Indeks unik parsial (migrasi): satu penugasan AKTIF per (proyek, karyawan) dan satu PROJECT_MANAGER aktif per proyek.
+model TrainingProjectMember {
+  id          String              @id @default(uuid()) @db.Uuid
+  projectId   String              @db.Uuid
+  employeeId  String              @db.Uuid
+  role        TrainingProjectRole
+  note        String?
+  startedAt   DateTime            @default(now())
+  endedAt     DateTime?
+  endedById   String?             @db.Uuid
+  createdById String              @db.Uuid
+  createdAt   DateTime            @default(now())
+
+  project  TrainingProject @relation(fields: [projectId], references: [id], onDelete: Restrict)
+  employee Employee        @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+
+  @@index([projectId])
+  @@index([employeeId, endedAt])
+  @@map("training_project_members")
+}
+
+model TrainingTask {
+  id             String               @id @default(uuid()) @db.Uuid
+  projectId      String               @db.Uuid
+  title          String
+  description    String?
+  assigneeId     String?              @db.Uuid
+  /// Tanggal jatuh tempo (tanggal kalender WIB). Terlambat = belum selesai dan jatuh tempo < hari ini (WIB).
+  dueDate        DateTime?            @db.Date
+  priority       TrainingTaskPriority @default(NORMAL)
+  status         TrainingTaskStatus   @default(TODO)
+  /// true: penanggung jawab hanya dapat mengirim ke "Menunggu pemeriksaan"; orang berwenang lain yang menyelesaikan.
+  requiresReview Boolean              @default(false)
+  completedAt    DateTime?
+  completedById  String?              @db.Uuid
+  createdById    String               @db.Uuid
+  createdAt      DateTime             @default(now())
+  updatedAt      DateTime             @updatedAt
+
+  project  TrainingProject       @relation(fields: [projectId], references: [id], onDelete: Restrict)
+  assignee Employee?             @relation(fields: [assigneeId], references: [id], onDelete: Restrict)
+  comments TrainingTaskComment[]
+
+  @@index([projectId, status])
+  @@index([assigneeId, status])
+  @@index([dueDate])
+  @@map("training_tasks")
+}
+
+/// Komentar tugas — append-only (trigger).
+model TrainingTaskComment {
+  id        String   @id @default(uuid()) @db.Uuid
+  taskId    String   @db.Uuid
+  authorId  String   @db.Uuid
+  body      String
+  createdAt DateTime @default(now())
+
+  task TrainingTask @relation(fields: [taskId], references: [id], onDelete: Restrict)
+
+  @@index([taskId, createdAt])
+  @@map("training_task_comments")
+}
+
+model TrainingChecklistTemplate {
+  id          String   @id @default(uuid()) @db.Uuid
+  name        String
+  description String?
+  isActive    Boolean  @default(true)
+  createdById String   @db.Uuid
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  items TrainingChecklistTemplateItem[]
+
+  @@map("training_checklist_templates")
+}
+
+model TrainingChecklistTemplateItem {
+  id         String                 @id @default(uuid()) @db.Uuid
+  templateId String                 @db.Uuid
+  phase      TrainingChecklistPhase
+  title      String
+  isRequired Boolean                @default(false)
+  sortOrder  Int                    @default(0)
+
+  template TrainingChecklistTemplate @relation(fields: [templateId], references: [id], onDelete: Restrict)
+
+  @@index([templateId, phase, sortOrder])
+  @@map("training_checklist_template_items")
+}
+
+/// Item checklist MILIK PROYEK (disalin dari template saat diterapkan; perubahan template tidak mengubahnya).
+/// Checklist dan tugas sengaja terpisah: progres kesiapan = item checklist saja, sehingga satu pekerjaan tidak terhitung dua kali.
+model TrainingProjectChecklistItem {
+  id                 String                 @id @default(uuid()) @db.Uuid
+  projectId          String                 @db.Uuid
+  phase              TrainingChecklistPhase
+  title              String
+  isRequired         Boolean                @default(false)
+  sortOrder          Int                    @default(0)
+  assigneeId         String?                @db.Uuid
+  isDone             Boolean                @default(false)
+  doneAt             DateTime?
+  doneById           String?                @db.Uuid
+  note               String?
+  sourceTemplateName String?
+  createdById        String                 @db.Uuid
+  createdAt          DateTime               @default(now())
+  updatedAt          DateTime               @updatedAt
+
+  project  TrainingProject @relation(fields: [projectId], references: [id], onDelete: Restrict)
+  assignee Employee?       @relation(fields: [assigneeId], references: [id], onDelete: Restrict)
+
+  @@index([projectId, phase, sortOrder])
+  @@index([assigneeId, isDone])
+  @@map("training_project_checklist_items")
+}
+
+/// Direktori instruktur/asesor/narasumber/fasilitator. Karyawan internal ditautkan lewat `employeeId` (tanpa akun baru);
+/// pihak eksternal cukup kontak operasional.
+model TrainingInstructor {
+  id           String                 @id @default(uuid()) @db.Uuid
+  name         String
+  kind         TrainingInstructorKind @default(INSTRUCTOR)
+  employeeId   String?                @unique @db.Uuid
+  organization String?
+  expertise    String?
+  phone        String?
+  email        String?
+  isActive     Boolean                @default(true)
+  createdById  String                 @db.Uuid
+  createdAt    DateTime               @default(now())
+  updatedAt    DateTime               @updatedAt
+
+  employee    Employee?                   @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  assignments TrainingProjectInstructor[]
+
+  @@index([name])
+  @@map("training_instructors")
+}
+
+model TrainingProjectInstructor {
+  id           String                 @id @default(uuid()) @db.Uuid
+  projectId    String                 @db.Uuid
+  instructorId String                 @db.Uuid
+  kind         TrainingInstructorKind
+  confirmation TrainingConfirmation   @default(PENDING)
+  note         String?
+  createdById  String                 @db.Uuid
+  createdAt    DateTime               @default(now())
+  updatedAt    DateTime               @updatedAt
+
+  project    TrainingProject    @relation(fields: [projectId], references: [id], onDelete: Restrict)
+  instructor TrainingInstructor @relation(fields: [instructorId], references: [id], onDelete: Restrict)
+  schedules  TrainingSchedule[]
+
+  @@unique([projectId, instructorId])
+  @@index([instructorId])
+  @@map("training_project_instructors")
+}
+
+/// Jadwal kegiatan. Waktu disimpan sebagai instan (UTC) dan ditampilkan dalam APP_TIMEZONE (Asia/Jakarta).
+model TrainingSchedule {
+  id                  String                 @id @default(uuid()) @db.Uuid
+  projectId           String                 @db.Uuid
+  title               String
+  startAt             DateTime
+  endAt               DateTime
+  location            String?
+  /// Label ruangan (dibandingkan tanpa membedakan huruf besar/kecil untuk peringatan bentrok).
+  room                String?
+  inchargeId          String?                @db.Uuid
+  projectInstructorId String?                @db.Uuid
+  status              TrainingScheduleStatus @default(PLANNED)
+  note                String?
+  createdById         String                 @db.Uuid
+  createdAt           DateTime               @default(now())
+  updatedAt           DateTime               @updatedAt
+
+  project           TrainingProject            @relation(fields: [projectId], references: [id], onDelete: Restrict)
+  incharge          Employee?                  @relation(fields: [inchargeId], references: [id], onDelete: Restrict)
+  projectInstructor TrainingProjectInstructor? @relation(fields: [projectInstructorId], references: [id], onDelete: Restrict)
+
+  @@index([projectId, startAt])
+  @@index([startAt])
+  @@map("training_schedules")
+}
+
+/// Peserta (data operasional lokal, input manual). Status peserta ≠ status pembayaran ≠ status kompetensi: sengaja
+/// TIDAK ada kolom pembayaran/kompetensi di sini dan tidak ada perubahan status otomatis dari sistem lain.
+model TrainingParticipant {
+  id           String                    @id @default(uuid()) @db.Uuid
+  projectId    String                    @db.Uuid
+  fullName     String
+  organization String?
+  phone        String?
+  email        String?
+  status       TrainingParticipantStatus @default(REGISTERED)
+  note         String?
+  /// "MANUAL" = dimasukkan manual (referensi lokal). Nilai lain dicadangkan untuk integrasi masa depan yang sudah diuji.
+  source       String                    @default("MANUAL")
+  createdById  String                    @db.Uuid
+  createdAt    DateTime                  @default(now())
+  updatedAt    DateTime                  @updatedAt
+
+  project TrainingProject @relation(fields: [projectId], references: [id], onDelete: Restrict)
+
+  @@index([projectId, status])
+  @@index([fullName])
+  @@map("training_participants")
+}
+
+/// Dokumen proyek. Isi berkas di `stored_files` (privat; tidak ada URL publik). "Hapus" = sembunyikan (`deletedAt`) dan
+/// mencabut akses; baris & berkas tetap tersimpan sebagai jejak.
+model TrainingProjectDocument {
+  id           String              @id @default(uuid()) @db.Uuid
+  projectId    String              @db.Uuid
+  category     TrainingDocCategory
+  title        String
+  note         String?
+  fileId       String              @unique @db.Uuid
+  uploadedById String              @db.Uuid
+  createdAt    DateTime            @default(now())
+  deletedAt    DateTime?
+  deletedById  String?             @db.Uuid
+
+  project TrainingProject @relation(fields: [projectId], references: [id], onDelete: Restrict)
+  file    StoredFile      @relation(fields: [fileId], references: [id], onDelete: Restrict)
+
+  @@index([projectId, deletedAt])
+  @@map("training_project_documents")
+}
+
+/// Referensi MANUAL ke sistem lain (website, HaloAI, sistem keuangan). BUKAN integrasi: tidak ada sinkronisasi.
+/// Unik per (proyek, sistem, id eksternal) agar integrasi masa depan idempoten.
+model TrainingExternalRef {
+  id          String                 @id @default(uuid()) @db.Uuid
+  projectId   String                 @db.Uuid
+  system      TrainingExternalSystem
+  externalId  String
+  label       String?
+  createdById String                 @db.Uuid
+  createdAt   DateTime               @default(now())
+
+  project TrainingProject @relation(fields: [projectId], references: [id], onDelete: Restrict)
+
+  @@unique([projectId, system, externalId])
+  @@map("training_external_refs")
+}
+
+/// Tautan referensi proyek ↔ surat tugas. Dimiliki modul ini agar tabel surat tugas (beku oleh trigger) tidak disentuh.
+/// Hanya referensi: status/persetujuan surat tugas & uang harian tetap sepenuhnya di HRIS.
+model TrainingProjectAssignmentLink {
+  id         String   @id @default(uuid()) @db.Uuid
+  projectId  String   @db.Uuid
+  letterId   String   @db.Uuid
+  linkedById String   @db.Uuid
+  createdAt  DateTime @default(now())
+
+  project TrainingProject  @relation(fields: [projectId], references: [id], onDelete: Restrict)
+  letter  AssignmentLetter @relation(fields: [letterId], references: [id], onDelete: Restrict)
+
+  @@unique([projectId, letterId])
+  @@index([letterId])
+  @@map("training_project_assignment_links")
 }

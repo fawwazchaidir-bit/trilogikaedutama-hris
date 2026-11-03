@@ -2,8 +2,8 @@ import type { Metadata, Viewport } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: { default: "Trilogika HRIS", template: "%s · Trilogika HRIS" },
-  description: "Internal Human Resources Information System Trilogika Edutama — karyawan, absensi, rekap, penggajian, slip gaji, surat tugas, dan dokumen",
+  title: { default: "Trilogika Internal Portal", template: "%s · Trilogika Internal Portal" },
+  description: "Trilogika Internal Portal — HRIS (karyawan, absensi, penggajian, surat tugas, dokumen) dan Training & Operations (proyek, tugas, jadwal) Trilogika Edutama",
   robots: { index: false, follow: false },
 };
 

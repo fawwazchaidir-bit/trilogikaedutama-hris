@@ -53,6 +53,11 @@ const schema = z.object({
   CONTRACT_REMINDER_WORKER: bool.default(true),
   /** Masa berlaku tautan "lupa password" (menit). */
   PASSWORD_RESET_MINUTES: int(30, 5, 1440),
+  /**
+   * Modul Training & Operations. DEFAULT MATI: modul baru hanya aktif bila diset "true" secara eksplisit.
+   * Mati = menu tidak tampil, halaman /training menjawab 404, API /api/training menjawab 404. Data tidak dihapus.
+   */
+  TRAINING_MODULE_ENABLED: bool.default(false),
   /** Kunci AES-256 (32 byte, base64) untuk enkripsi nomor rekening. Buat: `openssl rand -base64 32`. */
   DATA_ENCRYPTION_KEY: z.string().refine((v) => {
     try { return Buffer.from(v, "base64").length === 32; } catch { return false; }
@@ -77,6 +82,9 @@ export function env(): Env {
 }
 
 export const emailConfigured = (): boolean => !!env().SMTP_HOST && !!env().MAIL_FROM;
+
+/** Apakah modul Training & Operations diaktifkan (feature flag TRAINING_MODULE_ENABLED). */
+export const trainingEnabled = (): boolean => env().TRAINING_MODULE_ENABLED;
 
 export function whatsappConfigured(): boolean {
   const e = env();

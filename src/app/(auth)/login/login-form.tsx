@@ -48,7 +48,7 @@ export function LoginForm({ canReset }: { canReset: boolean }) {
         <Image src="/brand/logo.png" alt="Trilogika Edutama" width={72} height={72} priority unoptimized />
         <div>
           <h1 className="text-xl font-semibold text-ink">Trilogika Edutama</h1>
-          <p className="text-sm text-muted">Internal Human Resources Information System</p>
+          <p className="text-sm text-muted">Trilogika Internal Portal</p>
         </div>
       </div>
       {error && <Notice tone="danger">{error}</Notice>}

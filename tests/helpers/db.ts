@@ -7,6 +7,9 @@ import type { Role } from "@/lib/permissions";
 import { invalidateSecurityPolicyCache } from "@/server/auth/session";
 
 const TABLES = [
+  // Training & Operations (tabel baru; CASCADE tetap menjangkau sisanya, tetapi program/template berdiri sendiri sehingga disebut eksplisit).
+  "training_project_assignment_links", "training_external_refs", "training_project_documents", "training_participants", "training_schedules", "training_project_instructors", "training_instructors",
+  "training_project_checklist_items", "training_checklist_template_items", "training_checklist_templates", "training_task_comments", "training_tasks", "training_project_members", "training_projects", "training_programs", "training_access",
   "audit_logs", "daily_allowance_receipts", "assignment_assignees", "assignment_letters", "employee_documents", "notification_deliveries", "notifications", "overtime_requests", "location_checks", "two_factor_recovery_codes", "login_challenges", "password_reset_tokens", "payslips", "payroll_item_lines", "payroll_items", "payroll_runs", "salary_components",
   "leave_balance_entries", "leave_requests", "attendance_corrections", "attendances", "calendar_days", "schedule_assignments", "work_schedules",
   "employees", "divisions", "stored_files", "sessions", "rate_limit_buckets", "company_settings", "users",
@@ -20,7 +23,7 @@ export async function resetDb(): Promise<void> {
 
 export const TEST_PASSWORD = "Test-Password-123!";
 
-async function makeUser(email: string, name: string, role: Role, employeeId: string | null = null): Promise<Actor> {
+export async function makeUser(email: string, name: string, role: Role, employeeId: string | null = null): Promise<Actor> {
   const u = await prisma.user.create({ data: { email, name, role, passwordHash: await hashPassword(TEST_PASSWORD) } });
   if (employeeId) await prisma.employee.update({ where: { id: employeeId }, data: { userId: u.id } });
   return { userId: u.id, email: u.email, name: u.name, role: u.role, employeeId, ip: "127.0.0.1", userAgent: "vitest" };

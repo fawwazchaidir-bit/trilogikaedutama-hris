@@ -5,7 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useState } from "react";
 import {
   Bell, CalendarDays, CircleUserRound, ClipboardCheck, ClipboardList, FileText, KeyRound, LayoutDashboard, LogOut, Menu,
-  ScrollText, Settings, ShieldCheck, TableProperties, Users, UserCog, Wallet, X, Clock, FilePlus2, Timer, BarChart3, ShieldEllipsis, MapPinned, FolderOpen, Plane,
+  ScrollText, Settings, ShieldCheck, TableProperties, Users, UserCog, Wallet, X, Clock, FilePlus2, Timer, BarChart3, ShieldEllipsis, MapPinned, FolderOpen, Plane, GraduationCap, FolderKanban, ListChecks, CalendarRange, UsersRound, Presentation, FileStack, FileBarChart2,
 } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { api } from "@/lib/api-client";
@@ -36,6 +36,17 @@ const ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
   "/audit-log": ScrollText,
   "/pengaturan": Settings,
   "/pengguna": UserCog,
+  "/training": LayoutDashboard,
+  "/training/program": GraduationCap,
+  "/training/proyek": FolderKanban,
+  "/training/tugas-saya": ListChecks,
+  "/training/checklist": ClipboardCheck,
+  "/training/kalender": CalendarRange,
+  "/training/peserta": UsersRound,
+  "/training/instruktur": Presentation,
+  "/training/dokumen": FileStack,
+  "/training/laporan": FileBarChart2,
+  "/training/akses": ShieldCheck,
 };
 
 export interface ShellProps {
@@ -58,7 +69,7 @@ export function AppShell({ user, nav, company, unread, pendingBadges, children }
     try { await api("/api/auth/logout", { method: "POST", body: {} }); } finally { router.push("/login"); router.refresh(); }
   }
 
-  const groups = (["umum", "saya", "sdm", "gaji", "sistem"] as const)
+  const groups = (["umum", "saya", "sdm", "gaji", "training", "sistem"] as const)
     .map((g) => ({ g, items: nav.filter((n) => n.group === g) }))
     .filter((x) => x.items.length > 0);
 
@@ -68,7 +79,7 @@ export function AppShell({ user, nav, company, unread, pendingBadges, children }
         <Image src={company.logoUrl} alt="" width={40} height={40} unoptimized className="size-10 rounded-full bg-white/5 object-contain" />
         <div className="min-w-0">
           <p className="truncate text-sm font-semibold leading-tight text-white">{company.name}</p>
-          <p className="text-[11px] leading-snug text-stone-400">Internal Human Resources Information System</p>
+          <p className="text-[11px] leading-snug text-stone-400">Trilogika Internal Portal</p>
         </div>
       </div>
       <nav aria-label="Menu utama" className="flex-1 space-y-4 overflow-y-auto px-3 py-2">
@@ -78,7 +89,8 @@ export function AppShell({ user, nav, company, unread, pendingBadges, children }
             <div className="space-y-0.5">
               {items.map((item) => {
                 const Icon = ICONS[item.href] ?? FileText;
-                const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
+                // "/training" (Dashboard Training) hanya aktif pada halamannya sendiri, bukan pada seluruh anak rutenya.
+                const active = pathname === item.href || (item.href !== "/training" && pathname.startsWith(`${item.href}/`));
                 const badge = pendingBadges.find((b) => b.href === item.href && b.count > 0)?.count ?? 0;
                 return (
                   <Link

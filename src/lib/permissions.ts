@@ -106,7 +106,7 @@ export interface NavItem {
   anyOf?: readonly Permission[];
   /** Hanya tampil bila akun tertaut ke data karyawan (layanan mandiri). */
   selfService?: boolean;
-  group: "umum" | "saya" | "sdm" | "gaji" | "sistem";
+  group: "umum" | "saya" | "sdm" | "gaji" | "training" | "sistem";
 }
 
 export const NAV_ITEMS: readonly NavItem[] = [
@@ -144,5 +144,5 @@ export function visibleNav(role: Role | null | undefined, hasEmployee: boolean):
 }
 
 export const NAV_GROUP_LABEL: Record<NavItem["group"], string> = {
-  umum: "", saya: "Layanan Saya", sdm: "Kepegawaian", gaji: "Penggajian", sistem: "Sistem",
+  umum: "", saya: "Layanan Saya", sdm: "Kepegawaian", gaji: "Penggajian", training: "Training & Operations", sistem: "Sistem",
 };

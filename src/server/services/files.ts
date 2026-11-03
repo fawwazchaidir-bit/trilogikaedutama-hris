@@ -1,12 +1,13 @@
 import "server-only";
 import { createHash } from "node:crypto";
 import { prisma } from "../db";
-import { env } from "../env";
+import { env, trainingEnabled } from "../env";
+import { canReadTrainingFile } from "./training/document-access";
 import { Errors } from "../errors";
 import { writeAudit } from "../audit";
 import { actorCan, type Actor } from "../actor";
 
-export type FileKind = "LOGO" | "EMPLOYEE_PHOTO" | "LEAVE_ATTACHMENT" | "ATTENDANCE_PHOTO" | "SIGNATURE" | "DOCUMENT";
+export type FileKind = "LOGO" | "EMPLOYEE_PHOTO" | "LEAVE_ATTACHMENT" | "ATTENDANCE_PHOTO" | "SIGNATURE" | "DOCUMENT" | "TRAINING_DOCUMENT";
 
 /** Tipe yang diizinkan, diverifikasi dari MAGIC BYTES (bukan dari ekstensi / Content-Type kiriman klien). SVG sengaja ditolak (risiko XSS). */
 const SIGNATURES: { mime: string; ext: string; test: (b: Uint8Array) => boolean }[] = [
@@ -25,6 +26,8 @@ const ALLOWED: Record<FileKind, string[]> = {
   SIGNATURE: ["image/png"],
   // Kontrak kerja bermaterai yang ditandatangani basah (hasil pindai) — hanya PDF.
   DOCUMENT: ["application/pdf"],
+  // Dokumen proyek Training & Operations: PDF/PNG/JPEG saja (tipe diverifikasi dari magic bytes). Otorisasi per proyek dilakukan service training sebelum memanggil storeFile.
+  TRAINING_DOCUMENT: ["application/pdf", "image/png", "image/jpeg"],
 };
 
 export function sniffMime(bytes: Uint8Array): { mime: string; ext: string } | null {
@@ -49,7 +52,8 @@ export async function storeFile(
   if (kind === "LEAVE_ATTACHMENT" && !actor.employeeId && !actorCan(actor, "leave:review")) throw Errors.forbidden();
   if (kind === "ATTENDANCE_PHOTO" && !actor.employeeId) throw Errors.forbidden();
   if (kind === "DOCUMENT" && !actorCan(actor, "document:manage")) throw Errors.forbidden();
-  const maxMb = kind === "DOCUMENT" ? env().MAX_DOCUMENT_UPLOAD_MB : env().MAX_UPLOAD_MB;
+  if (kind === "TRAINING_DOCUMENT" && !trainingEnabled()) throw Errors.notFound("Halaman");
+  const maxMb = kind === "DOCUMENT" || kind === "TRAINING_DOCUMENT" ? env().MAX_DOCUMENT_UPLOAD_MB : env().MAX_UPLOAD_MB;
   const maxBytes = maxMb * 1024 * 1024;
   if (input.bytes.byteLength === 0) throw Errors.validation("File kosong.");
   if (input.bytes.byteLength > maxBytes) throw Errors.validation(`Ukuran file maksimal ${maxMb} MB.`);
@@ -79,6 +83,7 @@ export async function storeFile(
  *  - EMPLOYEE_PHOTO: admin (employee:view) atau karyawan pemilik foto itu sendiri.
  *  - LEAVE_ATTACHMENT: peninjau pengajuan (leave:view_all) atau pengunggahnya.
  *  - ATTENDANCE_PHOTO: peninjau absensi (attendance:view_all) atau karyawan pemilik foto itu; pembukaan oleh peninjau dicatat di audit.
+ *  - TRAINING_DOCUMENT: anggota/pemantau proyek yang berwenang (lihat assertCanReadTrainingFile); dokumen yang disembunyikan tidak dapat dibuka siapa pun.
  *  - DOCUMENT: pengelola dokumen (document:view_all) atau karyawan pemilik dokumen (yang belum diarsipkan); pembukaan oleh pengelola dicatat di audit.
  * Karyawan TIDAK dapat membuka berkas milik karyawan lain.
  */
@@ -102,6 +107,9 @@ export async function readFileForActor(actor: Actor, id: string) {
     const own = actor.employeeId ? (await prisma.attendancePhoto.count({ where: { fileId: id, employeeId: actor.employeeId } })) > 0 : false;
     ok = own || actorCan(actor, "attendance:view_all");
     if (ok && !own) await writeAudit(prisma, actor, { action: "file.view", entityType: "StoredFile", entityId: id, summary: "Foto absensi dibuka" });
+  }
+  if (file.kind === "TRAINING_DOCUMENT") {
+    ok = await canReadTrainingFile(actor, id);
   }
   if (file.kind === "DOCUMENT") {
     const own = actor.employeeId ? (await prisma.employeeDocument.count({ where: { fileId: id, employeeId: actor.employeeId, archivedAt: null } })) > 0 : false;

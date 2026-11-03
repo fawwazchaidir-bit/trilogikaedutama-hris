@@ -1,6 +1,6 @@
 /**
  * Lima permintaan pimpinan (diuji di peramban sungguhan terhadap build produksi):
- *  1. teks aplikasi "Internal Human Resources Information System"; 2. tampil/sembunyikan password di semua isian;
+ *  1. nama aplikasi "Trilogika Internal Portal"; 2. tampil/sembunyikan password di semua isian;
  *  3. Surat Tugas + Bukti Penerimaan Uang Harian (terpisah dari slip gaji); 4. Dokumen kontrak PDF + keputusan lanjut/tidak + pengingat;
  *  5. kebijakan cuti per karyawan.
  * Berjalan SEBELUM 06-stage2 (yang mengaktifkan 2FA pada akun HR & Super Admin dan sengaja diletakkan paling akhir) dan SETELAH 03b (penanda tangan
@@ -42,7 +42,7 @@ async function pdfHref(scope: import("@playwright/test").Locator, name: string |
 test.describe("nama aplikasi & tampil/sembunyikan password", () => {
   test("halaman masuk memakai nama baru dan password dapat ditampilkan/disembunyikan", async ({ page }) => {
     await page.goto("/login");
-    await expect(page.getByText("Internal Human Resources Information System")).toBeVisible();
+    await expect(page.getByText("Trilogika Internal Portal")).toBeVisible();
     await expect(page.getByText("Mini HRIS")).toHaveCount(0);
     const pw = page.getByLabel("Password");
     await pw.fill("rahasia-uji-123");
@@ -76,7 +76,7 @@ test.describe("nama aplikasi & tampil/sembunyikan password", () => {
 
   test("setelah masuk: sidebar memakai nama baru; ganti password & akun pengguna memiliki tombol mata", async ({ page }) => {
     await login(page, USERS.hr);
-    await expect(page.getByRole("complementary").getByText("Internal Human Resources Information System")).toBeVisible();
+    await expect(page.getByRole("complementary").getByText("Trilogika Internal Portal")).toBeVisible();
     await page.goto("/change-password");
     await expect(page.getByRole("button", { name: "Tampilkan sandi" })).toHaveCount(3);
     await page.getByLabel("Password saat ini").fill("abc");
