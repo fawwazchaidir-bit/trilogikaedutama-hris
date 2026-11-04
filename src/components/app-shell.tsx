@@ -11,6 +11,7 @@ import { cn } from "@/lib/cn";
 import { NAV_GROUP_LABEL, type NavItem, type Role } from "@/lib/permissions";
 import { CommandPalette } from "@/components/command-palette";
 import { UserMenu } from "@/components/user-menu";
+import { PushAutoRegister } from "@/components/push-auto-register";
 import { ToastProvider } from "@/components/ui/toast";
 import { DEFAULT_NAV_PREF, NAV_GROUP_IDS, writeNavPrefCookie, type NavGroupId, type NavPref } from "@/lib/nav-pref";
 
@@ -225,6 +226,7 @@ export function AppShell({ user, nav, company, unread, pendingBadges, initialNav
           {children}
         </main>
         </div>
+        <PushAutoRegister email={user.email} />
         <CommandPalette open={searchOpen} onClose={() => setSearchOpen(false)} nav={nav} canSearchProjects={canSearchProjects} />
       </div>
     </ToastProvider>

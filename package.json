@@ -25,7 +25,8 @@
     "db:backup": "bash scripts/backup.sh",
     "db:restore": "bash scripts/restore.sh",
     "user:create": "tsx --conditions=react-server scripts/create-user.ts",
-    "db:verify": "tsx scripts/verify-db.ts"
+    "db:verify": "tsx scripts/verify-db.ts",
+    "push:keys": "tsx scripts/generate-push-keys.ts"
   },
   "dependencies": {
     "@prisma/client": "^6.19.3",

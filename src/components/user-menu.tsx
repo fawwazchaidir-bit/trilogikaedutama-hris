@@ -6,6 +6,7 @@ import { ChevronDown, CircleUserRound, KeyRound, LogOut, ShieldEllipsis } from "
 import { api } from "@/lib/api-client";
 import { cn } from "@/lib/cn";
 import { ROLE_LABELS, type Role } from "@/lib/permissions";
+import { disableThisBrowser } from "@/lib/push-client";
 
 export const initialsOf = (name: string): string => {
   const parts = name.trim().split(/\s+/).filter(Boolean);
@@ -30,6 +31,8 @@ export function UserMenu({ user, hasEmployee, tone = "light" }: { user: { name: 
 
   async function logout() {
     setBusy(true);
+    // Peramban ini berhenti menerima notifikasi pengguna ini (komputer bisa dipakai orang lain); masuk lagi mendaftarkannya otomatis.
+    try { await disableThisBrowser(user.email, { browser: false }); } catch { /* tidak mendukung push: abaikan */ }
     try { await api("/api/auth/logout", { method: "POST", body: {} }); } finally { router.push("/login"); router.refresh(); }
   }
   const item = "flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm text-ink-soft hover:bg-canvas";

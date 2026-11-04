@@ -224,6 +224,8 @@ enum ReceiptStatus {
 enum DeliveryChannel {
   EMAIL
   WHATSAPP
+  /// Notifikasi push desktop (Web Push) ke peramban yang berlangganan.
+  PUSH
 }
 
 enum DeliveryStatus {
@@ -308,6 +310,8 @@ model User {
   deliveries      NotificationDelivery[]
   /// Level akses modul Training & Operations (opsional; tanpa baris = tanpa level modul).
   trainingAccess  TrainingAccess?
+
+  pushSubscriptions PushSubscription[]
 
   @@map("users")
 }
@@ -1954,4 +1958,25 @@ model PortalAnnouncement {
 
   @@index([createdAt])
   @@map("portal_announcements")
+}
+
+// ───────────── Notifikasi push desktop (Web Push) ─────────────
+
+/// Satu baris = satu peramban/perangkat desktop yang SENGAJA diaktifkan pengguna (izin peramban + klik "Aktifkan"). Alamat `endpoint` adalah
+/// URL rahasia milik push service peramban (hanya host resmi yang diterima — lihat src/lib/webpush.ts). Dihapus saat keluar/dimatikan/kedaluwarsa.
+model PushSubscription {
+  id            String    @id @default(uuid()) @db.Uuid
+  userId        String    @db.Uuid
+  endpoint      String    @unique
+  p256dh        String
+  auth          String
+  /// Label perangkat untuk daftar "perangkat saya" (mis. "Chrome · Windows"); bukan pengenal unik.
+  label         String?
+  createdAt     DateTime  @default(now())
+  lastSuccessAt DateTime?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("push_subscriptions")
 }

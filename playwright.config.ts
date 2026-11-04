@@ -1,5 +1,7 @@
 import "dotenv/config";
 import { defineConfig } from "@playwright/test";
+import { generateVapidKeys } from "./src/lib/webpush";
+const VAPID = generateVapidKeys();
 
 const PORT = Number(process.env.E2E_PORT ?? 3101);
 const BASE = `http://127.0.0.1:${PORT}`;
@@ -43,6 +45,8 @@ export default defineConfig({
       TRAINING_MODULE_ENABLED: "true",
       // Pekerja harian dimatikan agar tes deterministik. CRON_SECRET sengaja TIDAK diset: sweep API memastikan pemicu internal menjawab 404 tanpa rahasia.
       TRAINING_WORKER: "false",
+      // Kunci VAPID SEMENTARA untuk server uji (dibuat ulang tiap menjalankan Playwright; tidak disimpan di mana pun).
+      WEB_PUSH_PUBLIC_KEY: VAPID.publicKey, WEB_PUSH_PRIVATE_KEY: VAPID.privateKey, WEB_PUSH_SUBJECT: "mailto:e2e@trilogika.test",
     },
   },
 });

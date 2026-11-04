@@ -9,7 +9,7 @@ export interface DeliveryStats {
   email: boolean;
   whatsapp: boolean;
   counts: { pending: number; sent: number; failed: number; skipped: number };
-  recentFailures: { id: string; channel: "EMAIL" | "WHATSAPP"; to: string; subject: string | null; attempts: number; lastError: string | null; createdAt: string }[];
+  recentFailures: { id: string; channel: "EMAIL" | "WHATSAPP" | "PUSH"; to: string; subject: string | null; attempts: number; lastError: string | null; createdAt: string }[];
 }
 
 /** Ringkasan antrean pengiriman email/WhatsApp (Pengaturan, Super Admin). Alamat/nomor tujuan disamarkan. */

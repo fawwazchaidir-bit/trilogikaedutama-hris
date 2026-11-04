@@ -1,5 +1,7 @@
 # Notifikasi WhatsApp — cara kerja, prasyarat, dan keputusan
 
+> **Alternatif tanpa biaya per pesan dan tanpa penyedia pihak ketiga:** notifikasi desktop (Web Push) — lihat [NOTIFIKASI-DESKTOP.md](NOTIFIKASI-DESKTOP.md). Keduanya memakai jalur antrean yang sama dan dapat dipakai bersama.
+
 Dokumen ini menjelaskan mekanisme yang **sudah ada di kode** (bukan rencana). Semua pesan otomatis di portal — pengingat tenggat H-1/hari-H,
 eskalasi Kuning/Merah/terlambat/beban, pesan broadcast Direktur, persetujuan cuti, dan seterusnya — memakai **satu jalur yang sama**.
 

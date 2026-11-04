@@ -58,5 +58,8 @@ services:
       # Modul Training & Operations: DEFAULT MATI. Nyalakan bertahap (staging → UAT → production); lihat docs/TRAINING-OPS.md.
       TRAINING_MODULE_ENABLED: ${TRAINING_MODULE_ENABLED:-false}
       TRAINING_WORKER: ${TRAINING_WORKER:-true}
+      WEB_PUSH_PUBLIC_KEY: ${WEB_PUSH_PUBLIC_KEY:-}
+      WEB_PUSH_PRIVATE_KEY: ${WEB_PUSH_PRIVATE_KEY:-}
+      WEB_PUSH_SUBJECT: ${WEB_PUSH_SUBJECT:-}
 volumes:
   pgdata:

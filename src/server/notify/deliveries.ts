@@ -2,7 +2,8 @@ import "server-only";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "../db";
 import { env } from "../env";
-import { emailAvailable, sendEmail, sendWhatsapp, whatsappAvailable } from "./transports";
+import { PushGoneError } from "@/lib/webpush";
+import { emailAvailable, pushAvailable, sendEmail, sendPush, sendWhatsapp, whatsappAvailable } from "./transports";
 
 type Db = Prisma.TransactionClient | typeof prisma;
 
@@ -24,13 +25,15 @@ export function composeMessage(brand: string, n: { title: string; body: string |
  * Hanya saluran yang dikonfigurasi DAN dipilih pengguna (dan punya alamat/nomor) yang diantrekan.
  */
 export async function queueDeliveries(db: Db, rows: QueuedNotification[]): Promise<number> {
-  if (rows.length === 0 || (!emailAvailable() && !whatsappAvailable())) return 0;
+  if (rows.length === 0 || (!emailAvailable() && !whatsappAvailable() && !pushAvailable())) return 0;
   const users = await db.user.findMany({
     where: { id: { in: [...new Set(rows.map((r) => r.userId))] }, isActive: true },
     select: { id: true, email: true, notifyEmail: true, notifyWhatsapp: true, whatsappNumber: true },
   });
   if (users.length === 0) return 0;
   const byId = new Map(users.map((u) => [u.id, u]));
+  // Notifikasi desktop: satu pengiriman per perangkat yang SENGAJA diaktifkan pengguna (langganan push).
+  const subs = pushAvailable() ? await db.pushSubscription.findMany({ where: { userId: { in: users.map((u) => u.id) } }, select: { userId: true, endpoint: true } }) : [];
   const brand = (await db.companySettings.findUnique({ where: { id: 1 }, select: { name: true } }))?.name ?? "Trilogika Edutama";
   const data: Prisma.NotificationDeliveryCreateManyInput[] = [];
   for (const r of rows) {
@@ -39,6 +42,7 @@ export async function queueDeliveries(db: Db, rows: QueuedNotification[]): Promi
     const msg = composeMessage(brand, r);
     if (emailAvailable() && u.notifyEmail && u.email) data.push({ notificationId: r.id, userId: u.id, channel: "EMAIL", toAddress: u.email, subject: msg.subject, body: msg.text });
     if (whatsappAvailable() && u.notifyWhatsapp && u.whatsappNumber) data.push({ notificationId: r.id, userId: u.id, channel: "WHATSAPP", toAddress: u.whatsappNumber, subject: null, body: msg.text });
+    for (const s of subs) if (s.userId === u.id) data.push({ notificationId: r.id, userId: u.id, channel: "PUSH", toAddress: s.endpoint, subject: r.title, body: r.body ?? "" });
   }
   if (data.length) await db.notificationDelivery.createMany({ data });
   return data.length;
@@ -51,7 +55,7 @@ export function backoffSeconds(attempts: number): number {
   return Math.min(60 * 2 ** Math.max(0, attempts - 1), 3600);
 }
 
-interface Claimed { id: bigint; userId: string | null; channel: "EMAIL" | "WHATSAPP"; toAddress: string; subject: string | null; body: string; attempts: number }
+interface Claimed { id: bigint; notificationId: bigint | null; userId: string | null; channel: "EMAIL" | "WHATSAPP" | "PUSH"; toAddress: string; subject: string | null; body: string; attempts: number }
 
 /**
  * Proses antrean: klaim baris atomik (FOR UPDATE SKIP LOCKED → aman untuk beberapa instance/pekerja), kirim, lalu tandai.
@@ -64,22 +68,40 @@ export async function processDeliveries(opts: { limit?: number } = {}): Promise<
     WHERE id IN (
       SELECT id FROM notification_deliveries WHERE "status" = 'PENDING' AND "nextAttemptAt" <= now()
       ORDER BY id LIMIT ${limit} FOR UPDATE SKIP LOCKED)
-    RETURNING id, "userId", channel::text AS channel, "toAddress", subject, body, attempts`;
+    RETURNING id, "notificationId", "userId", channel::text AS channel, "toAddress", subject, body, attempts`;
   const result: ProcessResult = { claimed: claimed.length, sent: 0, failed: 0, retried: 0, skipped: 0 };
   for (const d of claimed) {
     // Pengguna dinonaktifkan / mematikan saluran setelah antrean dibuat → lewati.
     const u = d.userId ? await prisma.user.findUnique({ where: { id: d.userId }, select: { isActive: true, notifyEmail: true, notifyWhatsapp: true } }) : null;
-    if (d.userId && (!u || !u.isActive || (d.channel === "EMAIL" ? !u.notifyEmail : !u.notifyWhatsapp))) {
+    // Push tidak punya sakelar per pengguna: langganan perangkat itu sendiri adalah persetujuannya (dicek di bawah).
+    if (d.userId && (!u || !u.isActive || (d.channel === "EMAIL" ? !u.notifyEmail : d.channel === "WHATSAPP" ? !u.notifyWhatsapp : false))) {
       await prisma.notificationDelivery.update({ where: { id: d.id }, data: { status: "SKIPPED", lastError: "Pengguna nonaktif / saluran dimatikan" } });
       result.skipped++;
       continue;
     }
     try {
       if (d.channel === "EMAIL") await sendEmail({ to: d.toAddress, subject: d.subject ?? "Notifikasi", text: d.body });
-      else await sendWhatsapp({ to: d.toAddress, text: d.body });
+      else if (d.channel === "WHATSAPP") await sendWhatsapp({ to: d.toAddress, text: d.body });
+      else {
+        const sub = await prisma.pushSubscription.findUnique({ where: { endpoint: d.toAddress } });
+        if (!sub || sub.userId !== d.userId) { // dicabut / berpindah ke pengguna lain di peramban yang sama → jangan kirim
+          await prisma.notificationDelivery.update({ where: { id: d.id }, data: { status: "SKIPPED", lastError: "Langganan perangkat sudah dicabut" } });
+          result.skipped++;
+          continue;
+        }
+        const n = await prisma.notification.findFirst({ where: { id: d.notificationId ?? BigInt(-1) }, select: { id: true, href: true } });
+        await sendPush({ endpoint: sub.endpoint, p256dh: sub.p256dh, auth: sub.auth }, { title: d.subject ?? "Notifikasi baru", body: d.body, href: n?.href ?? "/notifikasi", ...(n ? { tag: `n-${n.id}` } : {}) });
+        await prisma.pushSubscription.update({ where: { id: sub.id }, data: { lastSuccessAt: new Date() } });
+      }
       await prisma.notificationDelivery.update({ where: { id: d.id }, data: { status: "SENT", sentAt: new Date(), lastError: null } });
       result.sent++;
     } catch (e) {
+      if (e instanceof PushGoneError) { // push service: langganan sudah tidak ada → hapus agar tidak dicoba terus
+        await prisma.pushSubscription.deleteMany({ where: { endpoint: d.toAddress } });
+        await prisma.notificationDelivery.update({ where: { id: d.id }, data: { status: "SKIPPED", lastError: e.message } });
+        result.skipped++;
+        continue;
+      }
       const msg = (e instanceof Error ? e.message : String(e)).slice(0, 500);
       if (d.attempts >= MAX_ATTEMPTS) {
         await prisma.notificationDelivery.update({ where: { id: d.id }, data: { status: "FAILED", lastError: msg } });

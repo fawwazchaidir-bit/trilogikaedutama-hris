@@ -1,13 +1,17 @@
 import "server-only";
 import nodemailer, { type Transporter } from "nodemailer";
-import { emailConfigured, env, whatsappConfigured } from "../env";
+import { emailConfigured, env, pushConfigured, whatsappConfigured } from "../env";
+import { sendWebPush, type PushTarget } from "@/lib/webpush";
 
 export interface EmailMessage { to: string; subject: string; text: string }
 export interface WhatsappMessage { to: string; text: string }
 
+export interface PushMessage { title: string; body: string; href: string; tag?: string }
+
 export interface Transports {
   email: (m: EmailMessage) => Promise<void>;
   whatsapp: (m: WhatsappMessage) => Promise<void>;
+  push: (target: PushTarget, m: PushMessage) => Promise<void>;
 }
 
 /** Hanya untuk tes: mengganti pengirim sebenarnya. `null` = kembali ke konfigurasi lingkungan. */
@@ -16,6 +20,7 @@ export function setTransportsForTest(t: Partial<Transports> | null): void { over
 
 export const emailAvailable = (): boolean => !!override?.email || emailConfigured();
 export const whatsappAvailable = (): boolean => !!override?.whatsapp || whatsappConfigured();
+export const pushAvailable = (): boolean => !!override?.push || pushConfigured();
 
 const TIMEOUT_MS = 15_000;
 
@@ -88,4 +93,15 @@ export async function sendWhatsapp(m: WhatsappMessage): Promise<void> {
     try { const j = JSON.parse(res.text) as { status?: boolean; reason?: string }; ok = j.status === true; reason = j.reason ?? reason; } catch { /* non-JSON */ }
     if (!ok) throw new Error(`Fonnte menolak pesan: ${reason}`);
   }
+}
+
+/**
+ * Kirim satu notifikasi push desktop. Muatan dienkripsi end-to-end untuk peramban penerima (RFC 8291); push service hanya melihat data terenkripsi.
+ * `PushGoneError` = langganan sudah tidak berlaku (pemanggil menghapusnya). Judul/isi dipotong agar muat dan tidak memuat data berlebih.
+ */
+export async function sendPush(target: PushTarget, m: PushMessage): Promise<void> {
+  if (override?.push) return override.push(target, m);
+  if (!pushConfigured()) throw new Error("Notifikasi push belum dikonfigurasi (WEB_PUSH_PUBLIC_KEY, WEB_PUSH_PRIVATE_KEY, WEB_PUSH_SUBJECT).");
+  const e = env();
+  await sendWebPush(target, { title: m.title.slice(0, 120), body: m.body.slice(0, 240), href: m.href, ...(m.tag ? { tag: m.tag } : {}) }, { publicKey: e.WEB_PUSH_PUBLIC_KEY!, privateKey: e.WEB_PUSH_PRIVATE_KEY!, subject: e.WEB_PUSH_SUBJECT! });
 }

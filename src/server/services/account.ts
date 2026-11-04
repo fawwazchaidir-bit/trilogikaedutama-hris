@@ -7,6 +7,7 @@ import type { Actor } from "../actor";
 import { writeAudit } from "../audit";
 import { blockedSeconds, recordFailure } from "../auth/rate-limit";
 import { emailAvailable, sendEmail, sendWhatsapp, whatsappAvailable } from "../notify/transports";
+import { sendTestPush } from "./push";
 import { getTwoFactorStatus, type TwoFactorStatus } from "./two-factor";
 import { normalizeWhatsappNumber } from "@/lib/phone";
 
@@ -74,7 +75,7 @@ export async function updateNotificationPrefs(actor: Actor, raw: unknown): Promi
   return { email: u.notifyEmail, whatsapp: u.notifyWhatsapp, whatsappNumber: u.whatsappNumber, emailAvailable: emailAvailable(), whatsappAvailable: whatsappAvailable() };
 }
 
-const testSchema = z.object({ channel: z.enum(["EMAIL", "WHATSAPP"]) });
+const testSchema = z.object({ channel: z.enum(["EMAIL", "WHATSAPP", "PUSH"]) });
 const TEST_LIMIT = { max: 5, windowMs: 3_600_000, blockMs: 3_600_000 };
 
 /** Kirim pesan uji LANGSUNG (bukan lewat antrean) agar pengguna melihat hasilnya; dibatasi 5 per jam. */
@@ -87,7 +88,9 @@ export async function sendTestNotification(actor: Actor, raw: unknown): Promise<
   const brand = (await prisma.companySettings.findUnique({ where: { id: 1 }, select: { name: true } }))?.name ?? "Trilogika Edutama";
   await recordFailure(key, TEST_LIMIT);
   try {
-    if (channel === "EMAIL") {
+    if (channel === "PUSH") {
+      await sendTestPush(actor, brand);
+    } else if (channel === "EMAIL") {
       if (!emailAvailable()) throw Errors.validation("Email belum dikonfigurasi di server (SMTP).");
       await sendEmail({ to: u.email, subject: `[${brand}] Pesan uji notifikasi`, text: `Halo ${u.name},\n\nIni pesan uji dari ${brand} HRIS. Bila Anda menerimanya, notifikasi email berfungsi.` });
     } else {

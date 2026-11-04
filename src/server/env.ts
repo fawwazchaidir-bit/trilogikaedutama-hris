@@ -1,5 +1,6 @@
 import "server-only";
 import { z } from "zod";
+import { vapidKeysValid } from "@/lib/webpush";
 
 const bool = z.enum(["true", "false"]).transform((v) => v === "true");
 const int = (def: number, min = 1, max = 1_000_000) =>
@@ -53,6 +54,13 @@ const schema = z.object({
   CONTRACT_REMINDER_WORKER: bool.default(true),
   /** Jalankan pekerja harian Training & Operations (snapshot status, eskalasi, pengingat tenggat H-1/hari-H) di dalam proses aplikasi (default true; hanya bila modul menyala). Matikan bila memakai pemicu eksternal /api/internal/training-daily. */
   TRAINING_WORKER: bool.default(true),
+  /**
+   * Notifikasi push desktop (Web Push). Kunci VAPID dibuat sekali dengan `npm run push:keys` lalu disimpan di .env (kunci privat RAHASIA).
+   * Kosong = fitur nonaktif. `WEB_PUSH_SUBJECT`: `mailto:` admin atau URL https situs (dikirim ke push service sebagai kontak).
+   */
+  WEB_PUSH_PUBLIC_KEY: opt(z.string()),
+  WEB_PUSH_PRIVATE_KEY: opt(z.string()),
+  WEB_PUSH_SUBJECT: opt(z.string().regex(/^(mailto:[^\s@]+@[^\s@]+|https:\/\/\S+)$/, 'WEB_PUSH_SUBJECT harus "mailto:alamat@email" atau URL https')),
   /** Masa berlaku tautan "lupa password" (menit). */
   PASSWORD_RESET_MINUTES: int(30, 5, 1440),
   /**
@@ -94,6 +102,12 @@ export function whatsappConfigured(): boolean {
   if (e.WHATSAPP_PROVIDER === "webhook") return !!e.WHATSAPP_API_URL;
   if (e.WHATSAPP_PROVIDER === "cloud_api") return !!e.WHATSAPP_TOKEN && !!e.WHATSAPP_PHONE_NUMBER_ID;
   return !!e.WHATSAPP_TOKEN; // fonnte
+}
+
+/** Web Push siap bila ketiganya terisi DAN kunci VAPID sah & sepasang. */
+export function pushConfigured(): boolean {
+  const e = env();
+  return !!e.WEB_PUSH_PUBLIC_KEY && !!e.WEB_PUSH_PRIVATE_KEY && !!e.WEB_PUSH_SUBJECT && vapidKeysValid({ publicKey: e.WEB_PUSH_PUBLIC_KEY, privateKey: e.WEB_PUSH_PRIVATE_KEY });
 }
 
 export function isSecureDeployment(): boolean {
