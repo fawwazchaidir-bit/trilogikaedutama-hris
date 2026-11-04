@@ -8,14 +8,17 @@ import { EmptyState, Notice } from "@/components/ui/card";
 import { SelectField, TextAreaField, TextField } from "@/components/ui/field";
 import { Table, TableWrap, Td, Th } from "@/components/ui/table";
 import { api } from "@/lib/api-client";
-import { formatDateShort } from "@/lib/format";
+import { formatDateShort, formatDateTime } from "@/lib/format";
 import { COMPONENT_LABEL, ITEM_COMPONENTS } from "@/lib/training/indicators/config";
 import type { ProgramIndicatorDto } from "@/server/services/training/indicator-compute";
 import type { MilestoneDto, ReadinessItemDto, WorkloadTaskDto } from "@/server/services/training/indicator-data";
+import type { RecoveryNoteDto } from "@/server/services/training/recovery";
+import { RECOVERY_KINDS, RECOVERY_KIND_LABEL, type RecoveryKind } from "@/lib/training/indicators/escalation";
 import { IndicatorTiles } from "./indicator-ui";
 import { useRunner } from "./use-runner";
 
 interface Props {
+  recovery: RecoveryNoteDto[]; canWriteRecovery: boolean;
   projectId: string; indicators: ProgramIndicatorDto; milestones: MilestoneDto[]; items: ReadinessItemDto[]; workload: WorkloadTaskDto[];
   employees: { id: string; name: string }[];
   /** Kemampuan pada proyek ini (dari server; penegakan tetap di server). */
@@ -36,6 +39,7 @@ export function MonitoringPanel(p: Props) {
   const [reason, setReason] = useState("");
   const [addWork, setAddWork] = useState(false);
   const [w, setW] = useState({ employeeId: "", name: "", hours: "", startDate: "", endDate: "" });
+  const [rec, setRec] = useState<{ kind: RecoveryKind; body: string; newDate: string }>({ kind: "YELLOW_STREAK", body: "", newDate: "" });
 
   const applied = p.indicators.applied;
   const byComponent = ITEM_COMPONENTS.map((c) => ({ c, rows: p.items.filter((i) => i.component === c) })).filter((g) => g.rows.length > 0);
@@ -133,6 +137,27 @@ export function MonitoringPanel(p: Props) {
           )}
         </>
       )}
+
+      <section id="pemulihan" aria-label="Catatan pemulihan" className="scroll-mt-20 space-y-3">
+        <h2 className="text-base font-semibold text-ink">Catatan pemulihan</h2>
+        <p className="text-xs text-muted">Rencana/keputusan pemulihan program (Kuning berturut-turut, Merah, milestone terlambat, beban berlebih). Catatan bersifat tetap: tidak dapat diubah atau dihapus, supaya jejak keputusan terjaga.</p>
+        {p.canWriteRecovery && live && (
+          <form className="grid gap-3 rounded-lg border border-line bg-surface p-4 sm:grid-cols-[14rem_1fr_11rem_auto]" onSubmit={(e) => { e.preventDefault(); void run(() => api(`/api/training/projects/${p.projectId}/recovery`, { body: { kind: rec.kind, body: rec.body, newDate: rec.newDate || null } }), "Catatan pemulihan disimpan.", () => setRec({ ...rec, body: "", newDate: "" })); }}>
+            <SelectField label="Jenis" value={rec.kind} onChange={(e) => setRec({ ...rec, kind: e.target.value as RecoveryKind })}>{RECOVERY_KINDS.map((k) => <option key={k} value={k}>{RECOVERY_KIND_LABEL[k]}</option>)}</SelectField>
+            <TextAreaField label="Rencana / keputusan" required rows={2} maxLength={1000} value={rec.body} onChange={(e) => setRec({ ...rec, body: e.target.value })} error={fieldErrors.body} />
+            <TextField label="Tanggal selesai baru" type="date" value={rec.newDate} onChange={(e) => setRec({ ...rec, newDate: e.target.value })} error={fieldErrors.newDate} hint="Opsional." />
+            <div className="flex items-end"><Button type="submit" variant="primary" loading={busy} disabled={rec.body.trim().length < 5}>Simpan catatan</Button></div>
+          </form>
+        )}
+        {p.recovery.length === 0 ? <p className="text-sm text-muted">Belum ada catatan pemulihan.</p> : (
+          <ul className="divide-y divide-line rounded-lg border border-line bg-surface">{p.recovery.map((n) => (
+            <li key={n.id} className="px-4 py-3 text-sm">
+              <p className="flex flex-wrap items-center gap-2"><Badge tone={n.kind === "RED" ? "red" : n.kind === "YELLOW_STREAK" ? "amber" : "gray"}>{n.kindLabel}</Badge>{n.newDate && <span className="text-xs text-muted">Tanggal selesai baru: {formatDateShort(n.newDate)}</span>}</p>
+              <p className="mt-1 whitespace-pre-wrap text-ink">{n.body}</p>
+              <p className="mt-0.5 text-xs text-muted">{n.createdByName ?? "—"} · {formatDateTime(n.createdAt)}</p>
+            </li>))}</ul>
+        )}
+      </section>
 
       <Dialog open={finish !== null} onClose={() => !busy && setFinish(null)} size="md" title={`Selesaikan ${finish?.code ?? ""}`} description={finish?.name}
         footer={<><Button onClick={() => setFinish(null)} disabled={busy}>Batal</Button><Button variant="primary" loading={busy} disabled={evidence.trim().length < 3} onClick={() => finish && void run(() => api(`/api/training/milestones/${finish.id}/complete`, { body: { evidence, doneAt: doneAt || null } }), "Milestone diselesaikan.", () => setFinish(null))}>Simpan</Button></>}>

@@ -5,6 +5,7 @@ import { Notice } from "@/components/ui/card";
 import { cn } from "@/lib/cn";
 import { COLOR_LABEL, LOAD_BAND_LABEL, TRIGGER_LABEL, type Color } from "@/lib/training/indicators/engine";
 import { fmtNum, fmtPct } from "@/lib/training/indicators/format";
+import { formatDateShort } from "@/lib/format";
 import type { ProgramIndicatorDto } from "@/server/services/training/indicator-compute";
 
 const TONE: Record<Color, "green" | "amber" | "red"> = { GREEN: "green", YELLOW: "amber", RED: "red" };
@@ -36,6 +37,12 @@ export function IndicatorTiles({ ind }: { ind: ProgramIndicatorDto }) {
         <span className="text-sm font-medium text-ink">Status program:</span><ColorBadge color={ind.overall} />
         <span className="text-xs text-muted">= yang terburuk dari tiga indikator, kecuali ada pemicu Merah.</span>
       </div>
+      {ind.runs && ind.overall === "YELLOW" && ind.runs.yellow.count >= ind.runs.yellowStreakDays && (
+        <Notice tone="warn">Kuning {ind.runs.yellow.count} hari kerja berturut-turut (sejak {ind.runs.yellow.startDate ? formatDateShort(ind.runs.yellow.startDate) : "—"}). Atasan PIC sudah diberi tahu; <a href="#pemulihan" className="font-medium underline">tulis rencana pemulihan</a> dalam 1 hari kerja.</Notice>
+      )}
+      {ind.runs && ind.overall === "RED" && ind.runs.red.count > 0 && (
+        <Notice tone="danger">Merah{ind.runs.red.count > 1 ? ` ${ind.runs.red.count} hari kerja berturut-turut` : " sejak hari ini"}. Putuskan pemulihan hari yang sama (tambah orang, geser tugas, atau ubah rencana) dan <a href="#pemulihan" className="font-medium underline">catat keputusannya</a>.</Notice>
+      )}
       {ind.triggers.length > 0 && (
         <Notice tone="danger"><ul className="space-y-0.5">{ind.triggers.map((c) => <li key={c} className="flex items-start gap-1.5"><AlertTriangle className="mt-0.5 size-4 shrink-0" aria-hidden />{TRIGGER_LABEL[c]}</li>)}</ul></Notice>
       )}

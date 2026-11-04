@@ -41,6 +41,8 @@ export default defineConfig({
       DATA_ENCRYPTION_KEY: process.env.DATA_ENCRYPTION_KEY ?? "",
       // Modul Training & Operations default MATI di aplikasi; E2E menyalakannya secara eksplisit (tidak bergantung pada .env lokal).
       TRAINING_MODULE_ENABLED: "true",
+      // Pekerja harian dimatikan agar tes deterministik; tes memicunya lewat POST /api/internal/training-daily (CRON_SECRET uji di bawah).
+      TRAINING_WORKER: "false", CRON_SECRET: "e2e-cron-secret-uji-0123456789",
     },
   },
 });

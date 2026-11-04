@@ -69,6 +69,46 @@ export const hourRowSchema = z.object({
 });
 export type HourRow = z.infer<typeof hourRowSchema>;
 
+/**
+ * Eskalasi & pengingat otomatis (dokumen §5.2). Penerima ditentukan lewat JABATAN → pemegang jabatan (bukan nama orang), sehingga
+ * pergantian orang cukup diubah di "Pemegang jabatan". Garis atasan (`reportsTo`) adalah USULAN dari bagan organisasi — HRIS belum menyimpan atasan langsung.
+ */
+export const escalationSchema = z.object({
+  /** Kirim notifikasi eskalasi otomatis (Kuning/Merah/terlambat/overload). */
+  enabled: z.boolean(),
+  /** "Kuning n hari kerja berturut-turut" → atasan langsung PIC diberi tahu & rencana pemulihan ditulis di portal. */
+  yellowStreakDays: int(2, 10),
+  /** Merah pada H-n s.d. H-1 → keputusan Go/No-Go atau penjadwalan ulang. */
+  redLateWindowDays: int(1, 30),
+  /** Pengingat tenggat tugas/milestone/item kesiapan/pelaksanaan program. */
+  reminders: z.object({ dayBefore: z.boolean(), dayOf: z.boolean(), programStart: z.boolean() }),
+  /** Kunci jabatan → kunci jabatan atasan langsungnya (null = tanpa atasan di portal → Direktur/Super Admin). */
+  reportsTo: z.record(z.string(), z.string().nullable()),
+  /** Merah: pelaksanaan → jabatan ini; pemasaran/klien → jabatan berikutnya; keduanya selalu + jabatan "selalu". */
+  redExecutionRole: text(40), redMarketingRole: text(40), redAlwaysRole: text(40),
+  /** Jabatan yang dianggap pemilik urusan pemasaran/klien (penentu Merah "pemasaran/klien"). */
+  marketingRoleKeys: z.array(text(40)).max(20),
+  /** Beban staf > ambang dua minggu berturut-turut → jabatan ini. */
+  overloadRole: text(40),
+});
+export type Escalation = z.infer<typeof escalationSchema>;
+
+export function defaultEscalation(): Escalation {
+  return {
+    enabled: true, yellowStreakDays: 2, redLateWindowDays: 7,
+    reminders: { dayBefore: true, dayOf: true, programStart: true },
+    reportsTo: {
+      SPV_CURRICULUM: "MANAGER_OPS", STAFF_CURRICULUM: "SPV_CURRICULUM", STAFF_GENERAL: "SPV_CURRICULUM", FACILITATOR: "SPV_CURRICULUM",
+      STAFF_FINANCE: "MANAGER_OPS", SPV_IT: "MANAGER_OPS",
+      STAFF_SOCIAL: "MANAGER_MARKETING", STAFF_ADMISI_1: "MANAGER_MARKETING", STAFF_ADMISI_2: "MANAGER_MARKETING",
+      MANAGER_MARKETING: null, MANAGER_OPS: null,
+    },
+    redExecutionRole: "SPV_CURRICULUM", redMarketingRole: "MANAGER_MARKETING", redAlwaysRole: "MANAGER_OPS",
+    marketingRoleKeys: ["MANAGER_MARKETING", "STAFF_SOCIAL", "STAFF_ADMISI_1", "STAFF_ADMISI_2"],
+    overloadRole: "MANAGER_OPS",
+  };
+}
+
 const weights = z.object({ PARTICIPANTS: finite(0, 1000), INSTRUCTOR: finite(0, 1000), MATERIAL: finite(0, 1000), LOGISTICS: finite(0, 1000), ADMIN: finite(0, 1000), CERTIFICATION: finite(0, 1000) });
 
 export const indicatorConfigSchema = z.object({
@@ -123,6 +163,8 @@ export const indicatorConfigSchema = z.object({
   requireEvidence: z.boolean(),
   /** Terapkan template pemantauan otomatis saat proyek dibuat. */
   autoApplyOnCreate: z.boolean(),
+  /** Konfigurasi tersimpan sebelum fitur eskalasi tidak memuat bagian ini → memakai nilai bawaan. */
+  escalation: escalationSchema.default(() => defaultEscalation()),
 });
 export type IndicatorConfig = z.infer<typeof indicatorConfigSchema>;
 
@@ -236,6 +278,7 @@ export function defaultIndicatorConfig(): IndicatorConfig {
     facilitators: [],
     requireEvidence: true,
     autoApplyOnCreate: true,
+    escalation: defaultEscalation(),
   };
 }
 
@@ -279,6 +322,23 @@ export function checkIndicatorConfig(c: IndicatorConfig): ConfigCheck {
     errors.push("Kode milestone awal/akhir untuk kenaikan komponen Peserta (reguler) harus ada pada template Reguler.");
   }
   if (!c.templates.PARTNER.milestones.some((m) => m.code === c.participants.partnerDeadlineCode)) errors.push("Kode milestone tenggat daftar peserta (kerjasama) harus ada pada template Kerjasama.");
+  const e = c.escalation;
+  for (const [k, v] of Object.entries(e.reportsTo)) {
+    if (!roleKeys.has(k)) errors.push(`Eskalasi: atasan ditetapkan untuk jabatan yang tidak ada (${k}).`);
+    if (v !== null && !roleKeys.has(v)) errors.push(`Eskalasi: atasan ${k} merujuk jabatan yang tidak ada (${v}).`);
+    if (v === k) errors.push(`Eskalasi: jabatan ${k} tidak boleh menjadi atasannya sendiri.`);
+  }
+  for (const start of Object.keys(e.reportsTo)) { // rantai atasan tidak boleh melingkar
+    const seen = new Set<string>([start]);
+    for (let cur = e.reportsTo[start] ?? null; cur; cur = e.reportsTo[cur] ?? null) {
+      if (seen.has(cur)) { errors.push(`Eskalasi: rantai atasan melingkar dimulai dari ${start}.`); break; }
+      seen.add(cur);
+    }
+  }
+  for (const [label, key] of [["Merah (pelaksanaan)", e.redExecutionRole], ["Merah (pemasaran/klien)", e.redMarketingRole], ["Merah (selalu diberi tahu)", e.redAlwaysRole], ["Beban berlebih", e.overloadRole]] as const) {
+    if (!roleKeys.has(key)) errors.push(`Eskalasi ${label}: jabatan tidak ada (${key}).`);
+  }
+  for (const k of e.marketingRoleKeys) if (!roleKeys.has(k)) errors.push(`Eskalasi: jabatan pemasaran/klien tidak ada (${k}).`);
   for (const h of c.hourTable) if (!roleKeys.has(h.roleKey)) errors.push(`Tabel jam standar memakai jabatan yang tidak ada (${h.roleKey}).`);
   return { errors, warnings };
 }

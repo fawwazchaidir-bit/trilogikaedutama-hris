@@ -2,6 +2,7 @@
 import { z } from "zod";
 import { hhmm, isoDate, optionalEmail, optionalPhone, optionalText, requiredText, uuid } from "./common";
 import { ANCHORS, ITEM_COMPONENTS, TRACKS, indicatorConfigSchema } from "@/lib/training/indicators/config";
+import { RECOVERY_KINDS } from "@/lib/training/indicators/escalation";
 import {
   ACTIVITY_KINDS, CHECKLIST_PHASES, CONFIRMATIONS, DELIVERY_MODES, DOC_CATEGORIES, EXTERNAL_SYSTEMS, INSTRUCTOR_KINDS,
   PARTICIPANT_STATUSES, PROJECT_ROLES, PROJECT_STATUSES, SCHEDULE_STATUSES, TASK_PRIORITIES, TASK_STATUSES, TRAINING_LEVELS,
@@ -286,3 +287,10 @@ export const staffCapacitySchema = z.object({
 });
 export const heatmapQuerySchema = z.object({ weeks: z.coerce.number().int().min(1).max(12).optional() });
 export const densityQuerySchema = z.object({ from: isoDate.optional(), days: z.coerce.number().int().min(1).max(92).optional() });
+
+export const recoveryNoteSchema = z.object({
+  kind: z.enum(RECOVERY_KINDS, { error: "Jenis catatan tidak valid" }),
+  body: requiredText(5, 1000, "Catatan pemulihan"),
+  /** Tanggal selesai baru yang dijanjikan (informasi). */
+  newDate: optDate,
+});

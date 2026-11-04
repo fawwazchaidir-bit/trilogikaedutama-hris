@@ -95,6 +95,8 @@ export interface TimelinessResult {
   criticalOverdue: string[];
   /** Milestone overdue lebih dari ambang eskalasi (kode). */
   escalate: string[];
+  /** Rincian `escalate`: kode + jumlah hari terlambat. */
+  escalateDetail: { code: string; daysOverdue: number }[];
 }
 
 export function computeTimeliness(rows: MilestoneIn[], today: string, th: IndicatorConfig["thresholds"]): TimelinessResult {
@@ -118,6 +120,7 @@ export function computeTimeliness(rows: MilestoneIn[], today: string, th: Indica
     avgDelayDays: done.length ? done.reduce((a, m) => a + Math.max(0, m.due ? diffDays(m.doneAt!, m.due) : 0), 0) / done.length : null,
     overdueActive: overdue.length, oldestOverdueDays: oldest, criticalOverdue,
     escalate: overdue.filter((m) => diffDays(today, m.due!) > th.overdueEscalationDays).map((m) => m.code),
+    escalateDetail: overdue.filter((m) => diffDays(today, m.due!) > th.overdueEscalationDays).map((m) => ({ code: m.code, daysOverdue: diffDays(today, m.due!) })),
   };
 }
 

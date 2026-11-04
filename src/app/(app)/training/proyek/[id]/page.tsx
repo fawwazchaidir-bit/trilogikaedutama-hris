@@ -19,6 +19,7 @@ import { MonitoringPanel } from "@/components/training/monitoring-panel";
 import { ColorBadge, MiniIndicators } from "@/components/training/indicator-ui";
 import { TRACK_LABEL } from "@/lib/training/indicators/config";
 import { getProgramIndicators } from "@/server/services/training/indicator-compute";
+import { listRecoveryNotes } from "@/server/services/training/recovery";
 import { listMilestones, listReadiness, listWorkloadTasks } from "@/server/services/training/indicator-data";
 import { actorCan } from "@/server/actor";
 import { env } from "@/server/env";
@@ -102,13 +103,13 @@ export default async function ProjectDetailPage({ params, searchParams }: { para
       })()}
 
       {tab === "pemantauan" && (async () => {
-        const [indicators, milestones, items, workload, dir, members] = await Promise.all([
+        const [indicators, milestones, items, workload, dir, members, recovery] = await Promise.all([
           guard(() => getProgramIndicators(user, id)), guard(() => listMilestones(user, id)), guard(() => listReadiness(user, id)), guard(() => listWorkloadTasks(user, id)),
-          can("manage_tasks") ? listDirectory(user).catch(() => null) : Promise.resolve(null), can("manage_tasks") ? listMembers(user, id) : Promise.resolve([]),
+          can("manage_tasks") ? listDirectory(user).catch(() => null) : Promise.resolve(null), can("manage_tasks") ? listMembers(user, id) : Promise.resolve([]), guard(() => listRecoveryNotes(user, id)),
         ]);
         // Pemilih staf untuk tugas jam kerja: seluruh direktori bila berwenang; kalau tidak, anggota aktif proyek.
         const employees = dir ? dir.map((d) => ({ id: d.id, name: d.fullName })) : members.filter((m) => m.active).map((m) => ({ id: m.employeeId, name: m.name }));
-        return <MonitoringPanel projectId={id} indicators={indicators} milestones={milestones} items={items} workload={workload} employees={employees} canUpdate={can("update")} canManageTasks={can("manage_tasks")} canManageChecklist={can("manage_checklist")} editable={editable} canSeeWorkload={can("manage_tasks") || ctx.caps.viewAll} />;
+        return <MonitoringPanel recovery={recovery} canWriteRecovery={can("manage_tasks")} projectId={id} indicators={indicators} milestones={milestones} items={items} workload={workload} employees={employees} canUpdate={can("update")} canManageTasks={can("manage_tasks")} canManageChecklist={can("manage_checklist")} editable={editable} canSeeWorkload={can("manage_tasks") || ctx.caps.viewAll} />;
       })()}
 
       {tab === "tim" && (async () => {

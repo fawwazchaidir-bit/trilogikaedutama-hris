@@ -16,6 +16,7 @@ import { densityQuerySchema, heatmapQuerySchema } from "@/lib/validation/trainin
 import { accessibleProjectWhere, loadProjectAccess, requireModule } from "./access";
 import { loadConfig } from "./indicator-config";
 import { dateCtx, loadCal, specOf, toProgramRow, type ProgramRow } from "./indicator-data";
+import { statusRun, type SnapshotIn, type StatusRun } from "@/lib/training/indicators/escalation";
 import { today } from "./shared";
 
 type Db = Tx | typeof prisma;
@@ -37,6 +38,8 @@ export interface Env {
   leaveDaysIn: (employeeId: string, weekStart: string) => number;
   onLeave: (employeeId: string, date: string) => boolean;
   person: (employeeId: string) => Person | undefined;
+  /** Karyawan aktif yang memegang tugas jam kerja terbuka pada jendela. */
+  taskHolders: string[];
 }
 
 export interface WeekLoad { weekStart: string; hours: number; capacity: number; pct: number; band: LoadBand; color: Color }
@@ -114,7 +117,7 @@ export async function buildEnv(db: Db, cfg: IndicatorConfig, opts: { weeks?: num
   return {
     today: t, cfg, cal, weeks, tasksOf: (id) => byEmp.get(id) ?? [], capacityOf, leaveDaysIn,
     onLeave: (id, date) => (leave.get(id) ?? []).some((l) => l.part === "FULL" && l.start <= date && date <= l.end),
-    person: (id) => people.get(id),
+    person: (id) => people.get(id), taskHolders: [...byEmp.keys()],
   };
 }
 
@@ -172,9 +175,11 @@ export interface ProgramIndicatorDto {
   next: { code: string; name: string; due: string; daysLeft: number } | null;
   /** Milestone yang sudah lewat tenggat lebih dari ambang eskalasi (kode). */
   escalate: string[];
+  /** Deret hari kerja berturut-turut Kuning / Merah (dari snapshot harian + keadaan hari ini). Null = tidak dimuat (daftar kartu). */
+  runs: { yellow: StatusRun; red: StatusRun; yellowStreakDays: number } | null;
 }
 
-interface ProjectData {
+export interface ProjectData {
   milestones: Prisma.TrainingMilestoneGetPayload<{ include: { assignee: { select: { id: true } } } }>[];
   items: Prisma.TrainingReadinessItemGetPayload<object>[];
   participants: { confirmedAt: Date | null; createdAt: Date }[];
@@ -190,7 +195,7 @@ function compute(env: Env, p: ProgramRow, d: ProjectData, density: DensityDay[],
     startDate: p.startDate, endDate: p.endDate, daysToStart: p.startDate ? diffDays(p.startDate, t) : null,
   };
   if (!p.indicatorsAppliedAt) {
-    return { ...base, applied: false, timeliness: null, readiness: null, projection: null, load: { pct: null, band: null, status: null, topPerson: null }, triggers: [], overall: null, gaps: [], next: null, escalate: [] };
+    return { ...base, applied: false, timeliness: null, readiness: null, projection: null, load: { pct: null, band: null, status: null, topPerson: null }, triggers: [], overall: null, gaps: [], next: null, escalate: [], runs: null };
   }
   if (!p.startDate) gaps.push("Tanggal mulai (H) belum diisi — tenggat milestone dan item tidak dapat dihitung.");
   if (p.track === "PARTNER" && !p.requestDate) gaps.push("Tanggal permintaan klien (T) belum diisi — milestone berpatokan T tidak terhitung.");
@@ -250,11 +255,25 @@ function compute(env: Env, p: ProgramRow, d: ProjectData, density: DensityDay[],
     load: { pct: pct === null ? null : cap(pct), band, status: band ? loadColor(band) : null, topPerson: viewAll ? top : null },
     triggers, overall, gaps,
     next: upcoming ? { code: upcoming.code, name: upcoming.name, due: upcoming.due!, daysLeft: diffDays(upcoming.due!, t) } : null,
-    escalate: timeliness.escalate,
+    escalate: timeliness.escalate, runs: null,
   };
 }
 
-async function loadData(db: Db, ids: string[]): Promise<Map<string, ProjectData>> {
+/** Snapshot harian beberapa hari terakhir per program (sebelum hari ini) — dasar aturan "berturut-turut". */
+export async function loadSnapshots(db: Db, ids: string[], today: string, days = 30): Promise<Map<string, SnapshotIn[]>> {
+  const out = new Map<string, SnapshotIn[]>(ids.map((id) => [id, []]));
+  if (!ids.length) return out;
+  const rows = await db.trainingStatusSnapshot.findMany({ where: { projectId: { in: ids }, date: { gte: isoToDate(addDays(today, -days)), lt: isoToDate(today) } }, select: { projectId: true, date: true, overall: true } });
+  for (const r of rows) out.get(r.projectId)!.push({ date: dateToIso(r.date), overall: r.overall as Color });
+  return out;
+}
+
+export function runsOf(prior: SnapshotIn[], today: string, overall: Color | null, cal: WorkCal): { yellow: StatusRun; red: StatusRun } {
+  const snaps = overall ? [...prior.filter((s) => s.date !== today), { date: today, overall }] : prior;
+  return { yellow: statusRun(snaps, today, "YELLOW", cal), red: statusRun(snaps, today, "RED", cal) };
+}
+
+export async function loadData(db: Db, ids: string[]): Promise<Map<string, ProjectData>> {
   const out = new Map<string, ProjectData>(ids.map((id) => [id, { milestones: [], items: [], participants: [] }]));
   if (!ids.length) return out;
   const [ms, items, parts] = await Promise.all([
@@ -275,7 +294,19 @@ export async function getProgramIndicators(actor: Actor, projectId: string): Pro
   const [row, data] = await Promise.all([prisma.trainingProject.findUniqueOrThrow({ where: { id: projectId } }), loadData(prisma, [projectId])]);
   const env = await buildEnv(prisma, loaded.config);
   const density = await densityDays(prisma, env, env.today, 31, projectId);
-  return { ...compute(env, toProgramRow(row), data.get(projectId)!, density, access.module.caps.viewAll), configVersion: loaded.version, configDamaged: loaded.damaged };
+  const dto = compute(env, toProgramRow(row), data.get(projectId)!, density, access.module.caps.viewAll);
+  const prior = (await loadSnapshots(prisma, [projectId], env.today)).get(projectId)!;
+  return { ...dto, runs: dto.applied ? { ...runsOf(prior, env.today, dto.overall, env.cal), yellowStreakDays: loaded.config.escalation.yellowStreakDays } : null, configVersion: loaded.version, configDamaged: loaded.damaged };
+}
+
+/** Untuk pekerja harian (tanpa pelaku): indikator semua program Persiapan/Berjalan yang templatenya sudah diterapkan. Hanya dipanggil dari service. */
+export async function computeActivePrograms(db: Db = prisma): Promise<{ env: Env; loaded: Awaited<ReturnType<typeof loadConfig>>; cards: ProgramIndicatorDto[] }> {
+  const loaded = await loadConfig(db);
+  const rows = await db.trainingProject.findMany({ where: { status: { in: ["PREPARATION", "RUNNING"] }, indicatorsAppliedAt: { not: null } }, orderBy: { code: "asc" }, take: 500 });
+  const data = await loadData(db, rows.map((r) => r.id));
+  const env = await buildEnv(db, loaded.config);
+  const density = await densityDays(db, env, env.today, 31);
+  return { env, loaded, cards: rows.map((r) => compute(env, toProgramRow(r), data.get(r.id)!, density, true)) };
 }
 
 const ORDER: Record<Color, number> = { RED: 0, YELLOW: 1, GREEN: 2 };

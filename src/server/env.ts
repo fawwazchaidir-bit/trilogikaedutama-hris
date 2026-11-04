@@ -51,6 +51,8 @@ const schema = z.object({
   RETENTION_WORKER: bool.default(true),
   /** Jalankan pengingat kontrak kerja (notifikasi ke pimpinan H-3 bulan, dst.) di dalam proses aplikasi (default true). Matikan bila memakai pemicu eksternal /api/internal/contract-reminders. */
   CONTRACT_REMINDER_WORKER: bool.default(true),
+  /** Jalankan pekerja harian Training & Operations (snapshot status, eskalasi, pengingat tenggat H-1/hari-H) di dalam proses aplikasi (default true; hanya bila modul menyala). Matikan bila memakai pemicu eksternal /api/internal/training-daily. */
+  TRAINING_WORKER: bool.default(true),
   /** Masa berlaku tautan "lupa password" (menit). */
   PASSWORD_RESET_MINUTES: int(30, 5, 1440),
   /**

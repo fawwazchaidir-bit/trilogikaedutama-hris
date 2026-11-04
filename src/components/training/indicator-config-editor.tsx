@@ -252,6 +252,36 @@ export function IndicatorConfigEditor({ initial }: { initial: IndicatorConfigDto
           <Button size="sm" onClick={() => edit((c) => { c.hourTable.push({ roleKey: c.roles[0]!.key, task: "Tugas baru", tracks: ["REGULAR", "PARTNER"], fixed: { REGULAR: 0, PARTNER: 0 }, perParticipant: 0, perClassDay: 0, modes: [], start: { anchor: "H", days: -7 }, end: { anchor: "H", days: 0 } }); })}><Plus className="size-4" />Tambah baris</Button>
         </Section>
 
+        <Section title="Eskalasi & pengingat otomatis" desc="Pesan otomatis (notifikasi dalam aplikasi; email/WhatsApp hanya bila dikonfigurasi dan dipilih pengguna) menurut dokumen §5.2. Penerima ditentukan lewat JABATAN → pemegang jabatan. Garis atasan di bawah adalah USULAN dari bagan organisasi — sesuaikan. Tanpa pemegang/atasan yang dapat dijangkau, pesan jatuh ke Direktur (Super Admin) agar tidak hilang.">
+          <label className="flex items-start gap-2 text-sm"><input className="mt-0.5" type="checkbox" checked={cfg.escalation.enabled} onChange={(e) => edit((c) => { c.escalation.enabled = e.target.checked; })} /><span>Kirim eskalasi otomatis (Kuning, Kuning berturut-turut, Merah, Merah H-7…H-1, milestone terlambat, beban berlebih)</span></label>
+          <div className="grid gap-4 sm:grid-cols-3">
+            <Num label="Kuning berturut-turut dieskalasi setelah (hari kerja)" step="1" value={cfg.escalation.yellowStreakDays} onChange={(n) => edit((c) => { c.escalation.yellowStreakDays = Math.min(10, Math.max(2, Math.trunc(n))); })} hint="Dokumen: 2. Akhir pekan dilewati." />
+            <Num label="Merah dianggap mendesak pada H-n sampai H-1" step="1" value={cfg.escalation.redLateWindowDays} onChange={(n) => edit((c) => { c.escalation.redLateWindowDays = Math.min(30, Math.max(1, Math.trunc(n))); })} hint="Dokumen: 7 (Go/No-Go atau jadwal ulang)." />
+          </div>
+          <fieldset className="text-sm"><legend className="mb-1 font-medium text-ink">Pengingat tenggat</legend>
+            <div className="flex flex-wrap gap-4">
+              <label className="inline-flex items-center gap-1.5"><input type="checkbox" checked={cfg.escalation.reminders.dayBefore} onChange={(e) => edit((c) => { c.escalation.reminders.dayBefore = e.target.checked; })} />H-1 (besok jatuh tempo)</label>
+              <label className="inline-flex items-center gap-1.5"><input type="checkbox" checked={cfg.escalation.reminders.dayOf} onChange={(e) => edit((c) => { c.escalation.reminders.dayOf = e.target.checked; })} />Hari-H (jatuh tempo hari ini)</label>
+              <label className="inline-flex items-center gap-1.5"><input type="checkbox" checked={cfg.escalation.reminders.programStart} onChange={(e) => edit((c) => { c.escalation.reminders.programStart = e.target.checked; })} />Pelaksanaan program dimulai (H-1 & H)</label>
+            </div>
+            <p className="mt-1 text-xs text-muted">Berlaku untuk tugas, milestone, dan item kesiapan kepada penanggung jawabnya.</p></fieldset>
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            {([["redExecutionRole", "Merah — urusan pelaksanaan"], ["redMarketingRole", "Merah — urusan pemasaran/klien"], ["redAlwaysRole", "Merah — selalu diberi tahu"], ["overloadRole", "Beban berlebih 2 minggu"]] as const).map(([k, label]) => (
+              <label key={k} className="text-sm"><span className="mb-1 block font-medium text-ink">{label}</span>
+                <select aria-label={label} className={cell} value={cfg.escalation[k]} onChange={(e) => edit((c) => { c.escalation[k] = e.target.value; })}>{roleOptions.map((r) => <option key={r.key} value={r.key}>{r.label}</option>)}</select></label>
+            ))}
+          </div>
+          <fieldset className="text-sm"><legend className="mb-1 font-medium text-ink">Jabatan yang dianggap pemilik urusan pemasaran/klien</legend>
+            <div className="flex flex-wrap gap-3">{cfg.roles.map((r) => <label key={r.key} className="inline-flex items-center gap-1.5"><input type="checkbox" checked={cfg.escalation.marketingRoleKeys.includes(r.key)} onChange={(e) => edit((c) => { c.escalation.marketingRoleKeys = e.target.checked ? [...new Set([...c.escalation.marketingRoleKeys, r.key])] : c.escalation.marketingRoleKeys.filter((x) => x !== r.key); })} />{r.label}</label>)}</div></fieldset>
+          <div className="overflow-x-auto rounded-md border border-line"><table className="w-full min-w-[520px] text-sm">
+            <thead className="bg-stone-50 text-left text-xs text-muted"><tr><th className="px-3 py-2 font-medium">Jabatan</th><th className="px-3 py-2 font-medium">Atasan langsung (penerima “Kuning berturut-turut” & “milestone terlambat”)</th></tr></thead>
+            <tbody className="divide-y divide-line">{cfg.roles.map((r) => (
+              <tr key={r.key}><td className="px-3 py-1.5">{r.label}</td>
+                <td className="px-3 py-1.5"><select aria-label={`Atasan ${r.label}`} className={cell} value={cfg.escalation.reportsTo[r.key] ?? ""} onChange={(e) => edit((c) => { c.escalation.reportsTo[r.key] = e.target.value || null; })}>
+                  <option value="">— Tidak ada (Direktur) —</option>{roleOptions.filter((o) => o.key !== r.key).map((o) => <option key={o.key} value={o.key}>{o.label}</option>)}</select></td></tr>))}</tbody>
+          </table></div>
+        </Section>
+
         <Section title="Aturan lain">
           <label className="flex items-start gap-2 text-sm"><input className="mt-0.5" type="checkbox" checked={cfg.requireEvidence} onChange={(e) => edit((c) => { c.requireEvidence = e.target.checked; })} /><span>Milestone tidak dianggap selesai tanpa bukti<span className="block text-xs text-muted">Tautan atau rujukan dokumen (Berita Acara, Form Serah Terima, Checklist Kesiapan Kelas, dst.).</span></span></label>
           <label className="flex items-start gap-2 text-sm"><input className="mt-0.5" type="checkbox" checked={cfg.autoApplyOnCreate} onChange={(e) => edit((c) => { c.autoApplyOnCreate = e.target.checked; })} /><span>Terapkan template pemantauan otomatis saat program dibuat<span className="block text-xs text-muted">Bila dimatikan, tombol “Terapkan template” tersedia di tab Pemantauan setiap program.</span></span></label>

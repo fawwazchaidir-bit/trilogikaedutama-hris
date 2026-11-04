@@ -1422,6 +1422,8 @@ model TrainingProject {
   milestones      TrainingMilestone[]
   readinessItems  TrainingReadinessItem[]
   workloadTasks   TrainingWorkloadTask[]
+  statusSnapshots TrainingStatusSnapshot[]
+  recoveryNotes   TrainingRecoveryNote[]
 
   @@unique([seqYear, seqNo])
   @@index([status, startDate])
@@ -1870,4 +1872,64 @@ model TrainingIndicatorConfigVersion {
   createdAt   DateTime @default(now())
 
   @@map("training_indicator_config_versions")
+}
+
+// ───────────── Otomasi pemantauan: snapshot harian, pengingat, catatan pemulihan ─────────────
+
+enum TrainingRecoveryKind {
+  YELLOW_STREAK
+  RED
+  OVERDUE
+  OVERLOAD
+  OTHER
+}
+
+/// Status program per hari (satu baris per program per tanggal WIB; pekerja harian menimpa baris hari yang sama). Dasar aturan "Kuning 2 hari berturut-turut".
+model TrainingStatusSnapshot {
+  id         String   @id @default(uuid()) @db.Uuid
+  projectId  String   @db.Uuid
+  date       DateTime @db.Date
+  /// GREEN | YELLOW | RED (dijaga CHECK).
+  overall    String
+  timeliness String?
+  readiness  String?
+  load       String?
+  triggers   String[]
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  project TrainingProject @relation(fields: [projectId], references: [id], onDelete: Restrict)
+
+  @@unique([projectId, date])
+  @@index([date])
+  @@map("training_status_snapshots")
+}
+
+/// Catatan pengiriman pengingat/eskalasi agar tidak terkirim dua kali walau pekerja berjalan berulang (kunci unik per penerima + peristiwa).
+model TrainingReminderLog {
+  id        BigInt   @id @default(autoincrement())
+  dedupeKey String   @unique
+  kind      String
+  projectId String?  @db.Uuid
+  createdAt DateTime @default(now())
+
+  @@index([kind, createdAt])
+  @@map("training_reminder_log")
+}
+
+/// Rencana/catatan pemulihan program (Kuning 2 hari berturut-turut, Merah, milestone terlambat, beban berlebih). Append-only.
+model TrainingRecoveryNote {
+  id          String               @id @default(uuid()) @db.Uuid
+  projectId   String               @db.Uuid
+  kind        TrainingRecoveryKind
+  body        String
+  /// Tanggal selesai baru yang dijanjikan (informasi; tenggat milestone tetap dihitung dari rumus).
+  newDate     DateTime?            @db.Date
+  createdById String               @db.Uuid
+  createdAt   DateTime             @default(now())
+
+  project TrainingProject @relation(fields: [projectId], references: [id], onDelete: Restrict)
+
+  @@index([projectId, createdAt])
+  @@map("training_recovery_notes")
 }
