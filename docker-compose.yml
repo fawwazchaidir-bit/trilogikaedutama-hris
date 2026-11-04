@@ -55,5 +55,7 @@ services:
       WHATSAPP_PHONE_NUMBER_ID: ${WHATSAPP_PHONE_NUMBER_ID:-}
       WHATSAPP_TEMPLATE_NAME: ${WHATSAPP_TEMPLATE_NAME:-}
       CRON_SECRET: ${CRON_SECRET:-}
+      # Modul Training & Operations: DEFAULT MATI. Nyalakan bertahap (staging → UAT → production); lihat docs/TRAINING-OPS.md.
+      TRAINING_MODULE_ENABLED: ${TRAINING_MODULE_ENABLED:-false}
 volumes:
   pgdata:

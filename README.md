@@ -1,10 +1,12 @@
-# Trilogika HRIS — Internal Human Resources Information System Trilogika Edutama
+# Trilogika Internal Portal — HRIS & Training Operations Trilogika Edutama
 
 Aplikasi web internal untuk **data karyawan, absensi, rekap otomatis, penggajian, dan slip gaji (PDF)** — Bahasa Indonesia,
 responsif (komputer & ponsel), tampilan mengikuti aplikasi invoice Trilogika agar familier.
 
-> **Bukan mockup.** Setiap tombol terhubung ke database PostgreSQL dan diuji: 618 tes unit/integrasi (terhadap PostgreSQL sungguhan)
-> dan 92 tes E2E di browser (login → absensi → pengajuan → persetujuan → penggajian → slip PDF → pembatalan/revisi → 2FA → lembur → laporan → surat tugas & uang harian → dokumen kontrak → kebijakan cuti).
+**Satu portal, satu akun:** HRIS (di bawah) + modul **Training & Operations** untuk mengelola proyek/pelaksanaan pelatihan dari persiapan sampai penutupan — lihat [bagian modul](#trilogika-internal-portal--training--operations) dan [docs/TRAINING-OPS.md](docs/TRAINING-OPS.md). Modul baru **mati secara bawaan** (`TRAINING_MODULE_ENABLED`).
+
+> **Bukan mockup.** Setiap tombol terhubung ke database PostgreSQL dan diuji: 713 tes unit/integrasi (terhadap PostgreSQL sungguhan; 2 dilewati)
+> dan 100 tes E2E di browser (login → absensi → pengajuan → persetujuan → penggajian → slip PDF → pembatalan/revisi → 2FA → lembur → laporan → surat tugas & uang harian → dokumen kontrak → kebijakan cuti → proyek pelatihan).
 > Data demo bersifat fiktif. **Baca [docs/KEPUTUSAN-BISNIS.md](docs/KEPUTUSAN-BISNIS.md) sebelum dipakai operasional.**
 
 ## Peran
@@ -57,6 +59,26 @@ responsif (komputer & ponsel), tampilan mengikuti aplikasi invoice Trilogika aga
 
 Batasan yang jujur (lokasi palsu tidak 100% dapat dicegah di web, integrasi WhatsApp/email belum diuji ke penyedia sungguhan, tabel pajak wajib diverifikasi) ada di [docs/KEPUTUSAN-BISNIS.md](docs/KEPUTUSAN-BISNIS.md).
 
+## Trilogika Internal Portal — Training & Operations
+
+Modul untuk satu siklus pelatihan: **program → proyek/batch → tim → tugas & checklist → jadwal → peserta → instruktur/asesor → dokumen → penutupan → laporan**.
+Memakai akun, karyawan, audit, dan penyimpanan berkas HRIS yang sudah ada; hanya menambah tabel `training_*` (tidak mengubah tabel HRIS).
+
+| Area | Isi |
+|---|---|
+| **Akses** | Role HRIS **tidak diubah**. Di atasnya: *level modul* (Pemantau · Admin Program · Manajer Program, diatur Super Admin) + *peran proyek* (PIC · Admin Program · PJ Peserta · PJ Materi · PJ Dokumentasi · Staf). Admin HRIS **tidak otomatis** punya akses. Proyek di luar lingkup menjawab 404. |
+| **Dashboard** | Per peran (Staf, Admin Program, Manajer Program, Direktur), dihitung dari data nyata dengan definisi indikator tertulis. Tidak ada persentase yang belum punya rumus (beban tim, kesiapan, ketepatan waktu). |
+| **Proyek** | Kode `TRN-2026-0001` (aman saat dibuat bersamaan), alur Draf → Persiapan → Berjalan → Selesai/Dibatalkan, cari/filter/urut, penanda "perlu perhatian", detail 9 tab, riwayat aktivitas. |
+| **Tugas & checklist** | Prioritas, tenggat, komentar, "Tugas Saya"; tugas "perlu diperiksa" tidak dapat disetujui penanggung jawabnya sendiri. Template checklist **disalin** ke proyek; item wajib menentukan penutupan. |
+| **Jadwal** | Daftar & kalender bulanan WIB; peringatan bentrok ruangan/instruktur lintas proyek. |
+| **Peserta & instruktur** | Data operasional lokal (input manual); kontak hanya untuk yang berwenang; instruktur internal ditautkan ke karyawan, eksternal tanpa akun. |
+| **Dokumen** | Privat (PDF/PNG/JPEG), izin diperiksa pada setiap unduhan. |
+| **Penutupan** | Checklist wajib harus selesai; pengecualian hanya Manajer Program dengan alasan tertulis; sesudahnya proyek baca-saja (dapat dibuka kembali). |
+| **Referensi** | Surat tugas HRIS ditautkan sebagai referensi (tabel milik modul; surat tugas tetap beku). Referensi Website/HaloAI/Sistem Keuangan dicatat **manual — belum ada integrasi**. |
+
+Aktifkan di development: set `TRAINING_MODULE_ENABLED="true"` di `.env`, `npm run db:migrate`, `npm run db:seed:dev`, `npm run db:seed:training-demo`.
+Peran & keputusan untuk pemilik sistem: [docs/TRAINING-PERAN.md](docs/TRAINING-PERAN.md). Audit, arsitektur, staging/UAT, deployment, rollback: [docs/TRAINING-OPS.md](docs/TRAINING-OPS.md).
+
 ## Teknologi
 
 Next.js 16 (App Router) · React 19 · TypeScript (strict) · Tailwind CSS 4 · PostgreSQL 16 · Prisma 6 · `@react-pdf/renderer` · ExcelJS · Zod · Vitest · Playwright.
@@ -90,7 +112,7 @@ Seed demo **menolak** berjalan bila `NODE_ENV=production`, host database bukan l
 | `npm run lint` · `typecheck` | ESLint · TypeScript strict |
 | `npm test` | Unit + integrasi (PostgreSQL `TEST_DATABASE_URL`; tabelnya dikosongkan) |
 | `npm run test:e2e` | E2E Playwright (build produksi + DB test; di sandbox: `PW_CHROMIUM_PATH=/opt/pw-browsers/chromium`) |
-| `npm run db:migrate` · `db:seed` · `db:seed:dev` | Migrasi · seed produksi · seed demo |
+| `npm run db:migrate` · `db:seed` · `db:seed:dev` · `db:seed:training-demo` | Migrasi · seed produksi · seed demo HRIS · seed demo Training & Operations (hanya dev/staging lokal) |
 | `npm run db:backup` · `db:restore` · `db:verify` | Cadangan · pemulihan · verifikasi hasil pemulihan |
 | `npm run user:create` | Buat akun dari terminal (pemulihan akses) |
 | `npm run typecheck` | Pemeriksaan tipe (strict) |
@@ -103,4 +125,6 @@ Seed demo **menolak** berjalan bila `NODE_ENV=production`, host database bukan l
 - [SECURITY](docs/SECURITY.md) — kontrol keamanan & privasi
 - [AUDIT](docs/AUDIT.md) — hasil audit pra-PR (temuan & perbaikan, uji silang waktu/zona, sapuan rute API, uji antar sistem, latihan pemasangan) dan **batasannya**
 - [DEPLOYMENT](docs/DEPLOYMENT.md) — konfigurasi, Docker, cadangan/pemulihan
-- [API](docs/API.md) — daftar endpoint
+- [API](docs/API.md) — daftar endpoint (termasuk `/api/training/*`)
+- [TRAINING-OPS](docs/TRAINING-OPS.md) — modul Training & Operations: audit, arsitektur, model data, feature flag, staging/UAT, deployment, rollback, rancangan integrasi
+- [TRAINING-PERAN](docs/TRAINING-PERAN.md) — peran & hak akses modul, usulan pemetaan dari bagan organisasi, keputusan untuk pemilik sistem

@@ -32,3 +32,18 @@
 - Kehilangan `DATA_ENCRYPTION_KEY` membuat nomor rekening **dan rahasia 2FA** tak terbaca (pengguna ber-2FA perlu direset oleh Super Admin).
 - Dependensi: `npm audit` melaporkan kerentanan pada rantai `prisma` CLI (`deepmerge-ts`) dan `exceljs`→`archiver`→`glob`/`minimatch` — alat build / pembuat ekspor, bukan jalur permintaan yang menerima masukan pengguna. Paket baru (`nodemailer`, `qrcode`) tidak menambah temuan.
 - Pindai dan pembaruan dependensi rutin tetap diperlukan; pertimbangkan uji penetrasi independen sebelum menyimpan data nyata.
+
+## Training & Operations
+
+Rinci: [TRAINING-OPS.md](TRAINING-OPS.md) §2–5 dan [TRAINING-PERAN.md](TRAINING-PERAN.md).
+
+- **Izin hanya dari level modul + peran proyek**; role HRIS tidak diubah dan modul **tidak memberi akses** ke slip gaji, presensi, cuti, atau data HR lain. Admin/HR tanpa level/keanggotaan tidak melihat modul (404).
+- **Anti-IDOR:** setiap service memuat proyek lewat satu gerbang (`loadProjectAccess`); tanpa hak lihat → **404**. ID turunan (anggota, item, jadwal, peserta, dokumen, tugas) selalu diverifikasi terhadap proyeknya. ID bukan-UUID → 404, bukan 500.
+- **Server menegakkan semuanya:** halaman, API, unduhan berkas. Menyembunyikan tombol/menu hanya kosmetik.
+- **Data pribadi dibatasi:** kontak peserta/instruktur dan dokumen peserta hanya untuk yang berwenang; dashboard & daftar tidak memuat kontak; audit tidak mencatat kontak atau isi dokumen.
+- **Dokumen privat:** disimpan di `stored_files`, tanpa URL publik; tipe diverifikasi dari isi berkas (PDF/PNG/JPEG); `attachment` + `nosniff` + CSP sandbox + `no-store`; izin diperiksa pada setiap unduhan dan **sebelum** badan unggahan dibaca.
+- **Pemisahan tugas:** pemeriksa hasil tugas ≠ penanggung jawabnya; penutupan/pembatalan/PIC hanya Manajer Program; pengecualian penutupan wajib beralasan dan tercatat.
+- **Audit:** semua perubahan penting (`training.*`) di `audit_logs` (append-only) dengan entitas `TrainingProject`; trigger menjaga alur status, melarang penghapusan proyek/dokumen, dan membuat komentar tugas append-only.
+- **Surat tugas/uang harian:** hanya referensi lewat tabel milik modul; menautkan butuh izin HRIS surat tugas; nominal tidak ditampilkan; modul tidak membuat/menyetujui uang harian.
+- **Flag keselamatan:** `TRAINING_MODULE_ENABLED` bawaan `false`; saat mati, menu hilang dan seluruh halaman/API menjawab 404.
+- **Batasan jujur:** tidak ada pemindai malware pada dokumen; berkas disimpan di PostgreSQL; integrasi ke Website/HaloAI/Sistem Keuangan **belum ada** (referensi dicatat manual).

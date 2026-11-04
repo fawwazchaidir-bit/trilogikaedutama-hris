@@ -8,7 +8,7 @@ import { parseInput } from "../../validate";
 import { dateToIso, isoToDate } from "../../json";
 import { addDays } from "@/lib/time";
 import { isOpenTask, PROJECT_STATUSES, type ActivityKind, type DocCategory, type ProjectStatus, PROJECT_STATUS_LABEL, ACTIVITY_KIND_LABEL } from "@/lib/training/types";
-import { ATTENTION_LABEL, ATTENTION_WINDOW_DAYS, closureReadiness, type ChecklistProgress } from "@/lib/training/indicators";
+import { ATTENTION_LABEL, ATTENTION_WINDOW_DAYS, closureReadiness, type AttentionCode, type ChecklistProgress } from "@/lib/training/indicators";
 import { isoDate, uuid } from "@/lib/validation/common";
 import type { Paged } from "@/lib/types";
 import { accessibleProjectWhere, loadProjectAccess, requireModule } from "./access";
@@ -27,7 +27,7 @@ export interface DashboardDto {
   /** Semua angka dihitung langsung dari data proyek yang boleh dilihat pelaku (lihat definisi di docs/TRAINING-OPS.md). */
   counts: {
     projectsInScope: number; activeProjects: number; completedProjects: number;
-    overdueTasks: number; dueTodayTasks: number; dueSoonTasks: number;
+    openTasks: number; overdueTasks: number; dueTodayTasks: number; dueSoonTasks: number;
     requiredChecklistProjects: number; openChecklistItems: number; activeWithoutDocuments: number; attentionProjects: number;
   };
   statusDistribution: { status: ProjectStatus; count: number }[];
@@ -54,14 +54,17 @@ export async function getTrainingDashboard(actor: Actor): Promise<DashboardDto> 
   const scope = accessibleProjectWhere(actor, mod);
   const inScope: Prisma.TrainingProjectWhereInput = scope;
   const activeScope: Prisma.TrainingProjectWhereInput = { AND: [scope, { status: { in: ["PREPARATION", "RUNNING"] } }] };
-  const taskScope = (extra: Prisma.TrainingTaskWhereInput = {}): Prisma.TrainingTaskWhereInput => ({ project: inScope, ...extra });
+  // Dashboard Staf menghitung tugas & checklist MILIKNYA sendiri (bukan seluruh pekerjaan di proyek yang ia ikuti).
+  const own = variant === "staff" ? { assigneeId: actor.employeeId ?? "00000000-0000-0000-0000-000000000000" } : {};
+  const taskScope = (extra: Prisma.TrainingTaskWhereInput = {}): Prisma.TrainingTaskWhereInput => ({ project: inScope, ...own, ...extra });
 
-  const [byStatus, overdue, dueToday, dueSoon, openChecklist, activeNoDocs, projectsPage, attentionPage, myTasks, myChecklist, upcoming] = await Promise.all([
+  const [byStatus, openTasks, overdue, dueToday, dueSoon, openChecklist, activeNoDocs, projectsPage, attentionPage, myTasks, myChecklist, upcoming] = await Promise.all([
     prisma.trainingProject.groupBy({ by: ["status"], where: inScope, _count: { _all: true } }),
+    prisma.trainingTask.count({ where: taskScope({ status: OPEN }) }),
     prisma.trainingTask.count({ where: taskScope({ status: OPEN, dueDate: { lt: td } }) }),
     prisma.trainingTask.count({ where: taskScope({ status: OPEN, dueDate: td }) }),
     prisma.trainingTask.count({ where: taskScope({ status: OPEN, dueDate: { gte: td, lte: isoToDate(addDays(t, 3)) } }) }),
-    prisma.trainingProjectChecklistItem.count({ where: { isDone: false, project: activeScope } }),
+    prisma.trainingProjectChecklistItem.count({ where: { isDone: false, ...(variant === "staff" ? { assigneeId: actor.employeeId ?? "00000000-0000-0000-0000-000000000000" } : {}), project: activeScope } }),
     prisma.trainingProject.count({ where: { AND: [activeScope, { documents: { none: { deletedAt: null } } }] } }),
     listProjects(actor, { active: "1", sort: "start_asc", pageSize: 8 }),
     listProjects(actor, { attention: "1", sort: "start_asc", pageSize: 8 }),
@@ -122,7 +125,7 @@ export async function getTrainingDashboard(actor: Actor): Promise<DashboardDto> 
     variant, today: t,
     counts: {
       projectsInScope: total, activeProjects: (statusMap.get("PREPARATION") ?? 0) + (statusMap.get("RUNNING") ?? 0), completedProjects: statusMap.get("COMPLETED") ?? 0,
-      overdueTasks: overdue, dueTodayTasks: dueToday, dueSoonTasks: dueSoon, requiredChecklistProjects: reqSet.size, openChecklistItems: openChecklist,
+      openTasks, overdueTasks: overdue, dueTodayTasks: dueToday, dueSoonTasks: dueSoon, requiredChecklistProjects: reqSet.size, openChecklistItems: openChecklist,
       activeWithoutDocuments: activeNoDocs, attentionProjects: attentionPage.total,
     },
     statusDistribution, byMonth, projects: projectsPage.items, attention: attentionPage.items,
@@ -199,7 +202,7 @@ const reportQuerySchema = z.object({ from: isoDate.optional(), to: isoDate.optio
 export interface ReportRowDto {
   id: string; code: string; name: string; programName: string | null; kind: ActivityKind; status: ProjectStatus;
   startDate: string | null; endDate: string | null; picName: string | null;
-  tasksTotal: number; tasksDone: number; tasksOverdue: number; checklist: ChecklistProgress; participants: number; documents: number; attention: string[]; closureSummary: string | null;
+  tasksTotal: number; tasksDone: number; tasksOverdue: number; checklist: ChecklistProgress; participants: number; documents: number; attention: AttentionCode[]; closureSummary: string | null;
 }
 
 export async function projectReportRows(actor: Actor, raw: unknown = {}): Promise<ReportRowDto[]> {
@@ -227,7 +230,7 @@ export async function projectReportRows(actor: Actor, raw: unknown = {}): Promis
   return list.items.map((p) => ({
     id: p.id, code: p.code, name: p.name, programName: p.programName, kind: p.kind, status: p.status, startDate: p.startDate, endDate: p.endDate, picName: p.picName,
     tasksTotal: tasksBy.get(p.id)?.total ?? 0, tasksDone: tasksBy.get(p.id)?.done ?? 0, tasksOverdue: p.overdueTasks, checklist: p.checklist,
-    participants: pm.get(p.id) ?? 0, documents: dm.get(p.id) ?? 0, attention: p.attention.map((a) => ATTENTION_LABEL[a]), closureSummary: cm.get(p.id) ?? null,
+    participants: pm.get(p.id) ?? 0, documents: dm.get(p.id) ?? 0, attention: p.attention, closureSummary: cm.get(p.id) ?? null,
   }));
 }
 
@@ -249,7 +252,7 @@ export async function projectReportTable(actor: Actor, raw: unknown = {}): Promi
     rows: rows.map((r) => ({
       code: r.code, name: r.name, program: r.programName ?? "", kind: ACTIVITY_KIND_LABEL[r.kind], status: PROJECT_STATUS_LABEL[r.status], start: r.startDate, end: r.endDate, pic: r.picName ?? "",
       tasks: `${r.tasksDone}/${r.tasksTotal}`, overdue: r.tasksOverdue, checklist: r.checklist.percent === null ? "Belum tersedia" : `${r.checklist.done}/${r.checklist.total} (${r.checklist.percent}%)`,
-      participants: r.participants, documents: r.documents, attention: r.attention.join("; "),
+      participants: r.participants, documents: r.documents, attention: r.attention.map((a) => ATTENTION_LABEL[a]).join("; "),
     })),
     totals: null,
   };

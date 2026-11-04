@@ -465,11 +465,24 @@ export async function endMember(actor: Actor, projectId: string, memberId: strin
     const m = await tx.trainingProjectMember.findFirst({ where: { id: memberId, projectId, endedAt: null }, include: { employee: { select: { fullName: true } } } });
     if (!m) throw Errors.notFound("Anggota");
     requireTeamRights(access, [m.role]);
-    await tx.trainingProjectMember.update({ where: { id: memberId }, data: { endedAt: new Date(), endedById: actor.userId } });
+    // `startedAt` diisi jam DATABASE (now()), `endedAt` jam APLIKASI: bila jam aplikasi sedikit tertinggal, CHECK endedAt >= startedAt akan
+    // menolak "tambah lalu segera akhiri". Jadi endedAt tidak boleh lebih awal dari startedAt yang dibaca dari DB.
+    const endedAt = new Date(Math.max(Date.now(), m.startedAt.getTime()));
+    await tx.trainingProjectMember.update({ where: { id: memberId }, data: { endedAt, endedById: actor.userId } });
     const openTasks = await tx.trainingTask.count({ where: { projectId, assigneeId: m.employeeId, status: { in: ["TODO", "IN_PROGRESS", "IN_REVIEW"] } } });
     await auditProject(tx, actor, projectId, { action: "training.member.end", summary: `Penugasan ${m.employee.fullName} di ${access.project.code} diakhiri${openTasks ? ` (masih memegang ${openTasks} tugas terbuka)` : ""}`, before: { role: m.role }, after: { ended: true } });
     return { openTasks };
   });
+}
+
+/** PIC (Project Manager aktif) pada proyek yang boleh dilihat pelaku — untuk filter daftar proyek. Hanya nama & id. */
+export async function listPicOptions(actor: Actor): Promise<{ id: string; name: string }[]> {
+  const mod = await requireModule(actor);
+  const rows = await prisma.trainingProjectMember.findMany({
+    where: { role: "PROJECT_MANAGER", endedAt: null, project: accessibleProjectWhere(actor, mod) },
+    select: { employee: { select: { id: true, fullName: true } } }, distinct: ["employeeId"], orderBy: { employee: { fullName: "asc" } },
+  });
+  return rows.map((r) => ({ id: r.employee.id, name: r.employee.fullName }));
 }
 
 // ═════════════════════════════ Opsi formulir ═════════════════════════════

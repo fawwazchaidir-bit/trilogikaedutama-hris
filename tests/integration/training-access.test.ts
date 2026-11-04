@@ -55,6 +55,18 @@ describe("gerbang modul: siapa yang boleh masuk", () => {
     expect(await fail(createProject(fx.viewer, { name: "Baru" }))).toMatchObject(FORBIDDEN);
   });
 
+  it("Pemantau & Super Admin tidak dapat mengubah tugas atau berkomentar (komentar = perubahan data); anggota proyek dapat", async () => {
+    const id = await mkProject(fx.mgr);
+    await addTeam(fx.mgr, id, [[fx.empIds[0], "PROJECT_MANAGER"], [fx.empIds[1], "STAFF"]]);
+    const t = await createTask(fx.emp1, id, { title: "Tugas pemantauan", assigneeId: fx.empIds[1] });
+    expect(await fail(addComment(fx.viewer, t.id, { body: "Saya pantau" }))).toMatchObject(FORBIDDEN);
+    expect(await fail(addComment(fx.superAdmin, t.id, { body: "Dari direktur" }))).toMatchObject(FORBIDDEN);
+    expect(await fail(changeTaskStatus(fx.viewer, t.id, { status: "DONE" }))).toMatchObject(FORBIDDEN);
+    await addComment(fx.emp2, t.id, { body: "Anggota boleh" });
+    await addComment(fx.mgr, t.id, { body: "Manajer boleh" });
+    expect(await prisma.trainingTaskComment.count()).toBe(2);
+  });
+
   it("level modul hanya dapat diatur Super Admin; tercatat di audit dan pemilik akun diberi tahu", async () => {
     expect(await fail(setAccessLevel(fx.mgr, { userId: fx.loner.userId, level: "MANAGER" }))).toMatchObject(FORBIDDEN);
     expect(await fail(setAccessLevel(fx.hr, { userId: fx.loner.userId, level: "MANAGER" }))).toMatchObject(FORBIDDEN);

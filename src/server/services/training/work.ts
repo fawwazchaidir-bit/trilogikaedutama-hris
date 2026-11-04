@@ -256,6 +256,8 @@ export async function listComments(actor: Actor, taskId: string): Promise<TaskCo
 export async function addComment(actor: Actor, taskId: string, raw: unknown): Promise<void> {
   const { task, access } = await loadTask(actor, taskId);
   assertEditable(access.project);
+  // Komentar adalah perubahan data: hanya ANGGOTA proyek (atau pengelola tugas) — Pemantau/Super Admin hanya melihat.
+  if (!access.memberRole && !access.abilities.has("manage_tasks")) throw Errors.forbidden("Hanya anggota proyek yang dapat berkomentar pada tugas.");
   const { body } = parseInput(taskCommentSchema, raw);
   await transaction(async (tx) => {
     await tx.trainingTaskComment.create({ data: { taskId, authorId: actor.userId, body } });

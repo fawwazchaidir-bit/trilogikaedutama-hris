@@ -21,6 +21,7 @@
 | `DELIVERY_WORKER` | tidak | `true` (default): pekerja pengiriman antrean di dalam aplikasi, tiap 30 detik. `false` bila memakai pemicu eksternal. |
 | `CRON_SECRET` | tidak | ≥ 16 karakter; mengaktifkan `POST /api/internal/deliveries` (Bearer) untuk cron/systemd timer. |
 | `PASSWORD_RESET_MINUTES` | tidak | Masa berlaku tautan lupa password; default 30. |
+| `TRAINING_MODULE_ENABLED` | tidak | **Bawaan `false`.** `true` menyalakan modul Training & Operations (menu, halaman, API). Di Docker diteruskan lewat `docker-compose.yml`. Aktifkan bertahap setelah migration; lihat [TRAINING-OPS.md](TRAINING-OPS.md) §7 & §10. |
 | `ADMIN_EMAIL` `ADMIN_NAME` `ADMIN_PASSWORD` | seed produksi | Super Admin pertama. Tanpa password default; seed gagal bila lemah. |
 
 Rahasia hanya dari environment — tidak ada kredensial di kode. `.env` tidak di-commit (`.gitignore`).

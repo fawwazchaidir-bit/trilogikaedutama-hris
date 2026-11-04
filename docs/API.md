@@ -25,3 +25,24 @@ Kode: 400 permintaan salah · 401 belum masuk · 403 tidak berizin · 404 tidak 
 | Mesin-ke-mesin | `POST /internal/deliveries` — `Authorization: Bearer $CRON_SECRET`; memproses antrean email/WhatsApp (404 bila `CRON_SECRET` tidak diatur) · `POST /internal/retention` — sama; menghapus foto absensi lebih tua dari masa simpan, mengembalikan `{purged, held, months, cutoff}` · `POST /internal/contract-reminders` — sama; mengirim pengingat kontrak berakhir (H-3 bulan, H-1 bulan, H-14 hari) ke pimpinan, idempoten, mengembalikan `{checked, sent, today}` |
 
 Izin tiap endpoint mengikuti matriks di `src/lib/permissions.ts`.
+
+## Training & Operations (`/api/training/*`)
+
+Modul **mati secara bawaan** (`TRAINING_MODULE_ENABLED=false`) → seluruh endpoint di bawah menjawab **404**. Proyek di luar lingkup akses pemanggil juga menjawab **404** (bukan 403). Ringkasan: [TRAINING-OPS.md](TRAINING-OPS.md), hak akses: [TRAINING-PERAN.md](TRAINING-PERAN.md).
+
+| Area | Endpoint |
+|---|---|
+| Dashboard & direktori | `GET /training/dashboard` · `GET /training/directory` (karyawan aktif, data minimal: nama, no. induk, jabatan, divisi) |
+| Akses modul (Super Admin) | `GET,POST,DELETE /training/access` (`POST {userId, level, note?}` · `DELETE {userId}`) |
+| Program | `GET,POST /training/programs` `PATCH /training/programs/:id` |
+| Proyek | `GET,POST /training/projects` (filter: `q status kind programId picId from to attention active sort page`) `GET,PATCH /training/projects/:id` `POST /training/projects/:id/{status,close,cancel,reopen}` `GET /training/projects/:id/{closure,activity}` |
+| Tim | `GET,POST /training/projects/:id/members` `PATCH,DELETE /training/projects/:id/members/:memberId` (DELETE = akhiri penugasan) |
+| Tugas | `GET,POST /training/projects/:id/tasks` `GET /training/tasks/mine?filter=` `GET,PATCH /training/tasks/:id` `POST /training/tasks/:id/status` `GET,POST /training/tasks/:id/comments` |
+| Checklist | `GET,POST /training/projects/:id/checklist` `POST /training/projects/:id/checklist/template` `PATCH,DELETE /training/checklist-items/:id` |
+| Template | `GET,POST /training/checklist-templates` `PUT /training/checklist-templates/:id` `POST /training/checklist-templates/default` |
+| Jadwal | `GET,POST /training/projects/:id/schedules` `PATCH /training/schedules/:id` `GET /training/calendar?from=&to=` (maks. 93 hari; balasan memuat `warnings` bentrok) |
+| Peserta | `GET,POST /training/projects/:id/participants` `PATCH /training/participants/:id` `GET /training/participants` (lintas proyek) |
+| Instruktur | `GET,POST /training/instructors` `PATCH /training/instructors/:id` `GET,POST /training/projects/:id/instructors` `PATCH,DELETE /training/projects/:id/instructors/:assignmentId` |
+| Dokumen | `GET,POST /training/projects/:id/documents` (`POST` multipart: `file`, `category`, `title`, `note?`; izin diperiksa **sebelum** badan dibaca) `GET /training/documents` `DELETE /training/documents/:id` · unduh via `GET /files/:id` (izin per proyek, `attachment`, `no-store`) |
+| Referensi | `GET,POST /training/projects/:id/assignments` `DELETE …/assignments/:linkId` (surat tugas, hanya referensi) · `GET /training/assignment-letters?q=` · `GET,POST /training/projects/:id/references` `DELETE …/references/:refId` (manual, bukan integrasi) |
+| Laporan | `GET /training/reports` · `GET /training/reports/export?format=csv\|xlsx\|pdf` |

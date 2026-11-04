@@ -10,7 +10,7 @@ import { resetDb } from "../helpers/db";
 import { addTeam, inDays, makeLetter, mkProject, PDF, seedTraining, TODAY, type TrainingFixtures } from "../helpers/training";
 import { formatProjectCode } from "@/lib/training/misc";
 import {
-  addMember, cancelProject, changeProjectStatus, closeProject, createProject, getProject, listMembers, listProjects, reopenProject, updateProject,
+  addMember, cancelProject, changeProjectStatus, closeProject, createProject, getProject, listProjects, reopenProject, updateProject,
 } from "@/server/services/training/projects";
 import {
   addChecklistItem, addComment, applyChecklistTemplate, changeTaskStatus, createTask, deleteChecklistItem, ensureDefaultTemplate, getTask, listChecklist,

@@ -39,6 +39,8 @@ export default defineConfig({
     env: {
       DATABASE_URL: TEST_DB, APP_URL: BASE, NODE_ENV: "production", APP_TIMEZONE: "Asia/Jakarta", TRUST_PROXY: "false",
       DATA_ENCRYPTION_KEY: process.env.DATA_ENCRYPTION_KEY ?? "",
+      // Modul Training & Operations default MATI di aplikasi; E2E menyalakannya secara eksplisit (tidak bergantung pada .env lokal).
+      TRAINING_MODULE_ENABLED: "true",
     },
   },
 });
