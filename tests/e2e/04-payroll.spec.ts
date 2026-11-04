@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { USERS, alertWith, confirmDialog, demoPayrollMonths, login } from "./helpers";
+import { USERS, alertWith, confirmDialog, demoPayrollMonths, login, menuLink } from "./helpers";
 
 test.describe.configure({ mode: "serial" });
 
@@ -59,7 +59,7 @@ test.describe("Penggajian — alur persetujuan sampai slip", () => {
     const ctx = await browser.newContext();
     const bp = await ctx.newPage();
     await login(bp, USERS.budi);
-    await bp.getByRole("link", { name: "Slip Gaji Saya" }).click();
+    await menuLink(bp, "Slip Gaji Saya").click();
     await expect(bp.locator("tbody tr")).toHaveCount(2);
     await expect(bp.locator("tbody tr").first()).toContainText(RUN);
     // Karyawan tidak dapat memakai unduh massal

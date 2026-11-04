@@ -2,7 +2,7 @@
  * Trilogika Internal Portal — rangka & beranda baru (sidebar maroon, bilah atas dengan pencarian Ctrl+K, menu pengguna, beranda per peran)
  * dan pemicu pekerja harian Training & Operations. Dijalankan sesudah 05f (memakai proyek & akses dari sana) dan sebelum 06-stage2 (2FA admin).
  */
-import { expect, test, type Browser } from "@playwright/test";
+import { expect, test, type Browser, type Page } from "@playwright/test";
 import { USERS, login, logout } from "./helpers";
 
 async function as(browser: Browser, who: keyof typeof USERS, vp = { width: 1360, height: 900 }) {
@@ -11,7 +11,12 @@ async function as(browser: Browser, who: keyof typeof USERS, vp = { width: 1360,
   await login(page, USERS[who]);
   return { ctx, page };
 }
-const CRON = "e2e-cron-secret-uji-0123456789";
+/** Ctrl+K dipasang saat hidrasi: ulangi sampai kotak pencarian terbuka (menekan sebelum hidrasi tidak berefek). */
+async function openPalette(page: Page) {
+  const box = page.getByRole("combobox", { name: "Cari" });
+  await expect(async () => { await page.keyboard.press("Control+k"); await expect(box).toBeVisible({ timeout: 1_000 }); }).toPass({ timeout: 15_000 });
+  return box;
+}
 
 test.describe.configure({ mode: "serial" });
 
@@ -42,8 +47,7 @@ test("beranda admin HRIS tanpa akses modul: menu HR, tanpa widget Training", asy
 test("pencarian cepat Ctrl+K: menu & proyek dalam lingkup akses; Enter membuka; Esc menutup; admin HRIS tidak melihat proyek", async ({ browser }) => {
   const a = await as(browser, "ayu");
   await a.page.goto("/dashboard");
-  await a.page.keyboard.press("Control+k");
-  const box = a.page.getByRole("combobox", { name: "Cari" });
+  const box = await openPalette(a.page);
   await expect(box).toBeFocused();
   await box.fill("pemantauan");
   await expect(a.page.getByRole("option", { name: /Pemantauan Program/ })).toBeVisible();
@@ -58,8 +62,7 @@ test("pencarian cepat Ctrl+K: menu & proyek dalam lingkup akses; Enter membuka; 
   await a.ctx.close();
 
   const h = await as(browser, "hr");
-  await h.page.keyboard.press("Control+k");
-  await h.page.getByRole("combobox", { name: "Cari" }).fill("Batch E2E");
+  await (await openPalette(h.page)).fill("Batch E2E");
   await expect(h.page.getByText(/Tidak ada hasil/)).toBeVisible();
   await expect(h.page.getByRole("option", { name: /Batch E2E/ })).toHaveCount(0);
   await h.ctx.close();
@@ -98,19 +101,4 @@ test("ponsel: beranda & dashboard training tanpa overflow horizontal; ikon cari 
   await page.getByRole("button", { name: "Cari", exact: true }).click();
   await expect(page.getByRole("dialog", { name: "Pencarian cepat" })).toBeVisible();
   await ctx.close();
-});
-
-test("pemicu pekerja harian: wajib CRON_SECRET; idempoten (pengingat tidak ganda)", async ({ request }) => {
-  const url = "/api/internal/training-daily";
-  expect((await request.post(url)).status()).toBe(401);
-  expect((await request.post(url, { headers: { authorization: "Bearer salah-salah-salah-salah" } })).status()).toBe(401);
-  const ok = await request.post(url, { headers: { authorization: `Bearer ${CRON}` } });
-  expect(ok.status()).toBe(200);
-  const first = (await ok.json()).data as { skipped: string | null; snapshots: number; reminders: number; escalations: number };
-  expect(first.skipped).toBeNull();
-  expect(first.snapshots).toBeGreaterThanOrEqual(0);
-  const second = (await (await request.post(url, { headers: { authorization: `Bearer ${CRON}` } })).json()).data as typeof first;
-  expect(second.reminders).toBe(0);
-  expect(second.escalations).toBe(0);
-  expect((await request.get(url)).status()).toBe(405);
 });

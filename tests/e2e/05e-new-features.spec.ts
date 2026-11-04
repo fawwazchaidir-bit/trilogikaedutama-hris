@@ -14,7 +14,7 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
-import { USERS, alertWith, isoDatePlus, login, logout, workdayPlus } from "./helpers";
+import { USERS, alertWith, isoDatePlus, login, logout, workdayPlus, menuLink } from "./helpers";
 
 test.describe.configure({ mode: "serial" });
 
@@ -101,7 +101,7 @@ test.describe("Surat Tugas & Bukti Penerimaan Uang Harian", () => {
 
   test("Karyawan tidak melihat menu/halaman admin; HR menerbitkan surat tugas untuk Ayu", async ({ page }) => {
     await login(page, USERS.ayu);
-    await expect(page.getByRole("link", { name: "Surat Tugas Saya" })).toBeVisible();
+    await expect(menuLink(page, "Surat Tugas Saya")).toBeVisible();
     await expect(page.getByRole("link", { name: /^Surat Tugas( \d+ menunggu)?$/ })).toHaveCount(0); // menu admin; "Surat Tugas Saya" tetap ada
     expect((await page.goto("/surat-tugas"))?.status()).toBe(404);
     await page.goto("/dashboard"); // halaman 404 tidak memuat rangka aplikasi (tombol Keluar)
@@ -166,7 +166,7 @@ test.describe("Surat Tugas & Bukti Penerimaan Uang Harian", () => {
 
   test("Karyawan melihat surat tugas & bukti miliknya, dapat mengunduh PDF; karyawan lain tidak dapat mengakses bukti itu; slip gaji tidak berubah", async ({ page, browser }) => {
     await login(page, USERS.ayu);
-    await page.getByRole("link", { name: "Surat Tugas Saya" }).click();
+    await menuLink(page, "Surat Tugas Saya").click();
     const card = page.locator("section", { hasText: letterNo });
     await expect(card).toContainText("Uang harian Anda: 3 hari × Rp 300.000 = Rp 900.000");
     await expect(card.getByText(/Diterima .* Transfer bank/)).toBeVisible();
@@ -318,7 +318,7 @@ test.describe("Dokumen: kontrak kerja PDF, penampil, keputusan lanjut/tidak, pen
 
   test("karyawan melihat dokumennya sendiri di 'Dokumen Saya' dan dapat membuka PDF; karyawan lain & anonim tidak", async ({ page, browser }) => {
     await login(page, USERS.budi);
-    await page.getByRole("link", { name: "Dokumen Saya" }).click();
+    await menuLink(page, "Dokumen Saya").click();
     await expect(page.getByText(TITLE).first()).toBeVisible();
     await page.getByRole("button", { name: /Lihat PDF/ }).first().click();
     const src = (await page.getByRole("dialog").locator("iframe").getAttribute("src"))!.split("#")[0]!;

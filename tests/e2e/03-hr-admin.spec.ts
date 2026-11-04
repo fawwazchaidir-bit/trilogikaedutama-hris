@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { USERS, alertWith, confirmDialog, isoDatePlus, login } from "./helpers";
+import { USERS, alertWith, confirmDialog, isoDatePlus, login, menuLink } from "./helpers";
 
 test.describe.configure({ mode: "serial" });
 
@@ -8,7 +8,7 @@ const year = new Date(Date.now() + 7 * 3_600_000).getUTCFullYear();
 test.describe("HR — pengajuan & saldo cuti", () => {
   test("menyetujui cuti Ayu → status berubah, saldo terpotong, Ayu mendapat notifikasi", async ({ page, browser }) => {
     await login(page, USERS.hr);
-    await page.getByRole("link", { name: /Pengajuan & Cuti/ }).click();
+    await menuLink(page, /Pengajuan & Cuti/).click();
     await page.getByLabel("Status").selectOption("PENDING");
     await page.getByRole("button", { name: "Terapkan", exact: true }).click();
     const row = page.locator("tbody tr", { hasText: "Ayu Lestari" });

@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { USERS, alertWith, confirmDialog, demoPayrollMonths, login, workdayPlus } from "./helpers";
+import { USERS, alertWith, confirmDialog, demoPayrollMonths, login, workdayPlus, menuLink } from "./helpers";
 
 test.describe.configure({ mode: "serial" });
 
@@ -34,7 +34,7 @@ test.describe("Karyawan (Ayu) — absensi", () => {
 
   test("riwayat bulanan memuat hari ini beserta penjelasan status", async ({ page }) => {
     await login(page, USERS.ayu);
-    await page.getByRole("link", { name: "Absensi Saya" }).click();
+    await menuLink(page, "Absensi Saya").click();
     await expect(page.getByRole("heading", { name: "Riwayat harian" })).toBeVisible();
     await expect(page.getByRole("button", { name: "Check-in" })).toBeDisabled();
     await page.getByText("Bagaimana angka ini dihitung?").click();
@@ -48,7 +48,7 @@ test.describe("Karyawan (Ayu) — absensi", () => {
 test.describe("Karyawan (Ayu) — pengajuan", () => {
   test("mengajukan izin → menunggu → dibatalkan sendiri", async ({ page }) => {
     await login(page, USERS.ayu);
-    await page.getByRole("link", { name: "Pengajuan Saya" }).click();
+    await menuLink(page, "Pengajuan Saya").click();
     const d = workdayPlus(40);
     await page.getByLabel("Jenis pengajuan").selectOption("IZIN");
     await page.getByLabel("Tanggal mulai").fill(d);
@@ -91,7 +91,7 @@ test.describe("Karyawan (Ayu) — pengajuan", () => {
 test.describe("Karyawan — slip gaji", () => {
   test("melihat slip miliknya dan mengunduh PDF yang valid", async ({ page }) => {
     await login(page, USERS.budi);
-    await page.getByRole("link", { name: "Slip Gaji Saya" }).click();
+    await menuLink(page, "Slip Gaji Saya").click();
     await expect(page.getByRole("heading", { name: "Slip Gaji Saya" })).toBeVisible();
     const rows = page.locator("tbody tr");
     await expect(rows).toHaveCount(1);

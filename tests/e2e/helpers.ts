@@ -63,3 +63,5 @@ export function demoPayrollMonths() {
   return { pending, issued, pendingRun: `Gaji ${monthLabel(pending)}`, issuedRun: `Gaji ${monthLabel(issued)}` };
 }
 
+/** Tautan di sidebar. Beranda juga memuat tile menu bernama sama, jadi tautan menu dicari di dalam navigasi utama. */
+export const menuLink = (page: Page, name: string | RegExp) => page.getByRole("navigation", { name: "Menu utama" }).getByRole("link", { name });

@@ -34,7 +34,7 @@ function discover(): Ep[] {
 const ENDPOINTS = discover();
 
 /** Rute yang sengaja terbuka tanpa sesi (login/pemulihan/health/pemicu mesin). */
-const PUBLIC = new Set(["/api/health", "/api/auth/login", "/api/auth/2fa", "/api/auth/forgot", "/api/auth/reset", "/api/internal/deliveries", "/api/internal/retention", "/api/internal/contract-reminders"]);
+const PUBLIC = new Set(["/api/health", "/api/auth/login", "/api/auth/2fa", "/api/auth/forgot", "/api/auth/reset", "/api/internal/deliveries", "/api/internal/retention", "/api/internal/contract-reminders", "/api/internal/training-daily"]);
 /** Tidak disapu dengan `{}` karena `{}` SAH dan mengubah data / menutup sesi / mengirim pesan. */
 const NO_EMPTY_BODY = new Set([
   "/api/attendance/check-in", "/api/attendance/check-out", "/api/auth/logout", "/api/auth/password", "/api/leave-balance/grant-quota",
@@ -93,7 +93,7 @@ test("rute publik: health 200; login/forgot/reset/2fa menolak masukan kosong den
     expect(r.status(), u).toBeGreaterThanOrEqual(400);
     expect(r.status(), u).toBeLessThan(500);
   }
-  for (const u of ["/api/internal/deliveries", "/api/internal/retention", "/api/internal/contract-reminders"]) {
+  for (const u of ["/api/internal/deliveries", "/api/internal/retention", "/api/internal/contract-reminders", "/api/internal/training-daily"]) {
     expect((await send(ctxs.anon, "POST", u, { body: {}, origin: null })).status(), u).toBe(404);
   }
 });
