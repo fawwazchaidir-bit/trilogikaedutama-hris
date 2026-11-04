@@ -10,7 +10,7 @@ Peran & hak akses untuk pemilik sistem: [TRAINING-PERAN.md](TRAINING-PERAN.md).
 
 | Area | Temuan |
 |---|---|
-| Stack | Next.js 16 (App Router), React 19, TypeScript strict, Tailwind 4, Prisma 6.19, PostgreSQL 16, Zod 4, Vitest 5, Playwright. Node ≥ 22 (`.nvmrc` 22), **npm** (`package-lock.json`). Tidak ada `AGENTS.md`/`CLAUDE.md`; acuan = README + `docs/`. |
+| Stack | Next.js 16 (App Router), React 19, TypeScript strict, Tailwind 4, Prisma 6.19, PostgreSQL 16, Zod 4, Vitest 5, Playwright. Node ≥ 22 (`.nvmrc` 22), **npm** (`package-lock.json`). `AGENTS.md` dibuat otomatis oleh `next dev` (catatan versi Next.js); acuan = README + `docs/`. |
 | **Cabang** | Fitur **Surat Tugas & Uang Harian**, dokumen kontrak, dan kebijakan cuti per karyawan hanya ada di cabang `claude/confident-carson-uohdwa` (7 commit setelah merge PR #1). Cabang kerja ini awalnya berisi hasil merge PR #1 saja, **tanpa** fitur itu. Cabang itu digabung (merge, tanpa konflik) ke cabang kerja sebelum pengembangan. `claude/hopeful-bell-ilrk9p` identik dengan PR #1 dan tidak berisi apa pun yang lain. |
 | Role | Tepat **3**: `SUPER_ADMIN`, `HR_ADMIN`, `EMPLOYEE` (`src/lib/permissions.ts`). Izin ditegakkan di **service layer** (`assertCan`); halaman terlarang menjawab 404. Tidak ada role "Admin Program/Manajer/Direktur" — dan tidak dibuat (lihat §4). |
 | Autentikasi | Cookie sesi opaque (hash SHA-256 di DB), password scrypt, pembatasan percobaan, CSRF via Origin, 2FA TOTP (dapat diwajibkan untuk admin), pembatalan sesi saat akun dinonaktifkan. |
@@ -153,13 +153,35 @@ status program Merah (milestone kritikal R06 terlambat 3 hari + item kritikal "J
 5. Daftar **item kesiapan** di luar contoh dokumen (jumlah per komponen sengaja disamakan dengan contoh §7) adalah usulan awal untuk ditinjau bersama tim.
 6. "Peserta acuan" = peserta minimum (reguler) atau jumlah peserta di kontrak (kerjasama).
 
-**Belum dibangun (jujur):** notifikasi eskalasi otomatis (§5.2: "diberi tahu PIC / atasan / Manajer Operasional") — angkanya sudah ditandai di layar (milestone terlambat > 3 hari, overload 2 minggu berturut-turut),
-tetapi pesannya belum dikirim; aturan **"Kuning 2 hari berturut-turut"** (butuh rekam jejak status harian); langkah "ukur jam nyata (Minggu 0)" adalah proses manusia, bukan kode (angkanya diganti lewat Rumus Indikator).
+**Langkah "ukur jam nyata (Minggu 0)"** adalah proses manusia, bukan kode: angkanya diganti lewat Rumus Indikator. Eskalasi otomatis, aturan "Kuning berturut-turut", dan pengingat tenggat sudah dibangun (§3b).
 
 **Siapa melakukan apa:** semua pengguna modul dapat *melihat* rumus dan parameter; **hanya Super Admin** yang mengubah (versi baru, catatan perubahan, dapat dikembalikan ke bawaan — riwayat tidak dihapus,
 tabel riwayat di database append-only). Konfigurasi yang rusak (mis. disunting langsung di DB) **tidak pernah dipakai menghitung**: dipakai bawaan dokumen dan ditandai.
 Efek perubahan: ambang/bobot/kapasitas/proyeksi/KP/wajib-bukti **langsung** berlaku; template milestone/item dan PIC berlaku untuk **program baru**; jam standar & pemegang jabatan berlaku saat jam kerja dihitung ulang
 (otomatis bila tanggal, peserta acuan, moda, atau jenis program berubah; atau tombol "Hitung ulang dari template").
+
+### 3b. Otomasi: snapshot harian, eskalasi, pengingat tenggat
+
+**Pekerja harian** (`src/server/services/training/automation.ts`) berjalan di dalam aplikasi tiap jam (`TRAINING_WORKER`, bawaan menyala bila modul menyala; 5 menit setelah start untuk pertama kali) atau dipicu penjadwal eksternal:
+`curl -X POST -H "Authorization: Bearer $CRON_SECRET" https://…/api/internal/training-daily` (404 bila `CRON_SECRET` kosong; 401 bila salah). **Idempoten**: setiap pesan punya kunci unik *per penerima* di `training_reminder_log`, jadi menjalankannya berulang atau di banyak instance tidak menggandakan pesan.
+Notifikasi memakai outbox yang sudah ada: dalam aplikasi selalu; email/WhatsApp hanya bila dikonfigurasi dan dipilih pengguna.
+
+| Peristiwa (dokumen §5.2) | Penerima (lewat **jabatan → pemegang jabatan**) | Kunci dedupe (sekali per…) |
+|---|---|---|
+| Program **Kuning** | PIC program | episode Kuning (hari awal deret) |
+| Kuning **2 hari kerja berturut-turut** (ambang dapat diubah) | atasan langsung PIC + PIC; wajib **rencana pemulihan** di portal | episode Kuning |
+| Program **Merah** | pelaksana (SPV Kurikulum) — atau Manajer Pemasaran bila penyebabnya proyeksi peserta/jabatan pemasaran — + Manajer Operasional + PIC | episode Merah |
+| **Merah pada H-7…H-1** | Manajer Operasional + SPV Kurikulum (+ Manajer Pemasaran untuk kerjasama: klien diberi tahu tertulis) | episode Merah |
+| Milestone terlambat > ambang (3 hari) | atasan langsung pemegang **jabatan milestone itu** (naik satu tingkat); tanpa atasan di portal → Direktur | milestone |
+| Beban staf Overload **2 minggu berturut-turut** | Manajer Operasional dan Keuangan (bukan orangnya sendiri) | staf + minggu |
+| **Pengingat tenggat H-1 dan hari-H**: tugas (Belum/Proses), milestone, item kesiapan, dimulainya pelaksanaan program | penanggung jawab (milestone/item tanpa PIC → PIC program); program: seluruh anggota aktif | entitas + tanggal tenggat + H-1/H + penerima |
+
+Aturan penting:
+- **Deret berturut-turut** dihitung dari *snapshot status harian* (`training_status_snapshots`, satu baris per program per tanggal WIB; pekerja menimpa baris hari yang sama). Hanya **hari kerja** yang dihitung; akhir pekan dilewati (tidak memutus). Hari kerja tanpa snapshot **memutus** deret — tanpa data tidak ada klaim "berturut-turut". Karena status dinilai saat pekerja berjalan, Kuning pagi yang sudah Hijau siang tetap tercatat pagi itu.
+- Penerima ditentukan dari konfigurasi (Rumus Indikator → *Eskalasi & pengingat otomatis*): `reportsTo` (atasan per jabatan — **usulan** dari bagan organisasi, HRIS belum menyimpan atasan langsung), peran Merah, dan peran beban. **Tanpa penerima yang dapat dijangkau** (jabatan belum diisi, karyawan nonaktif) → **Direktur (Super Admin)**, agar pesan penting tidak hilang diam-diam.
+- Hanya program **Persiapan/Berjalan** yang templatenya sudah diterapkan yang dinilai; Draf, Selesai, Dibatalkan tidak. Karyawan nonaktif tidak menerima pesan.
+- **Catatan pemulihan** (`training_recovery_notes`, append-only + audit) ditulis di tab Pemantauan oleh pengelola tugas proyek; hanya catatan, tidak mengubah tenggat (tenggat tetap dihitung dari rumus).
+- Setiap jenis pengingat dan eskalasi dapat dimatikan di konfigurasi. Mematikan **tidak** menghapus riwayat.
 
 ## 4. Role & hak akses
 
@@ -171,7 +193,7 @@ Matriks ditegakkan oleh satu file murni (`src/lib/training/access.ts`) dan diuji
 
 ## 5. Perubahan database & migration
 
-Dua migration baru, **murni aditif**: `20261103230905_training_operations` (modul) dan `20261104033508_training_indicators` (indikator pemantauan; dijelaskan di bawah).
+Tiga migration baru, **murni aditif**: `20261103230905_training_operations` (modul), `20261104033508_training_indicators` (indikator pemantauan) dan `20261104143000_training_automation` (tabel `training_status_snapshots`, `training_reminder_log`, `training_recovery_notes`; `CHECK` nilai status, trigger append-only catatan pemulihan).
 
 **Migration indikator** — menambah 6 tabel (`training_milestones`, `training_readiness_items`, `training_workload_tasks`, `training_staff_capacity`, `training_indicator_config`,
 `training_indicator_config_versions`), 5 tipe enum baru, kolom baru pada `training_projects` (jenis program, peserta min/maks, BNSP, tanggal T, tutup pendaftaran, waktu template diterapkan; semuanya
@@ -228,6 +250,8 @@ jalan, jangan hapus data: pakai database baru yang kosong.
 |---|---|
 | `false` | Menu tidak tampil; `/training/*` → HTTP 404; `/api/training/*` → 404; unggah/unduh dokumen proyek ditolak; seed demo menolak jalan. **Data tidak dihapus**; HRIS tidak terpengaruh. |
 | `true` | Menu tampil bagi yang punya akses modul (Super Admin, pemegang level, atau anggota aktif proyek). |
+
+`TRAINING_WORKER` (bawaan `true`) mengatur pekerja harian di dalam aplikasi (§3b); matikan bila memakai pemicu eksternal `/api/internal/training-daily`. Pekerja hanya bekerja saat modul menyala.
 
 Nyalakan **hanya** setelah migration diterapkan. Aktivasi bertahap: staging → UAT/pilot → production, masing-masing dengan keputusan eksplisit pemilik sistem.
 Mengaktifkan flag tidak memberi siapa pun akses otomatis: Super Admin harus memberi level pada akun yang relevan di **Akses Training**.
@@ -308,7 +332,7 @@ wajib untuk penutupan, template standar atas tindakan eksplisit) · jadwal & kal
 (internal ditautkan ke karyawan, eksternal tanpa akun) · dokumen proyek privat · tautan surat tugas (referensi) & referensi manual sistem lain · riwayat aktivitas · laporan + unduhan CSV/Excel/PDF ·
 pengaturan level akses (Super Admin) dengan usulan dari bagan organisasi · notifikasi dalam aplikasi (tugas baru, ditambahkan ke proyek, menunggu pemeriksaan, perubahan akses) lewat mekanisme existing ·
 **indikator pemantauan** (Ketepatan Waktu, Kesiapan, Beban Tim, proyeksi peserta, kepadatan kelas; tab Pemantauan per proyek, halaman Pemantauan Program, peta beban tim) dengan **rumus & parameter yang dapat diedit Direktur di aplikasi** (berversi) ·
-sidebar dapat disembunyikan & grup dapat dilipat (preferensi tersimpan per perangkat) · audit log untuk semua perubahan penting · loading/kosong/galat pada seluruh halaman · tampilan responsif (diuji 390 px) · branding **Trilogika Internal Portal**.
+**antarmuka portal** (sidebar maroon yang dapat disembunyikan & grupnya dilipat, bilah atas dengan pencarian cepat Ctrl+K — menu + proyek dalam lingkup akses —, notifikasi, dan menu pengguna; beranda per peran dengan sapaan, banner, menu utama, kartu ringkasan, grafik aktivitas 14 hari, proyek saya, kalender, aktivitas terbaru) · **eskalasi otomatis, deret Kuning berturut-turut, pengingat tenggat H-1/hari-H, catatan pemulihan** (§3b) · preferensi sidebar tersimpan per perangkat · audit log untuk semua perubahan penting · loading/kosong/galat pada seluruh halaman · tampilan responsif (diuji 390 px) · branding **Trilogika Internal Portal**.
 
 ## 13. Keterbatasan & pekerjaan lanjutan
 
@@ -319,9 +343,9 @@ sidebar dapat disembunyikan & grup dapat dilipat (preferensi tersimpan per peran
 - **Template checklist**: menyimpan mengganti seluruh item; belum ada riwayat versi template.
 - **Penghapusan** tugas/peserta/jadwal tidak ada (dibatalkan/diubah statusnya); duplikat salah-ketik tetap terlihat sebagai "Dibatalkan".
 - **Notifikasi**: memakai antrean existing (email/WhatsApp bergantung konfigurasi & penyedia yang belum diuji ke layanan sungguhan, sama seperti HRIS).
-- **Indikator**: notifikasi eskalasi otomatis dan aturan "Kuning 2 hari berturut-turut" belum ada (lihat §3a); item kesiapan di luar contoh dokumen adalah usulan; "terkonfirmasi" dicatat manual (bukan status pembayaran).
+- **Indikator & otomasi**: garis atasan per jabatan adalah usulan (HRIS belum menyimpan atasan langsung); pesan eskalasi/pengingat hanya sebatas notifikasi (dalam aplikasi; email/WhatsApp sesuai konfigurasi pengguna) — tidak ada tindakan otomatis pada data; item kesiapan di luar contoh dokumen adalah usulan; "terkonfirmasi" dicatat manual (bukan status pembayaran).
 - **Retensi & penghapusan permanen dokumen**: *menunggu persetujuan Direktur* — belum dibangun (tidak ada penghapusan otomatis atau permanen). Setelah masa retensi diputuskan, dapat ditambah aksi penghapusan permanen khusus Direktur dengan audit.
-- **Dokumen Word/PowerPoint/Excel**: belum diizinkan; menunggu keputusan setelah penjelasan risiko (lihat TRAINING-PERAN.md, keputusan #3).
+- **Dokumen Word/PowerPoint/Excel**: **tidak diizinkan** (keputusan pemilik sistem 4 Nov 2026): hanya PDF/PNG/JPEG; materi diekspor ke PDF (lihat TRAINING-PERAN.md, keputusan #3).
 - Halaman terlarang untuk akun yang *punya* akses modul menampilkan UI "tidak ditemukan" dengan status HTTP 200 (lihat §2).
 - Teks 2FA issuer ("Trilogika HRIS") dan subjek email tidak diganti agar tidak membingungkan pengguna aplikasi autentikator yang sudah terdaftar.
 

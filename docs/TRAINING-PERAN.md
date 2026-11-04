@@ -46,7 +46,7 @@ Akibat yang Anda rasakan:
 
 | Jabatan (bagan) | Role HRIS | Level modul (usulan) | Peran proyek yang lazim | Catatan |
 |---|---|---|---|---|
-| **Direktur Utama** | Super Admin | *(bawaan)* melihat semua + mengatur akses | — | Hanya-lihat sampai Anda memberi diri sendiri level Manajer Program (lihat Keputusan 1) |
+| **Direktur Utama** | Super Admin | *(bawaan)* kelola penuh semua proyek + mengatur akses & rumus indikator | — | Keputusan 4 Nov 2026: Direktur boleh mengubah data proyek |
 | **Manajer Operasional & Keuangan** | sesuai kebutuhan HR | **Manajer Program** | Project Manager | Kendali operasional; menutup/membatalkan proyek |
 | **Supervisor Administrasi & Kurikulum** | Karyawan | **Manajer Program** | PIC / Admin Program | Memegang jadwal induk, materi, instruktur. *Bagan tidak punya jabatan "Manajer Program"; fungsinya dijalankan supervisor ini.* |
 | **Staf Adm. & Kurikulum** (Fasilitator Kelas) | Karyawan | **Admin Program** | Admin Program / PJ Materi | Boleh membuat proyek; mengelola hanya proyek yang ia ikuti |
@@ -82,6 +82,7 @@ Keputusan 4 Nov 2026: **Direktur/Super Admin boleh mengubah data proyek** (kelol
 | **Mengubah** rumus & parameter indikator (versi baru, bisa dikembalikan) | **✓** | — | — | — |
 | Mengatur kapasitas per staf (paruh waktu, dst.) | ✓ | — | — | ✓ |
 | Melihat peta beban **seluruh tim** & kepadatan kelas | ✓ | ✓ | — *(hanya bebannya sendiri)* | ✓ |
+| Menerima eskalasi otomatis & pengingat tenggat | sesuai jabatan di Rumus Indikator; selalu jatuh ke Direktur bila penerima tidak terjangkau | — | sebagai penanggung jawab / anggota | sesuai jabatan |
 
 ### 3b. Pada satu proyek (peran proyek)
 
@@ -121,7 +122,7 @@ Aturan tambahan yang dijaga server:
 |---|---|---|---|
 | 1 | **Direktur/Super Admin boleh mengubah data proyek?** | ✅ **Diputuskan: YA** (4 Nov 2026) | Diterapkan di kode & tes. Pemisahan "memantau vs mengeksekusi" tidak lagi dipakai; setiap perubahan tetap tercatat di audit dengan nama pelaku. |
 | 2 | **Siapa yang memegang level Manajer Program?** | ✅ **Diputuskan: Direktur yang memberi akses, tanpa batas jumlah** | Tidak ada pembatasan 1–2 orang di kode; ada tes yang membuktikan banyak pemegang. Setiap pemberian/pencabutan tercatat. |
-| 3 | **Izinkan dokumen Word/PowerPoint/Excel?** | ⏳ **Penjelasan diberikan; menunggu keputusan Anda** | Lihat penjelasan di bawah. Sampai diputuskan: hanya PDF/PNG/JPEG. |
+| 3 | **Izinkan dokumen Word/PowerPoint/Excel?** | ✅ **Diputuskan: TIDAK — PDF/PNG/JPEG saja** (4 Nov 2026) | Materi instruktur diekspor ke PDF. Penjelasan risikonya tetap di bawah sebagai dasar keputusan; bila kelak ingin dibuka, ikuti usulan pemeriksaan di bawah. |
 | 4 | **Retensi & penghapusan permanen dokumen** | ⏳ **Menunggu persetujuan Direktur** | Belum dibangun apa pun: tidak ada penghapusan otomatis maupun permanen. "Hapus" tetap = disembunyikan. Setelah masa retensi diputuskan, ditambah aksi penghapusan permanen khusus Direktur (beralasan, tercatat di audit). |
 | 5 | **Rumus indikator beban tim, kesiapan, ketepatan waktu** | ✅ **Diputuskan: memakai dokumen v1.0, dapat diedit di aplikasi** | Rumus tetap di kode; semua angka (bobot, ambang, template, jam standar, kapasitas) diubah Direktur di *Rumus Indikator* — berversi, dapat dikembalikan. Rincian & tafsir: TRAINING-OPS.md §3a. |
 | 6 | **Batas ukuran dokumen** | Bawaan | `MAX_DOCUMENT_UPLOAD_MB` = 10 MB, disimpan di PostgreSQL. Volume foto dokumentasi besar sebaiknya pindah ke penyimpanan objek (butuh persetujuan & konfigurasi). |
@@ -138,5 +139,5 @@ Singkatnya: PDF dan gambar relatif "pasif" (tampilannya saja), sedangkan file Of
 
 Dampak ke operasional: instruktur/PJ materi sering memegang materi dalam PowerPoint/Word, tetapi PDF memenuhi hampir semua kebutuhan arsip proyek (ekspor satu kali).
 
-**Usulan** (bila Anda ingin mengizinkan): hanya `.docx/.xlsx/.pptx` (bukan format makro/lama), diperiksa struktur arsipnya + batas ukuran terurai, ditolak bila ada makro/objek tertanam/tautan luar, selalu diunduh sebagai lampiran (tidak dibuka di peramban), dan ditambah pemindai malware bila infrastrukturnya tersedia.
-**Alternatif paling aman & tanpa biaya**: tetap PDF/PNG/JPEG (instruktur mengekspor ke PDF). Beri tahu pilihan Anda — sebelum itu, tidak ada perubahan.
+**Keputusan: PDF/PNG/JPEG saja.** Bila kelak ingin mengizinkan Office, usulannya: hanya `.docx/.xlsx/.pptx` (bukan format makro/lama), diperiksa struktur arsipnya + batas ukuran terurai, ditolak bila ada makro/objek tertanam/tautan luar, selalu diunduh sebagai lampiran (tidak dibuka di peramban), dan ditambah pemindai malware bila infrastrukturnya tersedia.
+**Pilihan yang dipakai sekarang (paling aman, tanpa biaya)**: PDF/PNG/JPEG; instruktur mengekspor materi ke PDF.

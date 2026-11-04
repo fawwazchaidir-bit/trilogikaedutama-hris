@@ -93,3 +93,18 @@ export function formatHours(minutes: number): string {
 export function dotTime(hhmm: string): string {
   return hhmm.replace(":", ".");
 }
+
+/** "2 jam lalu", "kemarin", "3 hari lalu" untuk umpan aktivitas. Lebih dari 30 hari → tanggal. `nowMs` untuk pengujian. */
+export function timeAgo(value: Date | string, nowMs: number = Date.now()): string {
+  const t = (value instanceof Date ? value : new Date(value)).getTime();
+  const s = Math.max(0, Math.round((nowMs - t) / 1000));
+  if (s < 60) return "baru saja";
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m} menit lalu`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h} jam lalu`;
+  const d = Math.floor(h / 24);
+  if (d === 1) return "kemarin";
+  if (d <= 30) return `${d} hari lalu`;
+  return formatDateShort(new Date(t).toISOString().slice(0, 10));
+}

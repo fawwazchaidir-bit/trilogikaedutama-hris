@@ -1,15 +1,16 @@
 "use client";
 import Link from "next/link";
 import Image from "next/image";
-import { usePathname, useRouter } from "next/navigation";
-import { useState } from "react";
+import { usePathname } from "next/navigation";
+import { useEffect, useState } from "react";
 import {
-  Bell, CalendarDays, CircleUserRound, ClipboardCheck, ClipboardList, FileText, KeyRound, LayoutDashboard, LogOut, Menu,
-  ScrollText, Settings, ShieldCheck, TableProperties, Users, UserCog, Wallet, X, Clock, FilePlus2, Timer, BarChart3, ShieldEllipsis, MapPinned, FolderOpen, Plane, GraduationCap, FolderKanban, ListChecks, CalendarRange, UsersRound, Presentation, FileStack, FileBarChart2, ChevronDown, PanelLeftClose, PanelLeftOpen,
+  Bell, CalendarDays, CircleUserRound, ClipboardCheck, ClipboardList, FileText, LayoutDashboard, Menu, Search,
+  ScrollText, Settings, ShieldCheck, TableProperties, Users, UserCog, Wallet, X, Clock, FilePlus2, Timer, BarChart3, ShieldEllipsis, MapPinned, FolderOpen, Plane, GraduationCap, FolderKanban, ListChecks, CalendarRange, UsersRound, Presentation, FileStack, FileBarChart2, ChevronDown, PanelLeftClose, PanelLeftOpen, Gauge, SlidersHorizontal, UserRound, Briefcase,
 } from "lucide-react";
 import { cn } from "@/lib/cn";
-import { api } from "@/lib/api-client";
-import { NAV_GROUP_LABEL, ROLE_LABELS, type NavItem, type Role } from "@/lib/permissions";
+import { NAV_GROUP_LABEL, type NavItem, type Role } from "@/lib/permissions";
+import { CommandPalette } from "@/components/command-palette";
+import { UserMenu } from "@/components/user-menu";
 import { ToastProvider } from "@/components/ui/toast";
 import { DEFAULT_NAV_PREF, NAV_GROUP_IDS, writeNavPrefCookie, type NavGroupId, type NavPref } from "@/lib/nav-pref";
 
@@ -48,6 +49,12 @@ const ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
   "/training/dokumen": FileStack,
   "/training/laporan": FileBarChart2,
   "/training/akses": ShieldCheck,
+  "/training/pemantauan": Gauge,
+  "/training/indikator": SlidersHorizontal,
+};
+
+const GROUP_ICONS: Record<NavGroupId, React.ComponentType<{ className?: string }>> = {
+  umum: LayoutDashboard, saya: UserRound, sdm: Briefcase, gaji: Wallet, training: GraduationCap, sistem: Settings,
 };
 
 export interface ShellProps {
@@ -58,14 +65,17 @@ export interface ShellProps {
   pendingBadges: { href: string; count: number }[];
   /** Preferensi sidebar dari cookie (dibaca server → tanpa kedip). Bawaan: terbuka. */
   initialNav?: NavPref;
+  hasEmployee?: boolean;
+  /** Pengguna boleh memakai modul pelatihan (pencarian proyek di Ctrl+K). */
+  canSearchProjects?: boolean;
+  version?: string;
   children: React.ReactNode;
 }
 
-export function AppShell({ user, nav, company, unread, pendingBadges, initialNav = DEFAULT_NAV_PREF, children }: ShellProps) {
+export function AppShell({ user, nav, company, unread, pendingBadges, initialNav = DEFAULT_NAV_PREF, hasEmployee = false, canSearchProjects = false, version = "", children }: ShellProps) {
   const pathname = usePathname();
-  const router = useRouter();
   const [open, setOpen] = useState(false);
-  const [busy, setBusy] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
   // Sidebar desktop disembunyikan? & grup menu mana yang dilipat? (bawaan: semuanya terbuka). Disimpan di cookie.
   const [collapsed, setCollapsed] = useState(initialNav.collapsed);
   const [closed, setClosed] = useState<NavGroupId[]>(initialNav.closedGroups);
@@ -75,10 +85,12 @@ export function AppShell({ user, nav, company, unread, pendingBadges, initialNav
   const [pinnedAt, setPinnedAt] = useState<Partial<Record<NavGroupId, string>>>({});
   const toggleSidebar = () => { const c = !collapsed; setCollapsed(c); persist(c, closed); };
 
-  async function logout() {
-    setBusy(true);
-    try { await api("/api/auth/logout", { method: "POST", body: {} }); } finally { router.push("/login"); router.refresh(); }
-  }
+  // Ctrl/⌘+K membuka pencarian cepat dari halaman mana pun.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") { e.preventDefault(); setSearchOpen(true); } };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, []);
 
   const groups = NAV_GROUP_IDS
     .map((g) => ({ g, items: nav.filter((n) => n.group === g) }))
@@ -98,34 +110,36 @@ export function AppShell({ user, nav, company, unread, pendingBadges, initialNav
   }
 
   const sidebar = (
-    <div className="flex h-full flex-col bg-ink text-stone-200">
+    <div className="flex h-full flex-col bg-gradient-to-b from-maroon-900 to-maroon-950 text-white/80">
       <div className="flex items-center gap-3 px-5 py-5">
-        <Image src={company.logoUrl} alt="" width={40} height={40} unoptimized className="size-10 rounded-full bg-white/5 object-contain" />
+        <Image src={company.logoUrl} alt="" width={40} height={40} unoptimized className="size-10 shrink-0 rounded-full bg-white object-contain p-0.5" />
         <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-semibold leading-tight text-white">{company.name}</p>
-          <p className="text-[11px] leading-snug text-stone-400">Trilogika Internal Portal</p>
+          <p className="truncate text-sm font-bold uppercase leading-tight tracking-wide text-white">{company.name}</p>
+          <p className="text-[11px] leading-snug text-white/65">Trilogika Internal Portal</p>
         </div>
-        <button type="button" onClick={toggleSidebar} aria-label="Sembunyikan menu samping" title="Sembunyikan menu samping" className="hidden size-8 shrink-0 place-items-center rounded-md text-stone-400 hover:bg-white/10 hover:text-white lg:grid">
+        <button type="button" onClick={toggleSidebar} aria-label="Sembunyikan menu samping" title="Sembunyikan menu samping" className="hidden size-8 shrink-0 place-items-center rounded-md text-white/60 hover:bg-white/10 hover:text-white lg:grid">
           <PanelLeftClose className="size-[18px]" aria-hidden />
         </button>
       </div>
-      <nav aria-label="Menu utama" className="nav-scroll flex-1 space-y-3 px-3 pb-6 pt-4">
+      <nav aria-label="Menu utama" className="nav-scroll flex-1 space-y-1.5 px-3 pb-6 pt-3">
         {groups.map(({ g, items }) => {
           const label = NAV_GROUP_LABEL[g];
           const open = groupOpen(g, items);
+          const GroupIcon = GROUP_ICONS[g];
           return (
           <div key={g}>
             {label && (
               <button
                 type="button" onClick={() => toggleGroup(g, items)} aria-expanded={open} aria-controls={`nav-group-${g}`}
-                className="mb-1 flex w-full items-center justify-between rounded-md px-3 py-1 text-[11px] font-semibold uppercase tracking-wider text-stone-500 transition-colors hover:text-stone-300"
+                className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm font-semibold text-white transition-colors hover:bg-white/10"
               >
-                <span>{label}</span>
-                <ChevronDown className={cn("size-3.5 transition-transform duration-200 motion-reduce:transition-none", !open && "-rotate-90")} aria-hidden />
+                <GroupIcon className="size-[18px] shrink-0 text-white/80" aria-hidden />
+                <span className="flex-1 text-left">{label}</span>
+                <ChevronDown className={cn("size-4 text-white/60 transition-transform duration-200 motion-reduce:transition-none", !open && "-rotate-90")} aria-hidden />
               </button>
             )}
             <div id={`nav-group-${g}`} inert={!open} className={cn("grid transition-[grid-template-rows] duration-200 ease-out motion-reduce:transition-none", open ? "grid-rows-[1fr]" : "grid-rows-[0fr]")}>
-            <div className={cn("min-h-0 space-y-0.5 overflow-hidden transition-[visibility] duration-0 motion-reduce:transition-none", open ? "visible" : "invisible delay-200")}>
+            <div className={cn("min-h-0 space-y-0.5 overflow-hidden transition-[visibility] duration-0 motion-reduce:transition-none", open ? "visible" : "invisible delay-200", label && "ml-4 mt-0.5 border-l border-white/15 pl-2")}>
               {items.map((item) => {
                 const Icon = ICONS[item.href] ?? FileText;
                 // "/training" (Dashboard Training) hanya aktif pada halamannya sendiri, bukan pada seluruh anak rutenya.
@@ -134,11 +148,11 @@ export function AppShell({ user, nav, company, unread, pendingBadges, initialNav
                 return (
                   <Link
                     key={item.href} href={item.href} onClick={() => setOpen(false)} aria-current={active ? "page" : undefined}
-                    className={cn("flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors", active ? "bg-brand-600 text-white" : "text-stone-300 hover:bg-white/10 hover:text-white")}
+                    className={cn("flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors", active ? "bg-white text-brand-700 shadow-sm" : "text-white/80 hover:bg-white/10 hover:text-white")}
                   >
                     <Icon className="size-[18px] shrink-0" />
                     <span className="flex-1">{item.label}</span>
-                    {badge > 0 && <span className="rounded-full bg-white px-1.5 text-[11px] font-semibold text-brand-700" aria-label={`${badge} menunggu`}>{badge}</span>}
+                    {badge > 0 && <span className={cn("rounded-full px-1.5 text-[11px] font-semibold", active ? "bg-brand-600 text-white" : "bg-white text-brand-700")} aria-label={`${badge} menunggu`}>{badge}</span>}
                   </Link>
                 );
               })}
@@ -148,26 +162,17 @@ export function AppShell({ user, nav, company, unread, pendingBadges, initialNav
           );
         })}
       </nav>
-      <div className="border-t border-white/10 p-4">
-        <p className="truncate text-sm font-medium text-white">{user.name}</p>
-        <p className="truncate text-xs text-stone-400">{user.email}</p>
-        <p className="mt-1 inline-block rounded bg-white/10 px-1.5 py-0.5 text-[11px] font-medium text-stone-300">{ROLE_LABELS[user.role]}</p>
-        <div className="mt-3 flex gap-2">
-          <Link href="/change-password" className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-md bg-white/10 px-2 py-1.5 text-xs text-stone-200 hover:bg-white/20">
-            <KeyRound className="size-3.5" /> Password
-          </Link>
-          <button type="button" onClick={logout} disabled={busy} className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-md bg-white/10 px-2 py-1.5 text-xs text-stone-200 hover:bg-white/20 disabled:opacity-50">
-            <LogOut className="size-3.5" /> Keluar
-          </button>
-        </div>
+      <div className="border-t border-white/10 px-5 py-4 text-xs text-white/60">
+        <p className="font-medium text-white/80">{company.name}</p>
+        {version && <p>v{version}</p>}
       </div>
     </div>
   );
 
-  const bell = (
-    <Link href="/notifikasi" aria-label={unread ? `Notifikasi, ${unread} belum dibaca` : "Notifikasi"} className="relative rounded-md p-1.5 hover:bg-white/10 lg:hover:bg-black/5">
+  const bell = (tone: "light" | "dark") => (
+    <Link href="/notifikasi" aria-label={unread ? `Notifikasi, ${unread} belum dibaca` : "Notifikasi"} className={cn("relative grid size-10 place-items-center rounded-full", tone === "dark" ? "text-white hover:bg-white/10" : "text-ink-soft hover:bg-black/5")}>
       <Bell className="size-5" />
-      {unread > 0 && <span className="absolute -right-0.5 -top-0.5 grid min-w-4 place-items-center rounded-full bg-brand-600 px-1 text-[10px] font-semibold leading-4 text-white">{unread > 99 ? "99+" : unread}</span>}
+      {unread > 0 && <span className="absolute right-0.5 top-0.5 grid min-w-4 place-items-center rounded-full bg-brand-600 px-1 text-[10px] font-semibold leading-4 text-white ring-2 ring-white">{unread > 99 ? "99+" : unread}</span>}
     </Link>
   );
 
@@ -176,10 +181,13 @@ export function AppShell({ user, nav, company, unread, pendingBadges, initialNav
       <div className={cn("min-h-screen lg:grid lg:transition-[grid-template-columns] lg:duration-200 motion-reduce:lg:transition-none", collapsed ? "lg:grid-cols-[0rem_1fr]" : "lg:grid-cols-[16rem_1fr]")}>
         <aside aria-hidden={collapsed || undefined} inert={collapsed} className="no-print sticky top-0 hidden h-screen overflow-hidden lg:block">{sidebar}</aside>
 
-        <div className="no-print sticky top-0 z-30 flex items-center justify-between border-b border-white/10 bg-ink px-4 py-3 text-white lg:hidden">
-          <button type="button" aria-label="Buka menu" onClick={() => setOpen(true)} className="rounded-md p-1.5 hover:bg-white/10"><Menu className="size-5" /></button>
-          <span className="text-sm font-semibold">{company.name}</span>
-          {bell}
+        <div className="min-w-0 lg:flex lg:flex-col">
+        <div className="no-print sticky top-0 z-30 flex items-center gap-1 bg-maroon-900 px-3 py-2 text-white lg:hidden">
+          <button type="button" aria-label="Buka menu" onClick={() => setOpen(true)} className="grid size-10 place-items-center rounded-full hover:bg-white/10"><Menu className="size-5" /></button>
+          <span className="min-w-0 flex-1 truncate px-1 text-sm font-semibold">{company.name}</span>
+          <button type="button" aria-label="Cari" onClick={() => setSearchOpen(true)} className="grid size-10 place-items-center rounded-full hover:bg-white/10"><Search className="size-5" /></button>
+          {bell("dark")}
+          <UserMenu user={user} hasEmployee={hasEmployee} tone="dark" />
         </div>
         {open && (
           <div className="no-print fixed inset-0 z-40 lg:hidden" role="dialog" aria-modal="true" aria-label="Menu">
@@ -191,6 +199,22 @@ export function AppShell({ user, nav, company, unread, pendingBadges, initialNav
           </div>
         )}
 
+        <header className="no-print sticky top-0 z-30 hidden h-16 items-center gap-3 border-b border-line bg-white/95 px-6 backdrop-blur lg:flex xl:px-8">
+          {collapsed && (
+            <button type="button" onClick={toggleSidebar} aria-label="Tampilkan menu samping" title="Tampilkan menu samping" className="grid size-9 shrink-0 place-items-center rounded-md border border-line bg-white text-ink-soft shadow-sm hover:bg-canvas">
+              <PanelLeftOpen className="size-[18px]" aria-hidden />
+            </button>
+          )}
+          <button type="button" onClick={() => setSearchOpen(true)} aria-label="Cari program, proyek, atau menu" className="flex h-10 w-full max-w-xl items-center gap-3 rounded-full border border-line bg-canvas px-4 text-left text-sm text-muted hover:border-brand-200 hover:bg-white">
+            <Search className="size-[18px] shrink-0" aria-hidden />
+            <span className="flex-1 truncate">Cari program, proyek, atau menu…</span>
+            <kbd className="hidden rounded border border-line bg-white px-1.5 py-0.5 text-[11px] text-muted xl:block">Ctrl K</kbd>
+          </button>
+          <div className="flex-1" />
+          {bell("light")}
+          <UserMenu user={user} hasEmployee={hasEmployee} />
+        </header>
+
         <main className="min-w-0 px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
           {user.isDemo && (
             <div role="note" className="no-print mb-5 flex items-start gap-2 rounded-md border border-amber-300 bg-amber-50 px-4 py-2.5 text-sm text-amber-900">
@@ -198,16 +222,10 @@ export function AppShell({ user, nav, company, unread, pendingBadges, initialNav
               <p><strong>Akun demonstrasi — hanya untuk pengujian.</strong> Data di sini fiktif dan tidak boleh dipakai untuk operasional.</p>
             </div>
           )}
-          <div className="no-print mb-4 hidden items-center justify-between lg:flex">
-            {collapsed ? (
-              <button type="button" onClick={toggleSidebar} aria-label="Tampilkan menu samping" title="Tampilkan menu samping" className="grid size-9 place-items-center rounded-md border border-line bg-white text-ink-soft shadow-sm hover:bg-canvas">
-                <PanelLeftOpen className="size-[18px]" aria-hidden />
-              </button>
-            ) : <span />}
-            {bell}
-          </div>
           {children}
         </main>
+        </div>
+        <CommandPalette open={searchOpen} onClose={() => setSearchOpen(false)} nav={nav} canSearchProjects={canSearchProjects} />
       </div>
     </ToastProvider>
   );

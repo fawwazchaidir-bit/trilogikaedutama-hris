@@ -84,7 +84,7 @@ test.describe("login & hak akses", () => {
 
   test("login ulang dengan password yang benar berhasil", async ({ page }) => {
     await login(page, USERS.citra, E2E_PASSWORD);
-    await expect(page.getByRole("heading", { name: /Halo, Citra/ })).toBeVisible();
+    await expect(page.getByRole("heading", { name: /Selamat datang, Citra/ })).toBeVisible();
   });
 });
 

@@ -19,7 +19,9 @@ export async function login(page: Page, email: string, password = E2E_PASSWORD) 
 }
 
 export async function logout(page: Page) {
-  await page.getByRole("button", { name: "Keluar" }).first().click();
+  // Keluar ada di menu pengguna (pojok kanan atas): buka dulu menunya.
+  await page.getByRole("button", { name: "Menu pengguna" }).filter({ visible: true }).first().click();
+  await page.getByRole("menuitem", { name: "Keluar" }).click();
   await page.waitForURL(/\/login/);
 }
 

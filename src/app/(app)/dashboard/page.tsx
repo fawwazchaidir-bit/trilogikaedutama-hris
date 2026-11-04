@@ -3,10 +3,18 @@ import Link from "next/link";
 import { AlertTriangle, ArrowRight, CalendarCheck2, FileText } from "lucide-react";
 import { requirePageUser } from "@/server/auth/current";
 import { getAdminDashboard, getEmployeeDashboard } from "@/server/services/dashboard";
-import { Card, CardHeader, EmptyState, Notice, PageHeader } from "@/components/ui/card";
+import { Card, CardHeader, EmptyState, Notice } from "@/components/ui/card";
 import { Tile } from "@/components/ui/stat";
 import { Badge, PayrollStatusBadge, RequestStatusBadge } from "@/components/ui/badge";
 import { AttendancePanel } from "@/components/attendance-panel";
+import { PortalIntro } from "@/components/portal/portal-intro";
+import { MenuTiles } from "@/components/portal/menu-tiles";
+import { TrainingHome } from "@/components/portal/training-home";
+import { getBrand } from "@/server/services/settings";
+import { getTrainingHome } from "@/server/services/training/home";
+import { loadNav } from "@/server/nav";
+import { env } from "@/server/env";
+import { todayIso } from "@/lib/time";
 import { can } from "@/lib/permissions";
 import { formatDateLong, formatDateRange, formatDuration, monthLabel, formatDays } from "@/lib/format";
 import { formatRupiah } from "@/lib/money";
@@ -15,10 +23,31 @@ import { LEAVE_TYPE_LABEL } from "@/lib/labels";
 export const metadata: Metadata = { title: "Dashboard" };
 export const dynamic = "force-dynamic";
 
+const ADMIN_MENU = ["/karyawan", "/absensi", "/pengajuan", "/rekap", "/penggajian", "/surat-tugas"];
+const EMPLOYEE_MENU = ["/absensi-saya", "/pengajuan-saya", "/slip-saya", "/lembur-saya", "/surat-tugas-saya", "/dokumen-saya"];
+
 export default async function DashboardPage() {
   const user = await requirePageUser();
-  if (can(user.role, "dashboard:admin")) return <AdminView />;
-  return <EmployeeView />;
+  const admin = can(user.role, "dashboard:admin");
+  const [brand, { nav, trainingVisible }] = await Promise.all([getBrand(), loadNav(user)]);
+  const training = trainingVisible ? await getTrainingHome(user) : null;
+  return (
+    <div className="space-y-8">
+      <PortalIntro
+        name={user.name} today={todayIso(env().APP_TIMEZONE)} logoUrl={brand.logoUrl}
+        subtitle={admin ? "Kelola kehadiran, pengajuan, dan penggajian dengan lebih mudah dan terintegrasi." : "Kelola pekerjaan Anda dengan lebih mudah dan terintegrasi."}
+        banner={{ title: "Bersama Membangun Talenta Unggul untuk Indonesia", subtitle: brand.name }}
+      />
+      <section aria-label="Menu utama"><h2 className="mb-3 text-base font-semibold text-ink">Menu utama</h2><MenuTiles nav={nav} order={admin ? ADMIN_MENU : EMPLOYEE_MENU} wide /></section>
+      {admin ? <AdminView /> : <EmployeeView />}
+      {training && (
+        <section aria-label="Training & Operations" className="space-y-3">
+          <div className="flex flex-wrap items-baseline justify-between gap-2"><h2 className="text-base font-semibold text-ink">Training &amp; Operations</h2><Link href="/training" className="text-sm font-medium text-brand-700 hover:underline">Buka dashboard training</Link></div>
+          <TrainingHome data={training} nav={nav} />
+        </section>
+      )}
+    </div>
+  );
 }
 
 async function AdminView() {
@@ -27,7 +56,8 @@ async function AdminView() {
   const R = (n: number) => formatRupiah(n);
   return (
     <div>
-      <PageHeader title="Dashboard" description={`Ringkasan hari ini, ${formatDateLong(d.today)}. Semua angka dihitung langsung dari data absensi, jadwal, dan pengajuan.`} />
+      <h2 className="mb-3 text-base font-semibold text-ink">Ringkasan hari ini</h2>
+      <p className="-mt-2 mb-4 text-sm text-muted">{formatDateLong(d.today)}. Semua angka dihitung langsung dari data absensi, jadwal, dan pengajuan.</p>
 
       {d.missingDefaultSchedule && <div className="mb-4"><Notice tone="danger">Belum ada <strong>jadwal kerja default</strong>. Tanpa jadwal, tidak ada hari kerja yang dihitung. <Link className="underline" href="/jadwal">Atur jadwal</Link>.</Notice></div>}
       {(!d.setup.attendanceConfirmed || !d.setup.payrollRulesConfirmed) && can(user.role, "settings:view") && (
@@ -119,13 +149,14 @@ async function AdminView() {
 async function EmployeeView() {
   const user = await requirePageUser();
   if (!user.employeeId) {
-    return <div><PageHeader title="Dashboard" /><Notice tone="info">Akun Anda belum tertaut ke data karyawan. Hubungi Admin/HR.</Notice></div>;
+    return <Notice tone="info">Akun Anda belum tertaut ke data karyawan. Hubungi Admin/HR.</Notice>;
   }
   const d = await getEmployeeDashboard(user);
   const t = d.month.totals;
   return (
     <div>
-      <PageHeader title={`Halo, ${user.name.split(" ")[0]}`} description="Absensi, status pengajuan, dan slip gaji terbaru Anda." />
+      <h2 className="mb-1 text-base font-semibold text-ink">Absensi &amp; pengajuan Anda</h2>
+      <p className="mb-3 text-sm text-muted">Absensi, status pengajuan, dan slip gaji terbaru Anda.</p>
       <div className="grid gap-4 lg:grid-cols-[minmax(0,26rem)_1fr]">
         <AttendancePanel initial={d.today} />
         <div className="space-y-4">

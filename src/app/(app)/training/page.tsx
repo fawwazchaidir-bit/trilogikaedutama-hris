@@ -8,6 +8,9 @@ import { Badge } from "@/components/ui/badge";
 import { AttentionBadges, Breadcrumb, ProgressBar, ProjectStatusBadge } from "@/components/training/ui";
 import { TasksPanel } from "@/components/training/tasks-panel";
 import { getTrainingDashboard, type DashboardDto } from "@/server/services/training/insights";
+import { getTrainingHome } from "@/server/services/training/home";
+import { TrainingHome } from "@/components/portal/training-home";
+import { trainingNav } from "@/lib/training/nav";
 import { formatDateRange, formatDateWithDay, monthLabel } from "@/lib/format";
 import { PROJECT_STATUS_LABEL } from "@/lib/training/types";
 import { guard, trainingPage } from "./_lib";
@@ -23,8 +26,9 @@ const TITLE: Record<DashboardDto["variant"], { title: string; desc: string }> = 
 };
 
 export default async function TrainingDashboardPage() {
-  const { user } = await trainingPage();
-  const d = await guard(() => getTrainingDashboard(user));
+  const { user, ctx } = await trainingPage();
+  const [d, home] = await Promise.all([guard(() => getTrainingDashboard(user)), guard(() => getTrainingHome(user))]);
+  const nav = trainingNav(ctx.caps, !!user.employeeId);
   const c = d.counts;
   const t = TITLE[d.variant];
   const staff = d.variant === "staff";
@@ -35,23 +39,15 @@ export default async function TrainingDashboardPage() {
       <Breadcrumb items={[{ label: "Training & Operations" }, { label: "Dashboard" }]} />
       <PageHeader title={t.title} description={`${t.desc} Hari ini ${formatDateWithDay(d.today)}. Semua angka dihitung langsung dari data proyek.`} />
 
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        {staff ? (
-          <>
-            <Tile label="Tugas terbuka saya" value={c.openTasks} href="/training/tugas-saya" />
-            <Tile label="Tugas terlambat" value={c.overdueTasks} tone={c.overdueTasks ? "red" : undefined} href="/training/tugas-saya?filter=overdue" hint="Tenggat sebelum hari ini (WIB)" />
-            <Tile label="Mendekati tenggat" value={c.dueSoonTasks} tone={c.dueSoonTasks ? "amber" : undefined} href="/training/tugas-saya?filter=soon" hint="Dalam 3 hari ke depan" />
-            <Tile label="Checklist saya" value={c.openChecklistItems} href="/training/checklist" hint="Belum selesai (proyek aktif)" />
-          </>
-        ) : (
-          <>
-            <Tile label="Proyek aktif" value={c.activeProjects} href="/training/proyek?active=1" hint="Persiapan atau Berjalan" />
-            <Tile label="Tugas terlambat" value={c.overdueTasks} tone={c.overdueTasks ? "red" : undefined} hint="Terbuka & tenggat < hari ini (WIB)" />
-            <Tile label={d.variant === "admin" ? "Tugas jatuh tempo hari ini" : "Proyek perlu perhatian"} value={d.variant === "admin" ? c.dueTodayTasks : c.attentionProjects} tone={(d.variant === "admin" ? c.dueTodayTasks : c.attentionProjects) ? "amber" : undefined} href={d.variant === "admin" ? undefined : "/training/proyek?attention=1"} />
-            <Tile label={d.variant === "director" ? "Proyek selesai" : "Checklist wajib belum lengkap"} value={d.variant === "director" ? c.completedProjects : c.requiredChecklistProjects} hint={d.variant === "director" ? "Seluruh periode" : "Jumlah proyek aktif"} tone={d.variant !== "director" && c.requiredChecklistProjects ? "amber" : undefined} />
-          </>
-        )}
-      </div>
+      {staff && (
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <Tile label="Tugas terbuka saya" value={c.openTasks} href="/training/tugas-saya" />
+          <Tile label="Tugas terlambat" value={c.overdueTasks} tone={c.overdueTasks ? "red" : undefined} href="/training/tugas-saya?filter=overdue" hint="Tenggat sebelum hari ini (WIB)" />
+          <Tile label="Mendekati tenggat" value={c.dueSoonTasks} tone={c.dueSoonTasks ? "amber" : undefined} href="/training/tugas-saya?filter=soon" hint="Dalam 3 hari ke depan" />
+          <Tile label="Checklist saya" value={c.openChecklistItems} href="/training/checklist" hint="Belum selesai (proyek aktif)" />
+        </div>
+      )}
+      <div className={staff ? "mt-5" : ""}><TrainingHome data={home} nav={nav} withKpis={!staff} /></div>
 
       {d.variant === "admin" && (
         <div className="mt-3 grid gap-3 sm:grid-cols-3">
@@ -114,11 +110,11 @@ export default async function TrainingDashboardPage() {
       )}
 
       {d.variant === "director" && (
-        <Card className="mt-6"><CardHeader title="Ringkasan risiko operasional" description="Hanya indikator yang didukung data." />
+        <Card className="mt-6"><CardHeader title="Ringkasan risiko operasional" description="Dihitung langsung dari data proyek." />
           <dl className="grid gap-4 px-5 py-4 sm:grid-cols-2 lg:grid-cols-5">
             {[["Tugas terlambat", d.risks.overdueTasks], ["Checklist wajib belum lengkap, mulai ≤ 7 hari", d.risks.requiredChecklistNearStart], ["Proyek aktif tanpa PIC", d.risks.noPic], ["Lewat tanggal selesai, belum ditutup", d.risks.pastEndNotClosed], ["Tugas milik anggota yang sudah keluar tim", d.risks.orphanTasks]].map(([l, n]) => <div key={String(l)}><dt className="text-xs text-muted">{l}</dt><dd className={`tabular text-2xl font-semibold ${Number(n) ? "text-brand-700" : "text-ink"}`}>{n}</dd></div>)}
           </dl>
-          <div className="border-t border-line px-5 py-3"><Notice tone="info">Indikator <strong>beban tim</strong>, <strong>kesiapan kegiatan</strong>, dan <strong>ketepatan waktu</strong> belum ditampilkan sebagai persentase: rumusnya belum disepakati dan datanya belum memadai (lihat docs/TRAINING-OPS.md).</Notice></div></Card>
+          <div className="border-t border-line px-5 py-3"><Notice tone="info">Indikator <strong>Ketepatan Waktu</strong>, <strong>Kesiapan</strong>, dan <strong>Beban Tim</strong> ada di <Link href="/training/pemantauan" className="font-medium underline">Pemantauan Program</Link>; rumus dan ambang warnanya di <Link href="/training/indikator" className="font-medium underline">Rumus Indikator</Link>.</Notice></div></Card>
       )}
     </div>
   );

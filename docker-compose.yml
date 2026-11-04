@@ -57,5 +57,6 @@ services:
       CRON_SECRET: ${CRON_SECRET:-}
       # Modul Training & Operations: DEFAULT MATI. Nyalakan bertahap (staging → UAT → production); lihat docs/TRAINING-OPS.md.
       TRAINING_MODULE_ENABLED: ${TRAINING_MODULE_ENABLED:-false}
+      TRAINING_WORKER: ${TRAINING_WORKER:-true}
 volumes:
   pgdata:
