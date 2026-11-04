@@ -3,7 +3,7 @@
  * milestone & item kesiapan otomatis, milestone diselesaikan dengan bukti, peserta terkonfirmasi, peta beban & kepadatan kelas.
  * Dijalankan sesudah 05f (memakai level akses Ayu/Budi dan keanggotaan Citra dari sana) dan sebelum 06-stage2 (2FA admin).
  */
-import { expect, test, type Browser, type Locator } from "@playwright/test";
+import { expect, test, type Browser, type Locator, type Page } from "@playwright/test";
 import { USERS, isoDatePlus, login } from "./helpers";
 
 const PROJECT = "Sertifikasi HACCP E2E Indikator";
@@ -22,10 +22,18 @@ async function as(browser: Browser, who: keyof typeof USERS, vp = { width: 1360,
 
 test.describe.configure({ mode: "serial" });
 
+/** Versi konfigurasi aktif dari layar (0 = bawaan dokumen, belum pernah disimpan). Spec lain (mis. sweep API 05c) dapat sudah membuat versi, jadi tidak diasumsikan 1. */
+async function activeVersion(page: Page): Promise<number> {
+  const text = (await page.getByText(/Versi aktif:/).textContent()) ?? "";
+  const m = /Versi aktif: (\d+)/.exec(text);
+  return m ? Number(m[1]) : 0;
+}
+
 test("Direktur mengubah ambang di aplikasi: validasi urutan, simpan sebagai VERSI BARU, tercatat di riwayat & audit", async ({ browser }) => {
   const { ctx, page } = await as(browser, "pimpinan");
   await page.goto("/training/indikator");
   await expect(page.getByRole("heading", { name: "Rumus Indikator" })).toBeVisible();
+  const v0 = await activeVersion(page);
   const yellow = page.getByLabel("Ketepatan Waktu — Kuning bila SPI ≥");
   await expect(yellow).toHaveValue("0.85");
   const save = page.getByRole("button", { name: "Simpan sebagai versi baru" });
@@ -41,19 +49,21 @@ test("Direktur mengubah ambang di aplikasi: validasi urutan, simpan sebagai VERS
   await page.getByLabel("Catatan perubahan").fill("Batas Kuning SPI diturunkan setelah peninjauan");
   await save.click();
   await expect(page.getByText("Konfigurasi disimpan sebagai versi baru.").last()).toBeVisible();
-  await expect(page.getByRole("region", { name: "Riwayat versi" })).toContainText("Versi 1");
+  await expect(page.getByRole("region", { name: "Riwayat versi" })).toContainText(`Versi ${v0 + 1}`);
   await expect(page.getByRole("region", { name: "Riwayat versi" })).toContainText("Batas Kuning SPI diturunkan setelah peninjauan");
+  expect(await activeVersion(page)).toBe(v0 + 1);
   await page.reload();
   await expect(page.getByLabel("Ketepatan Waktu — Kuning bila SPI ≥")).toHaveValue("0.8");
 
   await page.goto("/audit-log");
-  await expect(page.getByText(/Konfigurasi indikator diubah → versi 1/).first()).toBeVisible();
+  await expect(page.getByText(new RegExp(`Konfigurasi indikator diubah → versi ${v0 + 1}\\b`)).first()).toBeVisible();
   await ctx.close();
 });
 
-test("Direktur mengisi pemegang jabatan (PIC) dan fasilitator; perubahan menjadi versi 2", async ({ browser }) => {
+test("Direktur mengisi pemegang jabatan (PIC) dan fasilitator; perubahan menjadi versi baru", async ({ browser }) => {
   const { ctx, page } = await as(browser, "pimpinan");
   await page.goto("/training/indikator");
+  const v1 = await activeVersion(page);
   await page.locator("summary", { hasText: "Jabatan, pemegang, dan fasilitator" }).click();
   await choose(page.getByLabel("Pemegang Supervisor Adm. & Kurikulum"), "Ayu Lestari");
   await choose(page.getByLabel("Pemegang Manajer Operasional dan Keuangan"), "Ayu Lestari");
@@ -63,7 +73,7 @@ test("Direktur mengisi pemegang jabatan (PIC) dan fasilitator; perubahan menjadi
   await choose(page.getByLabel("Tambah fasilitator"), "Citra Dewi");
   await page.getByRole("button", { name: "Simpan sebagai versi baru" }).click();
   await expect(page.getByText("Konfigurasi disimpan sebagai versi baru.").last()).toBeVisible();
-  await expect(page.getByRole("region", { name: "Riwayat versi" })).toContainText("Versi 2");
+  await expect(page.getByRole("region", { name: "Riwayat versi" })).toContainText(`Versi ${v1 + 1}`);
   await ctx.close();
 });
 
