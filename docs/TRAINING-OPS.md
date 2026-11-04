@@ -264,9 +264,11 @@ Mengaktifkan flag tidak memberi siapa pun akses otomatis: Super Admin harus memb
 | Integrasi — gerbang akses, IDOR, tim, penjaga DB | `tests/integration/training-access.test.ts` | 26 |
 | Integrasi — alur bisnis (proyek→penutupan, dashboard, jadwal, peserta, dokumen, referensi) | `tests/integration/training-flow.test.ts` | 35 |
 | Integrasi — modul dimatikan | `tests/integration/training-flag.test.ts` | 3 |
-| Unit — mesin indikator, konfigurasi, skema PATCH | `tests/unit/training-indicators.test.ts`, `training-validation.test.ts`, `nav-pref.test.ts` | 42 |
+| Unit — mesin indikator, konfigurasi, skema PATCH, eskalasi & deret hari kerja, waktu relatif | `tests/unit/training-indicators.test.ts`, `training-validation.test.ts`, `training-escalation.test.ts`, `nav-pref.test.ts`, `format-timeago.test.ts` | 60 |
 | Integrasi — indikator, konfigurasi berversi, template, hak akses, beban/KP | `tests/integration/training-indicators.test.ts` | 43 |
-| E2E browser (build produksi) | `tests/e2e/05f-training.spec.ts`, `05g-sidebar.spec.ts`, `05h-indicators.spec.ts` | 20 (8 + 5 + 7) |
+| Integrasi — otomasi: pengingat H-1/hari-H, snapshot, eskalasi, Kuning berturut-turut, beban berlebih, catatan pemulihan | `tests/integration/training-automation.test.ts` | 21 |
+| Integrasi — data beranda (lingkup akses) & pemicu pekerja harian (401/200/idempoten) | `tests/integration/training-home.test.ts`, `training-daily-route.test.ts` | 5 |
+| E2E browser (build produksi) | `tests/e2e/05f-training.spec.ts`, `05g-sidebar.spec.ts`, `05h-indicators.spec.ts`, `05i-portal.spec.ts` | 26 (8 + 5 + 7 + 6) |
 
 Yang dibuktikan khusus: akun tanpa akses/HR → 404; Pemantau hanya-lihat, Super Admin (Direktur) kelola penuh; staf tidak dapat mengubah tugas orang lain; mengganti ID proyek/tugas/anggota/item/jadwal/peserta/dokumen
 tidak membuka proyek lain; berkas dokumen tidak dapat dibuka di luar lingkup; kontak peserta/instruktur tersembunyi; kode proyek unik saat 8 pembuatan serentak; trigger & CHECK menolak SQL langsung;

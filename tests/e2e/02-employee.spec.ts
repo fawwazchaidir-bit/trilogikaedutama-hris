@@ -99,7 +99,7 @@ test.describe("Karyawan — slip gaji", () => {
     await rows.first().getByRole("link", { name: "Lihat" }).click();
     await expect(page.getByRole("heading", { name: new RegExp(`Slip Gaji — ${demoPayrollMonths().issuedRun}`) })).toBeVisible();
     await expect(page.getByText("Gaji bersih diterima")).toBeVisible();
-    await expect(page.getByText("Budi Santoso").first()).toBeVisible();
+    await expect(page.getByRole("main").getByText("Budi Santoso").first()).toBeVisible(); // di area konten (nama juga tampil di menu pengguna)
     // rekening hanya 4 digit terakhir
     await expect(page.getByText(/•••• •••• \d{4}/)).toBeVisible();
 
