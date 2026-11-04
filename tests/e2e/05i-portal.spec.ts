@@ -102,3 +102,45 @@ test("ponsel: beranda & dashboard training tanpa overflow horizontal; ikon cari 
   await expect(page.getByRole("dialog", { name: "Pencarian cepat" })).toBeVisible();
   await ctx.close();
 });
+
+test("banner beranda: Direktur menulis pesan broadcast (+ notifikasi) → tampil bagi karyawan; hanya Direktur yang dapat mengubah; kembali ke bawaan", async ({ browser }) => {
+  const boss = await as(browser, "pimpinan");
+  await boss.page.goto("/dashboard");
+  await expect(boss.page.getByRole("region", { name: "Sambutan" })).toContainText("Bersama Membangun Talenta Unggul untuk Indonesia");
+  await boss.page.getByRole("button", { name: "Ubah pesan banner" }).click();
+  const dlg = boss.page.getByRole("dialog", { name: "Pesan banner beranda" });
+  await dlg.getByLabel("Judul pesan").fill("Libur bersama E2E");
+  await dlg.getByLabel("Isi pesan (opsional)").fill("Kantor tutup satu hari.\nLayanan kembali normal esok hari.");
+  await dlg.getByRole("checkbox", { name: /Kirim juga sebagai notifikasi/ }).check();
+  await dlg.getByRole("button", { name: "Simpan & kirim notifikasi" }).click();
+  await expect(boss.page.getByText("Pesan banner diperbarui.").last()).toBeVisible();
+  const banner = boss.page.getByRole("region", { name: "Sambutan" });
+  await expect(banner).toContainText("Libur bersama E2E");
+  await expect(banner).toContainText("Layanan kembali normal esok hari.");
+  await expect(banner).toContainText("Pesan dari Rudi Hartono");
+  await boss.ctx.close();
+
+  const emp = await as(browser, "citra");
+  await emp.page.goto("/dashboard");
+  await expect(emp.page.getByRole("region", { name: "Sambutan" })).toContainText("Libur bersama E2E");
+  await expect(emp.page.getByRole("button", { name: "Ubah pesan banner" })).toHaveCount(0);
+  const put = await emp.page.request.put("/api/portal/announcement", { data: { title: "Pesan palsu karyawan" }, headers: { origin: new URL(emp.page.url()).origin } });
+  expect(put.status()).toBe(403);
+  await emp.page.goto("/notifikasi");
+  await expect(emp.page.getByText("Pesan dari Direktur: Libur bersama E2E")).toBeVisible();
+  await emp.ctx.close();
+
+  const hr = await as(browser, "hr");
+  await hr.page.goto("/dashboard");
+  await expect(hr.page.getByRole("region", { name: "Sambutan" })).toContainText("Libur bersama E2E");
+  await expect(hr.page.getByRole("button", { name: "Ubah pesan banner" })).toHaveCount(0);
+  await hr.ctx.close();
+
+  const back = await as(browser, "pimpinan");
+  await back.page.goto("/dashboard");
+  await back.page.getByRole("button", { name: "Ubah pesan banner" }).click();
+  await back.page.getByRole("dialog", { name: "Pesan banner beranda" }).getByRole("button", { name: "Kembalikan ke bawaan" }).click();
+  await expect(back.page.getByText("Banner dikembalikan ke teks bawaan.").last()).toBeVisible();
+  await expect(back.page.getByRole("region", { name: "Sambutan" })).toContainText("Bersama Membangun Talenta Unggul untuk Indonesia");
+  await back.ctx.close();
+});

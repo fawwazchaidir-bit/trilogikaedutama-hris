@@ -11,6 +11,8 @@ import { PortalIntro } from "@/components/portal/portal-intro";
 import { MenuTiles } from "@/components/portal/menu-tiles";
 import { TrainingHome } from "@/components/portal/training-home";
 import { getBrand } from "@/server/services/settings";
+import { getBanner, listBannerHistory } from "@/server/services/announcement";
+import { AnnouncementEditor } from "@/components/portal/announcement-editor";
 import { getTrainingHome } from "@/server/services/training/home";
 import { loadNav } from "@/server/nav";
 import { env } from "@/server/env";
@@ -31,12 +33,16 @@ export default async function DashboardPage() {
   const admin = can(user.role, "dashboard:admin");
   const [brand, { nav, trainingVisible }] = await Promise.all([getBrand(), loadNav(user)]);
   const training = trainingVisible ? await getTrainingHome(user) : null;
+  const banner = await getBanner();
+  const director = user.role === "SUPER_ADMIN";
+  const history = director ? await listBannerHistory(user) : [];
   return (
     <div className="space-y-8">
       <PortalIntro
         name={user.name} today={todayIso(env().APP_TIMEZONE)} logoUrl={brand.logoUrl}
         subtitle={admin ? "Kelola kehadiran, pengajuan, dan penggajian dengan lebih mudah dan terintegrasi." : "Kelola pekerjaan Anda dengan lebih mudah dan terintegrasi."}
-        banner={{ title: "Bersama Membangun Talenta Unggul untuk Indonesia", subtitle: brand.name }}
+        banner={banner} brandName={brand.name}
+        action={director ? <AnnouncementEditor banner={banner} history={history} /> : undefined}
       />
       <section aria-label="Menu utama"><h2 className="mb-3 text-base font-semibold text-ink">Menu utama</h2><MenuTiles nav={nav} order={admin ? ADMIN_MENU : EMPLOYEE_MENU} wide /></section>
       {admin ? <AdminView /> : <EmployeeView />}

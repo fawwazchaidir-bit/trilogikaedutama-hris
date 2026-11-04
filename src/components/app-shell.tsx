@@ -114,8 +114,8 @@ export function AppShell({ user, nav, company, unread, pendingBadges, initialNav
       <div className="flex items-center gap-3 px-5 py-5">
         <Image src={company.logoUrl} alt="" width={40} height={40} unoptimized className="size-10 shrink-0 rounded-full bg-white object-contain p-0.5" />
         <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-bold uppercase leading-tight tracking-wide text-white">{company.name}</p>
-          <p className="text-[11px] leading-snug text-white/65">Trilogika Internal Portal</p>
+          <p title={company.name} className="break-words text-[13px] font-bold uppercase leading-tight text-white">{company.name}</p>
+          <p className="mt-0.5 text-[11px] leading-snug text-white/65">Trilogika Internal Portal</p>
         </div>
         <button type="button" onClick={toggleSidebar} aria-label="Sembunyikan menu samping" title="Sembunyikan menu samping" className="hidden size-8 shrink-0 place-items-center rounded-md text-white/60 hover:bg-white/10 hover:text-white lg:grid">
           <PanelLeftClose className="size-[18px]" aria-hidden />
@@ -184,7 +184,7 @@ export function AppShell({ user, nav, company, unread, pendingBadges, initialNav
         <div className="min-w-0 lg:flex lg:flex-col">
         <div className="no-print sticky top-0 z-30 flex items-center gap-1 bg-maroon-900 px-3 py-2 text-white lg:hidden">
           <button type="button" aria-label="Buka menu" onClick={() => setOpen(true)} className="grid size-10 place-items-center rounded-full hover:bg-white/10"><Menu className="size-5" /></button>
-          <span className="min-w-0 flex-1 truncate px-1 text-sm font-semibold">{company.name}</span>
+          <span title={company.name} className="min-w-0 flex-1 break-words px-1 text-[13px] font-semibold leading-tight">{company.name}</span>
           <button type="button" aria-label="Cari" onClick={() => setSearchOpen(true)} className="grid size-10 place-items-center rounded-full hover:bg-white/10"><Search className="size-5" /></button>
           {bell("dark")}
           <UserMenu user={user} hasEmployee={hasEmployee} tone="dark" />

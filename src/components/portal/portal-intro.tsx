@@ -1,10 +1,12 @@
 import { CalendarDays } from "lucide-react";
-import { formatDateWithDay } from "@/lib/format";
+import { formatDateShort, formatDateWithDay } from "@/lib/format";
+import type { BannerDto } from "@/server/services/announcement";
 import { HeroBanner } from "./hero-banner";
 
-/** Sapaan + tanggal (WIB) + banner. `subtitle` menyesuaikan peran. */
-export function PortalIntro({ name, today, subtitle, logoUrl, banner }: { name: string; today: string; subtitle: string; logoUrl: string; banner: { title: string; subtitle?: string } }) {
+/** Sapaan + tanggal (WIB) + banner (pesan Direktur atau bawaan). `action` = tombol ubah pesan (hanya Direktur). */
+export function PortalIntro({ name, today, subtitle, logoUrl, banner, brandName, action }: { name: string; today: string; subtitle: string; logoUrl: string; banner: BannerDto; brandName: string; action?: React.ReactNode }) {
   const first = name.trim().split(/\s+/)[0] ?? name;
+  const caption = banner.isDefault ? brandName : `Pesan dari ${banner.postedByName ?? "Direktur"}${banner.postedAt ? ` · ${formatDateShort(banner.postedAt.slice(0, 10))}` : ""}${banner.expiresAt ? ` · tampil sampai ${formatDateShort(banner.expiresAt)}` : ""}`;
   return (
     <div className="space-y-5">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -17,7 +19,7 @@ export function PortalIntro({ name, today, subtitle, logoUrl, banner }: { name: 
           <span className="font-medium text-ink-soft">{formatDateWithDay(today)}</span>
         </p>
       </div>
-      <HeroBanner title={banner.title} subtitle={banner.subtitle} logoUrl={logoUrl} />
+      <HeroBanner title={banner.title} body={banner.body} caption={caption} logoUrl={logoUrl} action={action} />
     </div>
   );
 }

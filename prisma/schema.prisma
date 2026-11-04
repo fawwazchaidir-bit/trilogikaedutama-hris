@@ -1933,3 +1933,25 @@ model TrainingRecoveryNote {
   @@index([projectId, createdAt])
   @@map("training_recovery_notes")
 }
+
+// ───────────── Portal: pesan banner beranda (broadcast Direktur) ─────────────
+
+/// Pesan pada banner beranda yang dilihat seluruh karyawan. Hanya Super Admin (Direktur) yang menulis. APPEND-ONLY: pesan terbaru yang aktif dan belum
+/// kedaluwarsa yang tampil; `active = false` = kembali ke banner bawaan. Seluruh riwayat tersimpan.
+model PortalAnnouncement {
+  id            String    @id @default(uuid()) @db.Uuid
+  /// Urutan monoton: "pesan terbaru" = seq terbesar (tidak bergantung pada cap waktu milidetik).
+  seq           BigInt    @unique @default(autoincrement())
+  title         String
+  body          String?
+  active        Boolean   @default(true)
+  /// Tanggal terakhir pesan tampil (WIB, inklusif). Kosong = sampai diganti.
+  expiresAt     DateTime? @db.Date
+  /// Jumlah akun yang juga diberi notifikasi saat pesan dikirim (0 = hanya banner).
+  notifiedCount Int       @default(0)
+  createdById   String    @db.Uuid
+  createdAt     DateTime  @default(now())
+
+  @@index([createdAt])
+  @@map("portal_announcements")
+}
