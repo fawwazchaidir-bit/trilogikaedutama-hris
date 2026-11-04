@@ -9,6 +9,7 @@ import { AppError } from "@/server/errors";
 import { readFileForActor } from "@/server/services/files";
 import { resetDb } from "../helpers/db";
 import { addTeam, inDays, mkProject, PDF, seedTraining, type TrainingFixtures } from "../helpers/training";
+import { PROJECT_ABILITIES } from "@/lib/training/access";
 import { addMember, changeProjectStatus, createProject, endMember, getProject, listMembers, listProjects, updateMember, updateProject } from "@/server/services/training/projects";
 import { changeTaskStatus, addComment, createTask, getTask, listChecklist, listProjectTasks, updateChecklistItem, addChecklistItem, saveTemplate, applyChecklistTemplate } from "@/server/services/training/work";
 import { addParticipant, createSchedule, listProjectParticipants, updateParticipant, updateSchedule, uploadDocument } from "@/server/services/training/operations";
@@ -37,17 +38,27 @@ describe("gerbang modul: siapa yang boleh masuk", () => {
     expect(await fail(createProject(fx.hr, { name: "Dibuat HR" }))).toMatchObject(NOT_FOUND);
   });
 
-  it("Super Admin: melihat semua proyek tetapi TIDAK otomatis boleh mengubah (Direktur memantau)", async () => {
+  it("Direktur (Super Admin): akses penuh — melihat dan MENGUBAH proyek mana pun tanpa perlu level; semua tercatat di audit", async () => {
     const id = await mkProject(fx.mgr);
     const p = await getProject(fx.superAdmin, id);
-    expect(p.abilities).toEqual(["view"]);
-    expect(await fail(updateProject(fx.superAdmin, id, { name: "Diubah direktur" }))).toMatchObject(FORBIDDEN);
-    expect(await fail(createTask(fx.superAdmin, id, { title: "Tugas dari direktur" }))).toMatchObject(FORBIDDEN);
-    expect(await fail(createProject(fx.superAdmin, { name: "Baru" }))).toMatchObject(FORBIDDEN);
-    expect((await listProjects(fx.superAdmin)).total).toBe(1);
+    expect([...p.abilities].sort()).toEqual([...PROJECT_ABILITIES].sort());
+    await updateProject(fx.superAdmin, id, { name: "Diubah direktur" });
+    await createTask(fx.superAdmin, id, { title: "Tugas dari direktur" });
+    const made = await createProject(fx.superAdmin, { name: "Dibuat direktur", picEmployeeId: fx.empIds[0] }); // boleh menetapkan PIC
+    expect((await listMembers(fx.superAdmin, made.id)).filter((m) => m.active).map((m) => m.role)).toEqual(["PROJECT_MANAGER"]);
+    expect((await listProjects(fx.superAdmin)).total).toBe(2);
+    expect(await prisma.auditLog.count({ where: { actorId: fx.superAdmin.userId, action: { startsWith: "training.project." } } })).toBeGreaterThanOrEqual(2);
+    expect(await prisma.trainingAccess.count({ where: { userId: fx.superAdmin.userId } })).toBe(0); // tanpa baris level
   });
 
-  it("Pemantau (VIEWER): lihat semua, tidak bisa mengubah apa pun", async () => {
+  it("jumlah pemegang level Manajer Program TIDAK dibatasi; Direktur yang memberi", async () => {
+    for (const a of [fx.emp1, fx.emp2, fx.emp3, fx.loner]) await setAccessLevel(fx.superAdmin, { userId: a.userId, level: "MANAGER" });
+    expect(await prisma.trainingAccess.count({ where: { level: "MANAGER" } })).toBe(5); // 4 baru + 1 dari fixture
+    const id = await mkProject(fx.mgr);
+    for (const a of [fx.emp1, fx.emp2, fx.emp3, fx.loner]) expect((await getProject(a, id)).abilities).toContain("close");
+  });
+
+  it("Pemantau (VIEWER): lihat semua, tidak bisa mengubah apa pun (berbeda dari Direktur)", async () => {
     const id = await mkProject(fx.mgr);
     expect((await getProject(fx.viewer, id)).abilities).toEqual(["view"]);
     expect(await fail(updateProject(fx.viewer, id, { name: "x1" }))).toMatchObject(FORBIDDEN);
@@ -55,16 +66,16 @@ describe("gerbang modul: siapa yang boleh masuk", () => {
     expect(await fail(createProject(fx.viewer, { name: "Baru" }))).toMatchObject(FORBIDDEN);
   });
 
-  it("Pemantau & Super Admin tidak dapat mengubah tugas atau berkomentar (komentar = perubahan data); anggota proyek dapat", async () => {
+  it("Pemantau tidak dapat mengubah tugas atau berkomentar (komentar = perubahan data); anggota proyek, Manajer, dan Direktur dapat", async () => {
     const id = await mkProject(fx.mgr);
     await addTeam(fx.mgr, id, [[fx.empIds[0], "PROJECT_MANAGER"], [fx.empIds[1], "STAFF"]]);
     const t = await createTask(fx.emp1, id, { title: "Tugas pemantauan", assigneeId: fx.empIds[1] });
     expect(await fail(addComment(fx.viewer, t.id, { body: "Saya pantau" }))).toMatchObject(FORBIDDEN);
-    expect(await fail(addComment(fx.superAdmin, t.id, { body: "Dari direktur" }))).toMatchObject(FORBIDDEN);
     expect(await fail(changeTaskStatus(fx.viewer, t.id, { status: "DONE" }))).toMatchObject(FORBIDDEN);
+    await addComment(fx.superAdmin, t.id, { body: "Dari direktur" });
     await addComment(fx.emp2, t.id, { body: "Anggota boleh" });
     await addComment(fx.mgr, t.id, { body: "Manajer boleh" });
-    expect(await prisma.trainingTaskComment.count()).toBe(2);
+    expect(await prisma.trainingTaskComment.count()).toBe(3);
   });
 
   it("level modul hanya dapat diatur Super Admin; tercatat di audit dan pemilik akun diberi tahu", async () => {

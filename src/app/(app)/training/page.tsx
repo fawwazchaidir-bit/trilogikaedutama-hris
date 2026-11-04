@@ -19,7 +19,7 @@ const TITLE: Record<DashboardDto["variant"], { title: string; desc: string }> = 
   staff: { title: "Dashboard Training", desc: "Tugas, proyek, dan jadwal Anda." },
   admin: { title: "Dashboard Admin Program", desc: "Operasional harian pada proyek dalam lingkup akses Anda." },
   manager: { title: "Dashboard Manajer Program", desc: "Pelaksanaan proyek, keterlambatan, dan penugasan tim." },
-  director: { title: "Dashboard Direktur", desc: "Ringkasan seluruh proyek, status, dan risiko operasional (hanya lihat)." },
+  director: { title: "Dashboard Direktur", desc: "Ringkasan seluruh proyek, status, dan risiko operasional." },
 };
 
 export default async function TrainingDashboardPage() {

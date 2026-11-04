@@ -6,14 +6,20 @@ import { Notice } from "@/components/ui/card";
 import { SelectField, TextAreaField, TextField } from "@/components/ui/field";
 import { api } from "@/lib/api-client";
 import { ACTIVITY_KINDS, ACTIVITY_KIND_LABEL, DELIVERY_MODES, DELIVERY_MODE_LABEL, type ActivityKind, type DeliveryMode } from "@/lib/training/types";
+import { TRACKS, TRACK_LABEL, type Track } from "@/lib/training/indicators/config";
 import { useRunner } from "./use-runner";
 
 export interface ProjectFormValues {
   name: string; programId: string; kind: ActivityKind; clientName: string; deliveryMode: DeliveryMode; location: string;
   startDate: string; endDate: string; description: string; notes: string;
+  /** Pemantauan: jenis program & data pelaksana indikator (angka disimpan sebagai teks agar kolom dapat dikosongkan). */
+  track: Track; bnsp: boolean; participantsMin: string; participantsMax: string; requestDate: string; registrationCloseDate: string;
 }
 
-const EMPTY: ProjectFormValues = { name: "", programId: "", kind: "REGULAR", clientName: "", deliveryMode: "ONSITE", location: "", startDate: "", endDate: "", description: "", notes: "" };
+const EMPTY: ProjectFormValues = {
+  name: "", programId: "", kind: "REGULAR", clientName: "", deliveryMode: "ONSITE", location: "", startDate: "", endDate: "", description: "", notes: "",
+  track: "REGULAR", bnsp: false, participantsMin: "", participantsMax: "", requestDate: "", registrationCloseDate: "",
+};
 
 interface Option { id: string; name: string }
 
@@ -35,6 +41,16 @@ function Fields({ v, set, programs, errors }: { v: ProjectFormValues; set: (p: P
       <TextField className="sm:col-span-2" label="Lokasi / media" maxLength={200} value={v.location} onChange={(e) => set({ location: e.target.value })} error={errors.location} hint="Alamat atau kota (tatap muka), atau nama platform (daring). Jangan menulis kata sandi/tautan rahasia." />
       <TextField label="Tanggal mulai" type="date" value={v.startDate} onChange={(e) => set({ startDate: e.target.value })} error={errors.startDate} />
       <TextField label="Tanggal selesai" type="date" value={v.endDate} onChange={(e) => set({ endDate: e.target.value })} error={errors.endDate} />
+      <div className="sm:col-span-2 mt-1 border-t border-line pt-4"><p className="text-sm font-semibold text-ink">Pemantauan program</p><p className="text-xs text-muted">Menentukan template milestone, bobot kesiapan, dan jam kerja. Jenis program tidak dapat diganti setelah pekerjaan mulai tercatat.</p></div>
+      <SelectField label="Jenis program" value={v.track} onChange={(e) => set({ track: e.target.value as Track })} error={errors.track}>
+        {TRACKS.map((t) => <option key={t} value={t}>{TRACK_LABEL[t]}</option>)}
+      </SelectField>
+      <label className="flex items-center gap-2 self-end pb-2 text-sm text-ink"><input type="checkbox" className="size-4 rounded border-line" checked={v.bnsp} onChange={(e) => set({ bnsp: e.target.checked })} />Memakai skema sertifikasi BNSP</label>
+      <TextField label={v.track === "PARTNER" ? "Jumlah peserta di kontrak" : "Peserta minimum"} type="number" inputMode="numeric" min={0} value={v.participantsMin} onChange={(e) => set({ participantsMin: e.target.value })} error={errors.participantsMin} hint="Acuan komponen Peserta pada Kesiapan." />
+      <TextField label="Peserta maksimum" type="number" inputMode="numeric" min={0} value={v.participantsMax} onChange={(e) => set({ participantsMax: e.target.value })} error={errors.participantsMax} hint="Opsional." />
+      {v.track === "PARTNER"
+        ? <TextField label="Tanggal permintaan klien masuk (T)" type="date" value={v.requestDate} onChange={(e) => set({ requestDate: e.target.value })} error={errors.requestDate} hint="Acuan tenggat tahap awal program kerjasama." />
+        : <TextField label="Tutup pendaftaran" type="date" value={v.registrationCloseDate} onChange={(e) => set({ registrationCloseDate: e.target.value })} error={errors.registrationCloseDate} hint="Kosong = sesuai pengaturan (bawaan H-3)." />}
       <TextAreaField className="sm:col-span-2" label="Deskripsi" rows={3} maxLength={2000} value={v.description} onChange={(e) => set({ description: e.target.value })} error={errors.description} />
       <TextAreaField className="sm:col-span-2" label="Catatan penting" rows={2} maxLength={2000} value={v.notes} onChange={(e) => set({ notes: e.target.value })} error={errors.notes} />
     </div>
@@ -44,6 +60,8 @@ function Fields({ v, set, programs, errors }: { v: ProjectFormValues; set: (p: P
 const payload = (v: ProjectFormValues) => ({
   name: v.name, programId: v.programId || null, kind: v.kind, clientName: v.clientName, deliveryMode: v.deliveryMode, location: v.location,
   startDate: v.startDate || null, endDate: v.endDate || null, description: v.description, notes: v.notes,
+  track: v.track, bnsp: v.bnsp, participantsMin: v.participantsMin === "" ? null : Number(v.participantsMin), participantsMax: v.participantsMax === "" ? null : Number(v.participantsMax),
+  requestDate: v.requestDate || null, registrationCloseDate: v.registrationCloseDate || null,
 });
 
 /** Formulir proyek baru (halaman penuh). */

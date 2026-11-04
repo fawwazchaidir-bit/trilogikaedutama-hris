@@ -6,7 +6,7 @@ import { Errors } from "../../errors";
 import { parseInput } from "../../validate";
 import { actorCan, type Actor } from "../../actor";
 import { writeAudit, diffFields } from "../../audit";
-import { dateToIso } from "../../json";
+import { dateToIso, isoToDate } from "../../json";
 import { storeFile } from "../files";
 import { addDays, localDate, localTime, startOfLocalDay, zonedInstant } from "@/lib/time";
 import { SENSITIVE_DOC_CATEGORIES, type Confirmation, type DocCategory, type ExternalSystem, type InstructorKind, type ParticipantStatus, type ScheduleStatus } from "@/lib/training/types";
@@ -17,7 +17,7 @@ import {
 } from "@/lib/validation/training";
 import type { Paged } from "@/lib/types";
 import { accessibleProjectWhere, assertEditable, loadProjectAccess, requireAbility, requireGlobalCap, requireModule, type ModuleContext } from "./access";
-import { assertUuid, auditProject } from "./shared";
+import { assertUuid, auditProject, today } from "./shared";
 
 // ═════════════════════════════ Jadwal ═════════════════════════════
 
@@ -181,6 +181,8 @@ export interface ParticipantDto {
   /** Null bila pelaku tidak berwenang melihat kontak (bukan berarti kosong). */
   phone: string | null; email: string | null; contactVisible: boolean;
   status: ParticipantStatus; note: string | null; source: string; createdAt: string;
+  /** Terkonfirmasi (dicatat manual); tanggalnya, bila ada. */
+  confirmed: boolean; confirmedAt: string | null;
 }
 
 type PartRow = Prisma.TrainingParticipantGetPayload<{ include: { project: { select: { code: true; name: true } } } }>;
@@ -189,6 +191,7 @@ function toParticipantDto(r: PartRow, contactVisible: boolean): ParticipantDto {
   return {
     id: r.id, projectId: r.projectId, projectCode: r.project.code, projectName: r.project.name, fullName: r.fullName, organization: r.organization,
     phone: contactVisible ? r.phone : null, email: contactVisible ? r.email : null, contactVisible, status: r.status, note: r.note, source: r.source, createdAt: r.createdAt.toISOString(),
+    confirmed: r.confirmedAt !== null, confirmedAt: r.confirmedAt ? dateToIso(r.confirmedAt) : null,
   };
 }
 
@@ -216,7 +219,7 @@ export async function listAllParticipants(actor: Actor, raw: unknown = {}): Prom
     actor.employeeId ? prisma.trainingProjectMember.findMany({ where: { employeeId: actor.employeeId, endedAt: null, role: { in: ["PROJECT_MANAGER", "ADMIN_PROGRAM", "PARTICIPANT_OWNER"] } }, select: { projectId: true } }) : Promise.resolve([]),
   ]);
   const manageIn = new Set(mine.map((m) => m.projectId));
-  const items = rows.map((r) => toParticipantDto(r, mod.subject.level === "MANAGER" || manageIn.has(r.projectId)));
+  const items = rows.map((r) => toParticipantDto(r, mod.caps.fullAccess || manageIn.has(r.projectId)));
   return { items, total, page, pageSize, pageCount: Math.max(Math.ceil(total / pageSize), 1) };
 }
 
@@ -226,9 +229,10 @@ export async function addParticipant(actor: Actor, projectId: string, raw: unkno
   assertEditable(access.project);
   const input = parseInput(participantSchema, raw);
   return transaction(async (tx) => {
-    const p = await tx.trainingParticipant.create({ data: { projectId, ...input, source: "MANUAL", createdById: actor.userId } });
+    const { confirmed, ...fields } = input;
+    const p = await tx.trainingParticipant.create({ data: { projectId, ...fields, confirmedAt: confirmed ? isoToDate(today()) : null, source: "MANUAL", createdById: actor.userId } });
     // Audit tanpa kontak: hanya nama dan status.
-    await auditProject(tx, actor, projectId, { action: "training.participant.add", summary: `Peserta "${p.fullName}" ditambahkan ke ${access.project.code}`, after: { participantId: p.id, status: p.status } });
+    await auditProject(tx, actor, projectId, { action: "training.participant.add", summary: `Peserta "${p.fullName}" ditambahkan ke ${access.project.code}`, after: { participantId: p.id, status: p.status, confirmed: p.confirmedAt !== null } });
     return { id: p.id };
   });
 }
@@ -241,8 +245,13 @@ export async function updateParticipant(actor: Actor, participantId: string, raw
   requireAbility(access, "manage_participants");
   assertEditable(access.project);
   const input = parseInput(participantUpdateSchema, raw);
+  const { confirmed, ...fields } = input;
+  const confirmedAt = confirmed === undefined ? undefined : confirmed ? cur.confirmedAt ?? isoToDate(today()) : null;
   await transaction(async (tx) => {
-    await tx.trainingParticipant.update({ where: { id: participantId }, data: input });
+    await tx.trainingParticipant.update({ where: { id: participantId }, data: { ...fields, ...(confirmedAt !== undefined ? { confirmedAt } : {}) } });
+    if (confirmed !== undefined && (cur.confirmedAt !== null) !== confirmed) {
+      await auditProject(tx, actor, cur.projectId, { action: "training.participant.confirm", summary: `Peserta "${cur.fullName}" ${confirmed ? "dikonfirmasi" : "dibatalkan konfirmasinya"}`, before: { participantId, confirmed: cur.confirmedAt !== null }, after: { participantId, confirmed } });
+    }
     if (input.status && input.status !== cur.status) {
       await auditProject(tx, actor, cur.projectId, { action: "training.participant.status", summary: `Status peserta "${cur.fullName}": ${cur.status} → ${input.status}`, before: { participantId, status: cur.status }, after: { participantId, status: input.status } });
     } else {
@@ -407,7 +416,7 @@ export async function listAllDocuments(actor: Actor): Promise<(DocumentDto & { p
   });
   const mine = actor.employeeId ? await prisma.trainingProjectMember.findMany({ where: { employeeId: actor.employeeId, endedAt: null, role: { in: ["PROJECT_MANAGER", "ADMIN_PROGRAM", "PARTICIPANT_OWNER"] } }, select: { projectId: true } }) : [];
   const manageIn = new Set(mine.map((m) => m.projectId));
-  const visible = rows.filter((r) => !SENSITIVE_DOC_CATEGORIES.includes(r.category) || mod.subject.level === "MANAGER" || manageIn.has(r.projectId));
+  const visible = rows.filter((r) => !SENSITIVE_DOC_CATEGORIES.includes(r.category) || mod.caps.fullAccess || manageIn.has(r.projectId));
   const users = await prisma.user.findMany({ where: { id: { in: [...new Set(visible.map((r) => r.uploadedById))] } }, select: { id: true, name: true } });
   const n = new Map(users.map((u) => [u.id, u.name]));
   return visible.map((r) => ({

@@ -15,6 +15,11 @@ import { ProjectInstructorsPanel } from "@/components/training/instructors-panel
 import { DocumentsPanel } from "@/components/training/documents-panel";
 import { ReferencesPanel } from "@/components/training/references-panel";
 import { ClosurePanel } from "@/components/training/closure-panel";
+import { MonitoringPanel } from "@/components/training/monitoring-panel";
+import { ColorBadge, MiniIndicators } from "@/components/training/indicator-ui";
+import { TRACK_LABEL } from "@/lib/training/indicators/config";
+import { getProgramIndicators } from "@/server/services/training/indicator-compute";
+import { listMilestones, listReadiness, listWorkloadTasks } from "@/server/services/training/indicator-data";
 import { actorCan } from "@/server/actor";
 import { env } from "@/server/env";
 import { getProject, listMembers, listPrograms } from "@/server/services/training/projects";
@@ -32,11 +37,11 @@ import { guard, trainingPage } from "../../_lib";
 export const dynamic = "force-dynamic";
 export async function generateMetadata(): Promise<Metadata> { return { title: "Detail Proyek" }; }
 
-const TABS = ["ringkasan", "tim", "tugas", "jadwal", "peserta", "instruktur", "dokumen", "riwayat", "penutupan"] as const;
+const TABS = ["ringkasan", "pemantauan", "tim", "tugas", "jadwal", "peserta", "instruktur", "dokumen", "riwayat", "penutupan"] as const;
 type Tab = (typeof TABS)[number];
 
 export default async function ProjectDetailPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: SearchParams }) {
-  const { user } = await trainingPage();
+  const { user, ctx } = await trainingPage();
   const { id } = await params;
   const sp = await flattenSearchParams(searchParams);
   const tab: Tab = (TABS as readonly string[]).includes(sp.tab ?? "") ? (sp.tab as Tab) : "ringkasan";
@@ -54,20 +59,21 @@ export default async function ProjectDetailPage({ params, searchParams }: { para
         description={`${p.code} · ${ACTIVITY_KIND_LABEL[p.kind]}${p.programName ? ` · ${p.programName}` : ""}${p.clientName ? ` · ${p.clientName}` : ""}`}
         actions={<>
           <ProjectStatusBadge status={p.status} />
-          {can("update") && editable && <ProjectEditButton projectId={id} programs={programs} initial={{ name: p.name, programId: p.programId ?? "", kind: p.kind, clientName: p.clientName ?? "", deliveryMode: p.deliveryMode, location: p.location ?? "", startDate: p.startDate ?? "", endDate: p.endDate ?? "", description: p.description ?? "", notes: p.notes ?? "" }} />}
+          {can("update") && editable && <ProjectEditButton projectId={id} programs={programs} initial={{ name: p.name, programId: p.programId ?? "", kind: p.kind, clientName: p.clientName ?? "", deliveryMode: p.deliveryMode, location: p.location ?? "", startDate: p.startDate ?? "", endDate: p.endDate ?? "", description: p.description ?? "", notes: p.notes ?? "", track: p.track, bnsp: p.bnsp, participantsMin: p.participantsMin?.toString() ?? "", participantsMax: p.participantsMax?.toString() ?? "", requestDate: p.requestDate ?? "", registrationCloseDate: p.registrationCloseDate ?? "" }} />}
           <ProjectActions id={id} status={p.status} abilities={p.abilities} />
         </>}
       />
       {p.attention.length > 0 && <div className="mb-4"><AttentionBadges codes={p.attention} /></div>}
       {!editable && <div className="mb-4"><Notice tone={p.status === "CANCELLED" ? "danger" : "info"}>{p.status === "COMPLETED" ? "Proyek sudah ditutup (Selesai): data bersifat baca-saja." : `Proyek dibatalkan${p.cancelReason ? `: ${p.cancelReason}` : ""}. Data bersifat baca-saja.`}</Notice></div>}
       <TabNav base={base} active={tab} tabs={[
-        { key: "ringkasan", label: "Ringkasan" }, { key: "tim", label: "Tim" }, { key: "tugas", label: "Tugas & Checklist", count: p.openTasks }, { key: "jadwal", label: "Jadwal" },
+        { key: "ringkasan", label: "Ringkasan" }, { key: "pemantauan", label: "Pemantauan" }, { key: "tim", label: "Tim" }, { key: "tugas", label: "Tugas & Checklist", count: p.openTasks }, { key: "jadwal", label: "Jadwal" },
         { key: "peserta", label: "Peserta" }, { key: "instruktur", label: "Instruktur / Asesor" }, { key: "dokumen", label: "Dokumen" }, { key: "riwayat", label: "Riwayat" }, { key: "penutupan", label: "Penutupan" },
       ]} />
 
       {tab === "ringkasan" && (async () => {
         const [links, refs] = await Promise.all([guard(() => listAssignmentLinks(user, id)), guard(() => listExternalRefs(user, id))]);
         const hris = actorCan(user, "assignment:view_all");
+        const ind = await guard(() => getProgramIndicators(user, id));
         return (
           <div className="space-y-6">
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -76,16 +82,33 @@ export default async function ProjectDetailPage({ params, searchParams }: { para
               <Tile label="Tugas terlambat" value={p.overdueTasks} tone={p.overdueTasks ? "red" : undefined} />
               <Tile label="Project Manager (PIC)" value={p.picName ?? "Belum ada"} href={`${base}?tab=tim`} tone={p.picName ? undefined : "amber"} />
             </div>
+            <Card className="p-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="flex flex-wrap items-center gap-3"><span className="text-sm font-medium text-ink">Status pemantauan</span><ColorBadge color={ind.overall} /></div>
+                <Link href={`${base}?tab=pemantauan`} className="text-sm font-medium text-brand-700 hover:underline">Lihat rincian →</Link>
+              </div>
+              <div className="mt-3"><MiniIndicators ind={ind} /></div>
+            </Card>
             <Card><CardHeader title="Informasi proyek" />
               <dl className="grid gap-x-6 gap-y-4 px-5 py-4 text-sm sm:grid-cols-2">
                 {([["Kode proyek", p.code], ["Program", p.programName ?? "—"], ["Jenis kegiatan", ACTIVITY_KIND_LABEL[p.kind]], ["Klien / mitra", p.clientName ?? "—"], ["Moda", DELIVERY_MODE_LABEL[p.deliveryMode]], ["Lokasi / media", p.location ?? "—"],
-                  ["Periode", p.startDate && p.endDate ? formatDateRange(p.startDate, p.endDate) : "Belum dijadwalkan"], ["Template checklist", p.checklistTemplateName ?? "—"], ["Dibuat", formatDateTime(p.createdAt)], ["Terakhir diubah", formatDateTime(p.updatedAt)]] as [string, string][]).map(([k, v]) => <div key={k}><dt className="text-xs text-muted">{k}</dt><dd className="font-medium text-ink">{v}</dd></div>)}
+                  ["Periode", p.startDate && p.endDate ? formatDateRange(p.startDate, p.endDate) : "Belum dijadwalkan"], ["Jenis program", TRACK_LABEL[p.track] + (p.bnsp ? " · BNSP" : "")], ["Peserta acuan", p.participantsMin === null ? "—" : p.participantsMax ? `${p.participantsMin}–${p.participantsMax}` : String(p.participantsMin)], ["Template checklist", p.checklistTemplateName ?? "—"], ["Dibuat", formatDateTime(p.createdAt)], ["Terakhir diubah", formatDateTime(p.updatedAt)]] as [string, string][]).map(([k, v]) => <div key={k}><dt className="text-xs text-muted">{k}</dt><dd className="font-medium text-ink">{v}</dd></div>)}
                 <div className="sm:col-span-2"><dt className="text-xs text-muted">Deskripsi</dt><dd className="whitespace-pre-wrap">{p.description ?? "—"}</dd></div>
                 <div className="sm:col-span-2"><dt className="text-xs text-muted">Catatan penting</dt><dd className="whitespace-pre-wrap">{p.notes ?? "—"}</dd></div>
               </dl></Card>
             <Card className="p-5"><ReferencesPanel projectId={id} links={links} refs={refs} canLink={can("link_references")} canSearchLetters={hris} canOpenLetters={hris} /></Card>
           </div>
         );
+      })()}
+
+      {tab === "pemantauan" && (async () => {
+        const [indicators, milestones, items, workload, dir, members] = await Promise.all([
+          guard(() => getProgramIndicators(user, id)), guard(() => listMilestones(user, id)), guard(() => listReadiness(user, id)), guard(() => listWorkloadTasks(user, id)),
+          can("manage_tasks") ? listDirectory(user).catch(() => null) : Promise.resolve(null), can("manage_tasks") ? listMembers(user, id) : Promise.resolve([]),
+        ]);
+        // Pemilih staf untuk tugas jam kerja: seluruh direktori bila berwenang; kalau tidak, anggota aktif proyek.
+        const employees = dir ? dir.map((d) => ({ id: d.id, name: d.fullName })) : members.filter((m) => m.active).map((m) => ({ id: m.employeeId, name: m.name }));
+        return <MonitoringPanel projectId={id} indicators={indicators} milestones={milestones} items={items} workload={workload} employees={employees} canUpdate={can("update")} canManageTasks={can("manage_tasks")} canManageChecklist={can("manage_checklist")} editable={editable} canSeeWorkload={can("manage_tasks") || ctx.caps.viewAll} />;
       })()}
 
       {tab === "tim" && (async () => {

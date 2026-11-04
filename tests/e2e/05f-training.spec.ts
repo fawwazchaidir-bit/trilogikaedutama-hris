@@ -197,7 +197,7 @@ test("penutupan: checklist wajib menghalangi; ditutup dengan pengecualian berala
   await ctx.close();
 });
 
-test("admin HRIS (HR) tidak melihat menu Training & halamannya menjawab 404; Super Admin hanya-lihat tidak dapat membuat proyek", async ({ browser }) => {
+test("admin HRIS (HR) tidak melihat menu Training & halamannya menjawab 404; Direktur (Super Admin) memiliki akses penuh", async ({ browser }) => {
   const hr = await as(browser, "hr");
   await expect(hr.page.getByRole("navigation", { name: "Menu utama" }).getByText("Training & Operations")).toHaveCount(0);
   for (const p of ["/training", "/training/proyek", projectUrl]) expect((await hr.page.goto(p))!.status()).toBe(404);
@@ -208,10 +208,17 @@ test("admin HRIS (HR) tidak melihat menu Training & halamannya menjawab 404; Sup
   await boss.page.goto("/training");
   await expect(boss.page.getByRole("heading", { name: "Dashboard Direktur" })).toBeVisible();
   await boss.page.goto("/training/proyek");
-  await expect(boss.page.getByRole("link", { name: /Proyek baru/ })).toHaveCount(0);
+  await expect(boss.page.getByRole("link", { name: /Proyek baru/ })).toBeVisible(); // Direktur boleh membuat proyek
   await boss.page.goto(projectUrl);
-  await expect(boss.page.getByRole("button", { name: "Ubah data" })).toHaveCount(0);
-  await expect(boss.page.getByRole("heading", { name: PROJECT })).toBeVisible(); // tetap dapat memantau
+  await expect(boss.page.getByRole("heading", { name: PROJECT })).toBeVisible();
+  // Proyek sudah ditutup → baca-saja bagi siapa pun; yang diuji: Direktur melihat tombol kelola pada proyek lain yang masih terbuka
+  await boss.page.goto("/training/proyek/baru");
+  await boss.page.getByLabel("Nama proyek / kegiatan").fill("Proyek Direktur E2E");
+  await choose(boss.page.getByLabel("Project Manager (PIC)"), "Ayu Lestari");
+  await boss.page.getByRole("button", { name: "Buat proyek" }).click();
+  await boss.page.waitForURL(/\/training\/proyek\/[0-9a-f-]{36}$/);
+  await expect(boss.page.getByRole("button", { name: "Ubah data" })).toBeVisible();
+  await expect(boss.page.getByRole("button", { name: "Batalkan proyek" })).toBeVisible();
   await boss.ctx.close();
 });
 

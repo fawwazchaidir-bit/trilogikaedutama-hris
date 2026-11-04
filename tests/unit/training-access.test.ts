@@ -10,21 +10,24 @@ const subj = (role: Role, level: TrainingLevel | null = null): AccessSubject => 
 const A = (s: AccessSubject, m: ProjectRole | null = null) => [...projectAbilities(s, m)].sort();
 
 describe("model akses Training & Operations (murni)", () => {
-  it("MANAGER memiliki SEMUA kemampuan pada semua proyek, apa pun role globalnya", () => {
+  it("MANAGER memiliki SEMUA kemampuan pada semua proyek, apa pun role globalnya; Super Admin (Direktur) juga memiliki semuanya tanpa perlu level", () => {
+    expect(A(subj("SUPER_ADMIN"))).toEqual([...PROJECT_ABILITIES].sort());
     for (const r of ROLES) expect(A(subj(r, "MANAGER"))).toEqual([...PROJECT_ABILITIES].sort());
   });
 
-  it("role global HRIS TIDAK memberi kemampuan apa pun tanpa level modul/keanggotaan ('admin HRIS' ≠ 'Admin Program')", () => {
+  it("role global HRIS (selain Super Admin) TIDAK memberi kemampuan apa pun tanpa level modul/keanggotaan ('admin HRIS' ≠ 'Admin Program')", () => {
     expect(A(subj("HR_ADMIN"))).toEqual([]);
     expect(A(subj("EMPLOYEE"))).toEqual([]);
     expect(globalCaps(subj("HR_ADMIN"))).toMatchObject({ viewAll: false, createProject: false, managePrograms: false, manageAccess: false, hasModule: false });
   });
 
-  it("Super Admin & Pemantau: hanya melihat (tidak otomatis boleh mengubah)", () => {
-    expect(A(subj("SUPER_ADMIN"))).toEqual(["view"]);
+  it("Direktur (Super Admin): akses penuh lintas proyek + mengatur akses; Pemantau tetap hanya melihat", () => {
+    expect(globalCaps(subj("SUPER_ADMIN"))).toMatchObject({ fullAccess: true, viewAll: true, createProject: true, managePrograms: true, manageDirectory: true, manageAccess: true });
     expect(A(subj("EMPLOYEE", "VIEWER"))).toEqual(["view"]);
-    expect(globalCaps(subj("SUPER_ADMIN"))).toMatchObject({ viewAll: true, manageAccess: true, createProject: false });
-    expect(globalCaps(subj("EMPLOYEE", "VIEWER"))).toMatchObject({ viewAll: true, manageAccess: false, createProject: false });
+    expect(globalCaps(subj("EMPLOYEE", "VIEWER"))).toMatchObject({ fullAccess: false, viewAll: true, manageAccess: false, createProject: false, managePrograms: false });
+    // Role HRIS lain TIDAK mendapat akses penuh walau mengatur akun: hanya Super Admin atau pemegang level Manajer Program.
+    expect(globalCaps(subj("HR_ADMIN")).fullAccess).toBe(false);
+    expect(globalCaps(subj("EMPLOYEE", "MANAGER")).fullAccess).toBe(true);
   });
 
   it("hanya Super Admin yang mengatur akses modul; level Manajer tidak cukup", () => {

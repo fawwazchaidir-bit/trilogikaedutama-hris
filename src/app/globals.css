@@ -45,3 +45,17 @@ dialog { margin: auto; }
  * melebarkan trek grid sehingga halaman meluber horizontal di ponsel. Tabel tetap scroll di dalam kartunya.
  */
 .grid > * { min-width: 0; }
+
+/*
+ * Menu samping: gulir TANPA scrollbar yang tampak (tetap dapat digulir dengan roda/sentuh/keyboard). Tepi atas & bawah
+ * memudar sebagai penanda masih ada isi; padding atas/bawah pada elemen memastikan butir pertama/terakhir tidak ikut pudar.
+ */
+.nav-scroll {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 14px, #000 calc(100% - 22px), transparent 100%);
+  mask-image: linear-gradient(to bottom, transparent 0, #000 14px, #000 calc(100% - 22px), transparent 100%);
+}
+.nav-scroll::-webkit-scrollbar { display: none; }

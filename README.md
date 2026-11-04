@@ -66,8 +66,9 @@ Memakai akun, karyawan, audit, dan penyimpanan berkas HRIS yang sudah ada; hanya
 
 | Area | Isi |
 |---|---|
-| **Akses** | Role HRIS **tidak diubah**. Di atasnya: *level modul* (Pemantau · Admin Program · Manajer Program, diatur Super Admin) + *peran proyek* (PIC · Admin Program · PJ Peserta · PJ Materi · PJ Dokumentasi · Staf). Admin HRIS **tidak otomatis** punya akses. Proyek di luar lingkup menjawab 404. |
-| **Dashboard** | Per peran (Staf, Admin Program, Manajer Program, Direktur), dihitung dari data nyata dengan definisi indikator tertulis. Tidak ada persentase yang belum punya rumus (beban tim, kesiapan, ketepatan waktu). |
+| **Akses** | Role HRIS **tidak diubah**. Di atasnya: *level modul* (Pemantau · Admin Program · Manajer Program, diatur Super Admin) + *peran proyek* (PIC · Admin Program · PJ Peserta · PJ Materi · PJ Dokumentasi · Staf). Admin HRIS **tidak otomatis** punya akses. Direktur (Super Admin) kelola penuh seperti Manajer Program; jumlah pemegang level Manajer Program tidak dibatasi. Proyek di luar lingkup menjawab 404. |
+| **Dashboard** | Per peran (Staf, Admin Program, Manajer Program, Direktur), dihitung dari data nyata dengan definisi indikator tertulis. Persentase tidak dikarang: angka ringkasan dashboard dihitung dari data, sedangkan indikator terformula ada di baris **Pemantauan**. |
+| **Pemantauan** | Indikator **Ketepatan Waktu (SPI), Kesiapan (IKP vs target), Beban Tim, proyeksi peserta, kepadatan kelas paralel** menurut dokumen *Indikator Pemantauan Program Pelatihan v1.0*; status program = terburuk dari ketiganya + pemicu Merah. Parameter (bobot, ambang warna, template milestone, jam standar, kapasitas) **diubah Direktur di aplikasi** (*Rumus Indikator*, berversi, dapat dikembalikan) — rumus tetap di kode. |
 | **Proyek** | Kode `TRN-2026-0001` (aman saat dibuat bersamaan), alur Draf → Persiapan → Berjalan → Selesai/Dibatalkan, cari/filter/urut, penanda "perlu perhatian", detail 9 tab, riwayat aktivitas. |
 | **Tugas & checklist** | Prioritas, tenggat, komentar, "Tugas Saya"; tugas "perlu diperiksa" tidak dapat disetujui penanggung jawabnya sendiri. Template checklist **disalin** ke proyek; item wajib menentukan penutupan. |
 | **Jadwal** | Daftar & kalender bulanan WIB; peringatan bentrok ruangan/instruktur lintas proyek. |

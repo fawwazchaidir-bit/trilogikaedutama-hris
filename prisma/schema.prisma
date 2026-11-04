@@ -470,6 +470,10 @@ model Employee {
   trainingChecklistItems   TrainingProjectChecklistItem[]
   trainingInstructorEntry  TrainingInstructor?
   trainingScheduleIncharge TrainingSchedule[]
+  trainingMilestones       TrainingMilestone[]
+  trainingReadinessItems   TrainingReadinessItem[]
+  trainingWorkloadTasks    TrainingWorkloadTask[]
+  trainingCapacity         TrainingStaffCapacity?
 
   @@index([divisionId])
   @@index([isActive])
@@ -1373,6 +1377,21 @@ model TrainingProject {
   /// Nama template checklist yang dipakai saat dibuat (catatan saja; item checklist disalin menjadi milik proyek).
   checklistTemplateName String?
 
+  // Pemantauan (indikator Ketepatan Waktu, Kesiapan, Beban Tim). Tanggal H = startDate; hari terakhir = endDate.
+  /// Reguler (B2C) atau Kerjasama (B2B/B2G): menentukan template milestone & bobot kesiapan.
+  track                 TrainingTrack @default(REGULAR)
+  /// Reguler: peserta minimum. Kerjasama: jumlah peserta di kontrak. Dipakai sebagai "peserta acuan".
+  participantsMin       Int?
+  participantsMax       Int?
+  /// Memakai skema BNSP? Bila tidak, milestone/item sertifikasi dianggap Tidak berlaku dan komponen Sertifikasi dikeluarkan dari IKP.
+  bnsp                  Boolean       @default(false)
+  /// Tanggal permintaan klien masuk (T), untuk program kerjasama sebelum tanggal H pasti.
+  requestDate           DateTime?     @db.Date
+  /// Tutup pendaftaran (bawaan H-3 bila kosong), untuk proyeksi peserta program reguler.
+  registrationCloseDate DateTime?     @db.Date
+  /// Saat template pemantauan (milestone, item kesiapan, jam kerja) diterapkan; kosong = belum.
+  indicatorsAppliedAt   DateTime?
+
   // Penutupan / pembatalan (dikunci oleh CHECK konsistensi status).
   closedAt              DateTime?
   closedById            String?   @db.Uuid
@@ -1400,6 +1419,9 @@ model TrainingProject {
   documents       TrainingProjectDocument[]
   externalRefs    TrainingExternalRef[]
   assignmentLinks TrainingProjectAssignmentLink[]
+  milestones      TrainingMilestone[]
+  readinessItems  TrainingReadinessItem[]
+  workloadTasks   TrainingWorkloadTask[]
 
   @@unique([seqYear, seqNo])
   @@index([status, startDate])
@@ -1610,6 +1632,9 @@ model TrainingParticipant {
   note         String?
   /// "MANUAL" = dimasukkan manual (referensi lokal). Nilai lain dicadangkan untuk integrasi masa depan yang sudah diuji.
   source       String                    @default("MANUAL")
+  /// Terkonfirmasi (reguler: pembayaran sudah diverifikasi lewat Form Konfirmasi Pembayaran; kerjasama: nama diterima dari klien).
+  /// Diisi MANUAL oleh pengelola peserta; bukan status pembayaran dari sistem lain dan tidak diubah otomatis.
+  confirmedAt  DateTime?                 @db.Date
   createdById  String                    @db.Uuid
   createdAt    DateTime                  @default(now())
   updatedAt    DateTime                  @updatedAt
@@ -1674,4 +1699,175 @@ model TrainingProjectAssignmentLink {
   @@unique([projectId, letterId])
   @@index([letterId])
   @@map("training_project_assignment_links")
+}
+
+// ───────────── Indikator pemantauan (Ketepatan Waktu · Kesiapan · Beban Tim) ─────────────
+// Rumus: "Indikator Pemantauan Program Pelatihan" v1.0 (4 Nov 2026). Parameter (ambang, bobot, template, jam standar) TIDAK ditulis di
+// dalam rumus: disimpan sebagai konfigurasi berversi (`training_indicator_config`) dan dapat diubah Direktur tanpa programmer.
+
+enum TrainingTrack {
+  REGULAR
+  PARTNER
+}
+
+enum TrainingAnchor {
+  /// Hari pertama pelaksanaan (H).
+  H
+  /// Hari terakhir pelaksanaan (H+n dihitung dari sini).
+  H_END
+  /// Tanggal permintaan klien masuk (T).
+  T
+  /// Relatif terhadap tenggat milestone lain (refCode).
+  MILESTONE
+  /// Tanggal diisi manual (mis. termin kontrak, jatuh tempo invoice).
+  MANUAL
+}
+
+enum TrainingReadinessComponent {
+  INSTRUCTOR
+  MATERIAL
+  LOGISTICS
+  ADMIN
+  CERTIFICATION
+}
+
+enum TrainingReadinessStatus {
+  OPEN
+  DONE
+  NOT_APPLICABLE
+}
+
+enum TrainingWorkloadStatus {
+  OPEN
+  DONE
+  CANCELLED
+}
+
+/// Milestone program (salinan template saat diterapkan). Tenggat TIDAK disimpan: dihitung dari tanggal H/T + offset, sehingga ikut bergeser
+/// bila tanggal H berubah. Milestone tidak dianggap selesai tanpa bukti (bila diwajibkan konfigurasi).
+model TrainingMilestone {
+  id            String         @id @default(uuid()) @db.Uuid
+  projectId     String         @db.Uuid
+  code          String
+  name          String
+  anchor        TrainingAnchor
+  offsetDays    Int            @default(0)
+  /// true = hari kerja (mis. T + 2 hari kerja); false = hari kalender.
+  offsetWork    Boolean        @default(false)
+  refCode       String?
+  manualDate    DateTime?      @db.Date
+  weight        Int
+  critical      Boolean        @default(false)
+  /// Hanya berlaku bila program memakai skema BNSP; bila tidak, dianggap Tidak berlaku (dihitung saat dibaca).
+  bnspOnly      Boolean        @default(false)
+  assigneeId    String?        @db.Uuid
+  roleKey       String?
+  doneAt        DateTime?      @db.Date
+  doneById      String?        @db.Uuid
+  evidence      String?
+  notApplicable Boolean        @default(false)
+  reference     String?
+  sortOrder     Int            @default(0)
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  project  TrainingProject @relation(fields: [projectId], references: [id], onDelete: Restrict)
+  assignee Employee?       @relation(fields: [assigneeId], references: [id], onDelete: Restrict)
+
+  @@unique([projectId, code])
+  @@index([projectId, sortOrder])
+  @@index([assigneeId])
+  @@map("training_milestones")
+}
+
+/// Item kesiapan (komponen IKP). Berbeda dari checklist umum/penutupan: terbobot per komponen, punya tenggat dan penanda kritikal.
+model TrainingReadinessItem {
+  id          String                     @id @default(uuid()) @db.Uuid
+  projectId   String                     @db.Uuid
+  component   TrainingReadinessComponent
+  name        String
+  critical    Boolean                    @default(false)
+  anchor      TrainingAnchor
+  offsetDays  Int                        @default(0)
+  offsetWork  Boolean                    @default(false)
+  refCode     String?
+  manualDate  DateTime?                  @db.Date
+  bnspOnly    Boolean                    @default(false)
+  status      TrainingReadinessStatus    @default(OPEN)
+  assigneeId  String?                    @db.Uuid
+  roleKey     String?
+  updatedById String?                    @db.Uuid
+  sortOrder   Int                        @default(0)
+  createdAt   DateTime                   @default(now())
+  updatedAt   DateTime                   @updatedAt
+
+  project  TrainingProject @relation(fields: [projectId], references: [id], onDelete: Restrict)
+  assignee Employee?       @relation(fields: [assigneeId], references: [id], onDelete: Restrict)
+
+  @@index([projectId, component])
+  @@index([assigneeId])
+  @@map("training_readiness_items")
+}
+
+/// Tugas beban kerja (jam) per staf untuk satu program. Dibuat dari Tabel Jam Standar (source = TEMPLATE) atau ditambah atasan (MANUAL).
+model TrainingWorkloadTask {
+  id          String                 @id @default(uuid()) @db.Uuid
+  projectId   String                 @db.Uuid
+  employeeId  String                 @db.Uuid
+  name        String
+  hours       Float
+  startDate   DateTime               @db.Date
+  endDate     DateTime               @db.Date
+  status      TrainingWorkloadStatus @default(OPEN)
+  /// "TEMPLATE" (dibuat otomatis; dibuat ulang bila tanggal/peserta program berubah) atau "MANUAL" (tidak pernah ditimpa otomatis).
+  source      String                 @default("TEMPLATE")
+  roleKey     String?
+  createdById String?                @db.Uuid
+  createdAt   DateTime               @default(now())
+  updatedAt   DateTime               @updatedAt
+
+  project  TrainingProject @relation(fields: [projectId], references: [id], onDelete: Restrict)
+  employee Employee        @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+
+  @@index([projectId, status])
+  @@index([employeeId, startDate, endDate])
+  @@map("training_workload_tasks")
+}
+
+/// Kapasitas per staf. Tanpa baris = memakai bawaan konfigurasi (jam efektif 6/hari, Senin–Jumat). Cuti diambil dari cuti disetujui di HRIS (opsional).
+model TrainingStaffCapacity {
+  employeeId  String   @id @db.Uuid
+  hoursPerDay Float?
+  workDays    Int[]    @default([1, 2, 3, 4, 5])
+  note        String?
+  updatedById String   @db.Uuid
+  updatedAt   DateTime @updatedAt
+
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+
+  @@map("training_staff_capacity")
+}
+
+/// Konfigurasi indikator AKTIF (singleton id = 1). Hanya Super Admin (Direktur) yang mengubahnya; setiap perubahan = versi baru.
+model TrainingIndicatorConfig {
+  id          Int      @id @default(1)
+  version     Int
+  config      Json
+  note        String?
+  updatedById String   @db.Uuid
+  updatedAt   DateTime @updatedAt
+
+  @@map("training_indicator_config")
+}
+
+/// Riwayat seluruh versi konfigurasi — append-only (trigger): dapat ditelusuri rumus/ambang mana yang berlaku kapan.
+model TrainingIndicatorConfigVersion {
+  id          String   @id @default(uuid()) @db.Uuid
+  version     Int      @unique
+  config      Json
+  note        String?
+  changedById String   @db.Uuid
+  createdAt   DateTime @default(now())
+
+  @@map("training_indicator_config_versions")
 }

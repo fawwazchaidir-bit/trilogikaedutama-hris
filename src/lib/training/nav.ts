@@ -12,6 +12,7 @@ export const TRAINING_NAV_ITEMS: readonly TrainingNavItem[] = [
   { href: "/training", label: "Dashboard Training", group: "training" },
   { href: "/training/program", label: "Program Pelatihan", group: "training" },
   { href: "/training/proyek", label: "Proyek Pelatihan", group: "training" },
+  { href: "/training/pemantauan", label: "Pemantauan Program", group: "training" },
   { href: "/training/tugas-saya", label: "Tugas Saya", group: "training", needsEmployee: true },
   { href: "/training/checklist", label: "Checklist", group: "training" },
   { href: "/training/kalender", label: "Kalender Kegiatan", group: "training" },
@@ -19,6 +20,7 @@ export const TRAINING_NAV_ITEMS: readonly TrainingNavItem[] = [
   { href: "/training/instruktur", label: "Instruktur / Asesor", group: "training" },
   { href: "/training/dokumen", label: "Dokumen Proyek", group: "training" },
   { href: "/training/laporan", label: "Laporan Proyek", group: "training" },
+  { href: "/training/indikator", label: "Rumus Indikator", group: "training" },
   { href: "/training/akses", label: "Akses Training", group: "training", needsManageAccess: true },
 ];
 

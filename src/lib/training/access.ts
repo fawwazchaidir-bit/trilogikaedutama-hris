@@ -10,7 +10,8 @@
  * Jabatan karyawan (teks `employees.position`) tidak pernah dipakai untuk izin: hak akses melekat pada orang +
  * penugasan, sehingga pergantian jabatan/rangkap tugas tidak mengubah izin secara diam-diam.
  *
- * Satu-satunya akses lintas proyek tanpa keanggotaan: SUPER_ADMIN (lihat), VIEWER (lihat), MANAGER (kelola).
+ * Akses lintas proyek tanpa keanggotaan: SUPER_ADMIN (Direktur) dan MANAGER = kelola penuh; VIEWER = hanya lihat.
+ * Keputusan pemilik sistem: Direktur boleh mengubah data proyek, dan jumlah pemegang level Manajer Program TIDAK dibatasi (Direktur yang memberi akses).
  * Menyembunyikan menu hanya kosmetik; penegakan sebenarnya ada di service (lihat services/training/access.ts).
  */
 import type { Role } from "@/lib/permissions";
@@ -44,6 +45,8 @@ export interface AccessSubject {
 }
 
 export interface GlobalCaps {
+  /** Kelola penuh lintas proyek: Super Admin (Direktur) atau Manajer Program. */
+  fullAccess: boolean;
   /** Melihat SEMUA proyek (bukan hanya yang diikuti). */
   viewAll: boolean;
   /** Membuat proyek baru. */
@@ -62,13 +65,14 @@ export interface GlobalCaps {
 
 export function globalCaps(s: AccessSubject): GlobalCaps {
   const isSuper = s.role === "SUPER_ADMIN";
-  const manager = s.level === "MANAGER";
+  const full = isSuper || s.level === "MANAGER";
   return {
-    viewAll: isSuper || s.level === "VIEWER" || manager,
-    createProject: manager || s.level === "ADMIN_PROGRAM",
-    managePrograms: manager,
-    manageDirectory: manager || s.level === "ADMIN_PROGRAM",
-    viewDirectoryContacts: manager || s.level === "ADMIN_PROGRAM",
+    fullAccess: full,
+    viewAll: full || s.level === "VIEWER",
+    createProject: full || s.level === "ADMIN_PROGRAM",
+    managePrograms: full,
+    manageDirectory: full || s.level === "ADMIN_PROGRAM",
+    viewDirectoryContacts: full || s.level === "ADMIN_PROGRAM",
     manageAccess: isSuper,
     hasModule: isSuper || s.level !== null,
   };
@@ -88,12 +92,12 @@ const BY_PROJECT_ROLE: Record<ProjectRole, readonly ProjectAbility[]> = {
 
 /**
  * Kemampuan `s` pada SATU proyek, diberi peran proyek aktifnya (null = bukan anggota). Gabungan (union):
- *  - MANAGER: semua.
- *  - SUPER_ADMIN / VIEWER: hanya `view` (tanpa hak ubah — Direktur memantau, tidak otomatis mengubah).
+ *  - MANAGER dan SUPER_ADMIN (Direktur): semua.
+ *  - VIEWER (Pemantau): hanya `view`.
  *  - peran proyek: sesuai tabel di atas.
  */
 export function projectAbilities(s: AccessSubject, memberRole: ProjectRole | null): ReadonlySet<ProjectAbility> {
-  if (s.level === "MANAGER") return ALL;
+  if (globalCaps(s).fullAccess) return ALL;
   const out = new Set<ProjectAbility>();
   if (globalCaps(s).viewAll) out.add("view");
   if (memberRole) for (const a of BY_PROJECT_ROLE[memberRole]) out.add(a);

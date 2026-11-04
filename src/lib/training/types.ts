@@ -11,9 +11,9 @@ export const TRAINING_LEVEL_LABEL: Record<TrainingLevel, string> = {
   MANAGER: "Manajer Program",
 };
 export const TRAINING_LEVEL_HELP: Record<TrainingLevel, string> = {
-  VIEWER: "Melihat seluruh proyek, progres, jadwal, dan laporan. Tidak dapat mengubah data. Cocok untuk Direktur atau manajer lain yang perlu memantau.",
+  VIEWER: "Melihat seluruh proyek, progres, jadwal, dan laporan. Tidak dapat mengubah data. Cocok untuk manajer atau pihak lain yang perlu memantau. (Direktur sudah memiliki akses penuh sebagai Super Admin.)",
   ADMIN_PROGRAM: "Dapat membuat proyek. Mengelola peserta, dokumen, jadwal, dan tugas hanya pada proyek yang ia ikuti, sesuai peran proyeknya.",
-  MANAGER: "Mengelola seluruh proyek: tim & PIC, tugas, template checklist, program, penutupan/pembatalan proyek.",
+  MANAGER: "Mengelola seluruh proyek: tim & PIC, tugas, template checklist, program, penutupan/pembatalan proyek. Jumlah pemegang tidak dibatasi; Direktur yang memberi akses.",
 };
 
 export type ActivityKind = "REGULAR" | "CERTIFICATION" | "IN_HOUSE" | "OTHER";

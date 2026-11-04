@@ -1,6 +1,7 @@
 "use client";
 import { useState } from "react";
 import { EyeOff, Plus } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { EmptyState, Notice } from "@/components/ui/card";
@@ -12,8 +13,8 @@ import type { ParticipantDto } from "@/server/services/training/operations";
 import { ParticipantStatusBadge } from "./ui";
 import { useRunner } from "./use-runner";
 
-interface Form { id?: string; fullName: string; organization: string; phone: string; email: string; status: ParticipantStatus; note: string }
-const BLANK: Form = { fullName: "", organization: "", phone: "", email: "", status: "REGISTERED", note: "" };
+interface Form { id?: string; fullName: string; organization: string; phone: string; email: string; status: ParticipantStatus; note: string; confirmed: boolean }
+const BLANK: Form = { fullName: "", organization: "", phone: "", email: "", status: "REGISTERED", note: "", confirmed: false };
 
 /**
  * Peserta = data operasional LOKAL (input manual), bukan sinkronisasi dari website. Status peserta tidak terkait status
@@ -23,7 +24,7 @@ export function ParticipantsPanel({ projectId, participants, canManage, editable
   const { busy, error, fieldErrors, run, reset } = useRunner();
   const [form, setForm] = useState<Form | null>(null);
   const live = canManage && editable;
-  const open = (p?: ParticipantDto) => { reset(); setForm(p ? { id: p.id, fullName: p.fullName, organization: p.organization ?? "", phone: p.phone ?? "", email: p.email ?? "", status: p.status, note: p.note ?? "" } : BLANK); };
+  const open = (p?: ParticipantDto) => { reset(); setForm(p ? { id: p.id, fullName: p.fullName, organization: p.organization ?? "", phone: p.phone ?? "", email: p.email ?? "", status: p.status, note: p.note ?? "", confirmed: p.confirmed } : BLANK); };
   const hiddenContacts = participants.some((p) => !p.contactVisible);
 
   return (
@@ -36,13 +37,14 @@ export function ParticipantsPanel({ projectId, participants, canManage, editable
       {participants.length === 0 ? <EmptyState title="Belum ada peserta" description={live ? "Tambahkan peserta satu per satu." : "Belum ada peserta pada proyek ini."} /> : (
         <TableWrap>
           <Table>
-            <thead><tr><Th>Nama</Th><Th>Instansi</Th><Th>Kontak</Th><Th>Status</Th>{live && <Th />}</tr></thead>
+            <thead><tr><Th>Nama</Th><Th>Instansi</Th><Th>Kontak</Th><Th>Status</Th><Th>Konfirmasi</Th>{live && <Th />}</tr></thead>
             <tbody>{participants.map((p) => (
               <tr key={p.id}>
                 <Td><p className="font-medium text-ink">{p.fullName}</p>{p.note && <p className="text-xs text-muted">{p.note}</p>}</Td>
                 <Td>{p.organization ?? "—"}</Td>
                 <Td>{p.contactVisible ? <>{p.phone ?? "—"}<br /><span className="text-xs text-muted">{p.email ?? ""}</span></> : <span className="text-xs text-muted">Disembunyikan</span>}</Td>
                 <Td><ParticipantStatusBadge status={p.status} /></Td>
+                <Td>{p.confirmed ? <Badge tone="green">Terkonfirmasi</Badge> : <span className="text-xs text-muted">Belum</span>}</Td>
                 {live && <Td align="right"><Button size="sm" onClick={() => open(p)}>Ubah</Button></Td>}
               </tr>
             ))}</tbody>
@@ -58,6 +60,7 @@ export function ParticipantsPanel({ projectId, participants, canManage, editable
           <SelectField label="Status peserta" value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value as ParticipantStatus })}>{PARTICIPANT_STATUSES.map((s) => <option key={s} value={s}>{PARTICIPANT_STATUS_LABEL[s]}</option>)}</SelectField>
           <TextField label="Telepon" inputMode="tel" maxLength={30} value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} error={fieldErrors.phone} />
           <TextField label="Email" type="email" maxLength={200} value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} error={fieldErrors.email} />
+          <label className="flex items-start gap-2 text-sm text-ink sm:col-span-2"><input type="checkbox" className="mt-0.5 size-4 rounded border-line" checked={form.confirmed} onChange={(e) => setForm({ ...form, confirmed: e.target.checked })} /><span>Terkonfirmasi<span className="block text-xs text-muted">Reguler: pembayaran sudah diverifikasi lewat Form Konfirmasi Pembayaran. Kerjasama: nama diterima dari klien. Dicatat manual dan dihitung pada indikator Kesiapan.</span></span></label>
           <TextAreaField className="sm:col-span-2" label="Catatan administratif" rows={2} maxLength={500} value={form.note} onChange={(e) => setForm({ ...form, note: e.target.value })} />
         </div>}
       </Dialog>

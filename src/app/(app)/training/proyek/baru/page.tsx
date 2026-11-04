@@ -13,7 +13,7 @@ export const dynamic = "force-dynamic";
 export default async function NewProjectPage() {
   const { user, ctx } = await trainingPage();
   if (!ctx.caps.createProject) notFound();
-  const canSetPic = ctx.subject.level === "MANAGER";
+  const canSetPic = ctx.caps.fullAccess;
   const [opts, dir] = await Promise.all([guard(() => getProjectFormOptions(user)), canSetPic ? guard(() => listDirectory(user)) : Promise.resolve(null)]);
   return (
     <div>

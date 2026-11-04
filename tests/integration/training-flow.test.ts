@@ -518,8 +518,7 @@ describe("referensi: surat tugas HRIS & sistem lain", () => {
     expect(await fail(linkAssignment(fx.mgr, id, { letterId: letter.id }))).toMatchObject({ code: "FORBIDDEN" });
     expect(await fail(searchAssignmentLetters(fx.mgr, "Bandung"))).toMatchObject({ code: "FORBIDDEN" });
     expect(await fail(linkAssignment(fx.hr, id, { letterId: letter.id }))).toMatchObject({ code: "NOT_FOUND" });
-    // Super Admin (izin HRIS penuh) + level Manajer Program → boleh
-    await prisma.trainingAccess.create({ data: { userId: fx.superAdmin.userId, level: "MANAGER", grantedById: fx.superAdmin.userId } });
+    // Super Admin (izin HRIS penuh + akses penuh modul, tanpa perlu level) → boleh
     expect((await searchAssignmentLetters(fx.superAdmin, "bandung")).map((l) => l.number)).toEqual(["001/ST/XI/2026"]);
     await linkAssignment(fx.superAdmin, id, { letterId: letter.id });
     expect(await fail(linkAssignment(fx.superAdmin, id, { letterId: letter.id }))).toMatchObject({ code: "CONFLICT" });

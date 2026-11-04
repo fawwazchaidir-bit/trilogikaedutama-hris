@@ -5,12 +5,13 @@ import { usePathname, useRouter } from "next/navigation";
 import { useState } from "react";
 import {
   Bell, CalendarDays, CircleUserRound, ClipboardCheck, ClipboardList, FileText, KeyRound, LayoutDashboard, LogOut, Menu,
-  ScrollText, Settings, ShieldCheck, TableProperties, Users, UserCog, Wallet, X, Clock, FilePlus2, Timer, BarChart3, ShieldEllipsis, MapPinned, FolderOpen, Plane, GraduationCap, FolderKanban, ListChecks, CalendarRange, UsersRound, Presentation, FileStack, FileBarChart2,
+  ScrollText, Settings, ShieldCheck, TableProperties, Users, UserCog, Wallet, X, Clock, FilePlus2, Timer, BarChart3, ShieldEllipsis, MapPinned, FolderOpen, Plane, GraduationCap, FolderKanban, ListChecks, CalendarRange, UsersRound, Presentation, FileStack, FileBarChart2, ChevronDown, PanelLeftClose, PanelLeftOpen,
 } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { api } from "@/lib/api-client";
 import { NAV_GROUP_LABEL, ROLE_LABELS, type NavItem, type Role } from "@/lib/permissions";
 import { ToastProvider } from "@/components/ui/toast";
+import { DEFAULT_NAV_PREF, NAV_GROUP_IDS, writeNavPrefCookie, type NavGroupId, type NavPref } from "@/lib/nav-pref";
 
 const ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
   "/dashboard": LayoutDashboard,
@@ -55,42 +56,80 @@ export interface ShellProps {
   company: { name: string; logoUrl: string };
   unread: number;
   pendingBadges: { href: string; count: number }[];
+  /** Preferensi sidebar dari cookie (dibaca server → tanpa kedip). Bawaan: terbuka. */
+  initialNav?: NavPref;
   children: React.ReactNode;
 }
 
-export function AppShell({ user, nav, company, unread, pendingBadges, children }: ShellProps) {
+export function AppShell({ user, nav, company, unread, pendingBadges, initialNav = DEFAULT_NAV_PREF, children }: ShellProps) {
   const pathname = usePathname();
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
+  // Sidebar desktop disembunyikan? & grup menu mana yang dilipat? (bawaan: semuanya terbuka). Disimpan di cookie.
+  const [collapsed, setCollapsed] = useState(initialNav.collapsed);
+  const [closed, setClosed] = useState<NavGroupId[]>(initialNav.closedGroups);
+
+  const persist = (c: boolean, g: NavGroupId[]) => writeNavPrefCookie({ collapsed: c, closedGroups: g });
+  // Halaman tempat pengguna sengaja melipat sebuah grup (tidak disimpan): di halaman lain dalam grup itu, grup terbuka lagi agar butir aktif terlihat.
+  const [pinnedAt, setPinnedAt] = useState<Partial<Record<NavGroupId, string>>>({});
+  const toggleSidebar = () => { const c = !collapsed; setCollapsed(c); persist(c, closed); };
 
   async function logout() {
     setBusy(true);
     try { await api("/api/auth/logout", { method: "POST", body: {} }); } finally { router.push("/login"); router.refresh(); }
   }
 
-  const groups = (["umum", "saya", "sdm", "gaji", "training", "sistem"] as const)
+  const groups = NAV_GROUP_IDS
     .map((g) => ({ g, items: nav.filter((n) => n.group === g) }))
     .filter((x) => x.items.length > 0);
+  const isActive = (href: string) => pathname === href || (href !== "/training" && pathname.startsWith(`${href}/`));
+
+  const groupOpen = (g: NavGroupId, items: { href: string }[]) =>
+    !NAV_GROUP_LABEL[g] || !closed.includes(g) || (items.some((i) => isActive(i.href)) && pinnedAt[g] !== pathname);
+  function toggleGroup(g: NavGroupId, items: { href: string }[]) {
+    if (groupOpen(g, items)) {
+      const next = [...new Set([...closed, g])];
+      setClosed(next); setPinnedAt({ ...pinnedAt, [g]: pathname }); persist(collapsed, next);
+    } else {
+      const next = closed.filter((x) => x !== g);
+      setClosed(next); persist(collapsed, next);
+    }
+  }
 
   const sidebar = (
     <div className="flex h-full flex-col bg-ink text-stone-200">
       <div className="flex items-center gap-3 px-5 py-5">
         <Image src={company.logoUrl} alt="" width={40} height={40} unoptimized className="size-10 rounded-full bg-white/5 object-contain" />
-        <div className="min-w-0">
+        <div className="min-w-0 flex-1">
           <p className="truncate text-sm font-semibold leading-tight text-white">{company.name}</p>
           <p className="text-[11px] leading-snug text-stone-400">Trilogika Internal Portal</p>
         </div>
+        <button type="button" onClick={toggleSidebar} aria-label="Sembunyikan menu samping" title="Sembunyikan menu samping" className="hidden size-8 shrink-0 place-items-center rounded-md text-stone-400 hover:bg-white/10 hover:text-white lg:grid">
+          <PanelLeftClose className="size-[18px]" aria-hidden />
+        </button>
       </div>
-      <nav aria-label="Menu utama" className="flex-1 space-y-4 overflow-y-auto px-3 py-2">
-        {groups.map(({ g, items }) => (
+      <nav aria-label="Menu utama" className="nav-scroll flex-1 space-y-3 px-3 pb-6 pt-4">
+        {groups.map(({ g, items }) => {
+          const label = NAV_GROUP_LABEL[g];
+          const open = groupOpen(g, items);
+          return (
           <div key={g}>
-            {NAV_GROUP_LABEL[g] && <p className="mb-1 px-3 text-[11px] font-semibold uppercase tracking-wider text-stone-500">{NAV_GROUP_LABEL[g]}</p>}
-            <div className="space-y-0.5">
+            {label && (
+              <button
+                type="button" onClick={() => toggleGroup(g, items)} aria-expanded={open} aria-controls={`nav-group-${g}`}
+                className="mb-1 flex w-full items-center justify-between rounded-md px-3 py-1 text-[11px] font-semibold uppercase tracking-wider text-stone-500 transition-colors hover:text-stone-300"
+              >
+                <span>{label}</span>
+                <ChevronDown className={cn("size-3.5 transition-transform duration-200 motion-reduce:transition-none", !open && "-rotate-90")} aria-hidden />
+              </button>
+            )}
+            <div id={`nav-group-${g}`} inert={!open} className={cn("grid transition-[grid-template-rows] duration-200 ease-out motion-reduce:transition-none", open ? "grid-rows-[1fr]" : "grid-rows-[0fr]")}>
+            <div className={cn("min-h-0 space-y-0.5 overflow-hidden transition-[visibility] duration-0 motion-reduce:transition-none", open ? "visible" : "invisible delay-200")}>
               {items.map((item) => {
                 const Icon = ICONS[item.href] ?? FileText;
                 // "/training" (Dashboard Training) hanya aktif pada halamannya sendiri, bukan pada seluruh anak rutenya.
-                const active = pathname === item.href || (item.href !== "/training" && pathname.startsWith(`${item.href}/`));
+                const active = isActive(item.href);
                 const badge = pendingBadges.find((b) => b.href === item.href && b.count > 0)?.count ?? 0;
                 return (
                   <Link
@@ -104,8 +143,10 @@ export function AppShell({ user, nav, company, unread, pendingBadges, children }
                 );
               })}
             </div>
+            </div>
           </div>
-        ))}
+          );
+        })}
       </nav>
       <div className="border-t border-white/10 p-4">
         <p className="truncate text-sm font-medium text-white">{user.name}</p>
@@ -132,8 +173,8 @@ export function AppShell({ user, nav, company, unread, pendingBadges, children }
 
   return (
     <ToastProvider>
-      <div className="min-h-screen lg:grid lg:grid-cols-[16rem_1fr]">
-        <aside className="no-print sticky top-0 hidden h-screen lg:block">{sidebar}</aside>
+      <div className={cn("min-h-screen lg:grid lg:transition-[grid-template-columns] lg:duration-200 motion-reduce:lg:transition-none", collapsed ? "lg:grid-cols-[0rem_1fr]" : "lg:grid-cols-[16rem_1fr]")}>
+        <aside aria-hidden={collapsed || undefined} inert={collapsed} className="no-print sticky top-0 hidden h-screen overflow-hidden lg:block">{sidebar}</aside>
 
         <div className="no-print sticky top-0 z-30 flex items-center justify-between border-b border-white/10 bg-ink px-4 py-3 text-white lg:hidden">
           <button type="button" aria-label="Buka menu" onClick={() => setOpen(true)} className="rounded-md p-1.5 hover:bg-white/10"><Menu className="size-5" /></button>
@@ -157,7 +198,14 @@ export function AppShell({ user, nav, company, unread, pendingBadges, children }
               <p><strong>Akun demonstrasi — hanya untuk pengujian.</strong> Data di sini fiktif dan tidak boleh dipakai untuk operasional.</p>
             </div>
           )}
-          <div className="no-print mb-4 hidden justify-end lg:flex">{bell}</div>
+          <div className="no-print mb-4 hidden items-center justify-between lg:flex">
+            {collapsed ? (
+              <button type="button" onClick={toggleSidebar} aria-label="Tampilkan menu samping" title="Tampilkan menu samping" className="grid size-9 place-items-center rounded-md border border-line bg-white text-ink-soft shadow-sm hover:bg-canvas">
+                <PanelLeftOpen className="size-[18px]" aria-hidden />
+              </button>
+            ) : <span />}
+            {bell}
+          </div>
           {children}
         </main>
       </div>

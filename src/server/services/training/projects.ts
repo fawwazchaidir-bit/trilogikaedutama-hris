@@ -24,6 +24,9 @@ import {
   accessibleProjectWhere, assertEditable, assertModuleEnabled, loadProjectAccess, requireAbility, requireGlobalCap, requireModule,
 } from "./access";
 import { assertUuid, auditProject, iso, today } from "./shared";
+import { loadConfig } from "./indicator-config";
+import { applyTemplatesTx, loadProgramRow, regenerateWorkloadTx, toProgramRow } from "./indicator-data";
+import type { Track } from "@/lib/training/indicators/config";
 
 // ═════════════════════════════ Program ═════════════════════════════
 
@@ -78,7 +81,7 @@ export async function updateProgram(actor: Actor, id: string, raw: unknown): Pro
 
 export interface ProjectListItemDto {
   id: string; code: string; name: string; programName: string | null; kind: ActivityKind; clientName: string | null;
-  status: ProjectStatus; startDate: string | null; endDate: string | null; picName: string | null;
+  status: ProjectStatus; startDate: string | null; endDate: string | null; picName: string | null; track: Track;
   checklist: ChecklistProgress; openTasks: number; overdueTasks: number; attention: AttentionCode[];
 }
 
@@ -86,6 +89,8 @@ export interface ProjectDetailDto {
   id: string; code: string; name: string; programId: string | null; programName: string | null; kind: ActivityKind; clientName: string | null;
   deliveryMode: DeliveryMode; location: string | null; startDate: string | null; endDate: string | null; status: ProjectStatus;
   description: string | null; notes: string | null; checklistTemplateName: string | null;
+  /** Pemantauan: jenis program & data pelaksana indikator. */
+  track: Track; bnsp: boolean; participantsMin: number | null; participantsMax: number | null; requestDate: string | null; registrationCloseDate: string | null; indicatorsApplied: boolean;
   picName: string | null; picEmployeeId: string | null; createdAt: string; updatedAt: string;
   closedAt: string | null; closedByName: string | null; closureSummary: string | null; closureFollowUp: string | null; closureOverrideReason: string | null;
   cancelledAt: string | null; cancelReason: string | null;
@@ -173,7 +178,7 @@ export async function listProjects(actor: Actor, raw: unknown = {}): Promise<Pag
     const s = sig.get(r.id)!;
     return {
       id: r.id, code: r.code, name: r.name, programName: r.program?.name ?? null, kind: r.kind, clientName: r.clientName, status: r.status,
-      startDate: r.startDate ? dateToIso(r.startDate) : null, endDate: r.endDate ? dateToIso(r.endDate) : null, picName: s.picName,
+      startDate: r.startDate ? dateToIso(r.startDate) : null, endDate: r.endDate ? dateToIso(r.endDate) : null, picName: s.picName, track: r.track,
       checklist: s.checklist, openTasks: s.open, overdueTasks: s.overdue, attention: attentionFor(r, s),
     };
   });
@@ -189,7 +194,10 @@ export async function getProject(actor: Actor, id: string): Promise<ProjectDetai
   return {
     id: r.id, code: r.code, name: r.name, programId: r.programId, programName: r.program?.name ?? null, kind: r.kind, clientName: r.clientName,
     deliveryMode: r.deliveryMode, location: r.location, startDate: r.startDate ? dateToIso(r.startDate) : null, endDate: r.endDate ? dateToIso(r.endDate) : null,
-    status: r.status, description: r.description, notes: r.notes, checklistTemplateName: r.checklistTemplateName, picName: sig.picName, picEmployeeId: pic?.employeeId ?? null,
+    status: r.status, description: r.description, notes: r.notes, checklistTemplateName: r.checklistTemplateName,
+    track: r.track, bnsp: r.bnsp, participantsMin: r.participantsMin, participantsMax: r.participantsMax,
+    requestDate: r.requestDate ? dateToIso(r.requestDate) : null, registrationCloseDate: r.registrationCloseDate ? dateToIso(r.registrationCloseDate) : null, indicatorsApplied: r.indicatorsAppliedAt !== null,
+    picName: sig.picName, picEmployeeId: pic?.employeeId ?? null,
     createdAt: r.createdAt.toISOString(), updatedAt: r.updatedAt.toISOString(),
     closedAt: iso(r.closedAt), closedByName: closer?.name ?? null, closureSummary: r.closureSummary, closureFollowUp: r.closureFollowUp, closureOverrideReason: r.closureOverrideReason,
     cancelledAt: iso(r.cancelledAt), cancelReason: r.cancelReason,
@@ -231,10 +239,10 @@ async function addMemberRow(tx: Tx, actor: Actor, project: { id: string; code: s
   }
 }
 
-export async function createProject(actor: Actor, raw: unknown): Promise<{ id: string; code: string }> {
+export async function createProject(actor: Actor, raw: unknown): Promise<{ id: string; code: string; indicatorWarnings: string[] }> {
   const mod = await requireGlobalCap(actor, "createProject");
   const input = parseInput(projectCreateSchema, raw);
-  const isManager = mod.subject.level === "MANAGER";
+  const isManager = mod.caps.fullAccess; // Manajer Program atau Direktur: boleh menetapkan PIC
   if (input.picEmployeeId && !isManager) throw Errors.forbidden("Hanya Manajer Program yang dapat menetapkan Project Manager (PIC). Proyek dapat dibuat dulu tanpa PIC.");
   // Pembuat berlevel Admin Program mengelola proyeknya lewat keanggotaan; tanpa data karyawan ia tidak akan bisa membuka proyeknya sendiri.
   if (!isManager && !actor.employeeId) throw Errors.forbidden("Akun Anda belum tertaut ke data karyawan, sehingga tidak dapat menjadi anggota proyek. Minta HR menautkan akun Anda.");
@@ -250,6 +258,7 @@ export async function createProject(actor: Actor, raw: unknown): Promise<{ id: s
       : null;
     if (input.checklistTemplateId && (!template || !template.isActive)) throw Errors.validation("Template checklist tidak ditemukan atau nonaktif.", { checklistTemplateId: "Template tidak valid" });
 
+    assertProgramNumbers(input.participantsMin, input.participantsMax, input.startDate, input.registrationCloseDate);
     const seqNo = await nextProjectSeq(tx, year);
     const code = formatProjectCode(year, seqNo);
     const p = await tx.trainingProject.create({
@@ -257,6 +266,8 @@ export async function createProject(actor: Actor, raw: unknown): Promise<{ id: s
         seqYear: year, seqNo, code, name: input.name, programId: input.programId, kind: input.kind, clientName: input.clientName, deliveryMode: input.deliveryMode,
         location: input.location, startDate: input.startDate ? isoToDate(input.startDate) : null, endDate: input.endDate ? isoToDate(input.endDate) : null,
         description: input.description, notes: input.notes, checklistTemplateName: template?.name ?? null, createdById: actor.userId,
+        track: input.track, participantsMin: input.participantsMin, participantsMax: input.participantsMax, bnsp: input.bnsp,
+        requestDate: input.requestDate ? isoToDate(input.requestDate) : null, registrationCloseDate: input.registrationCloseDate ? isoToDate(input.registrationCloseDate) : null,
       },
     });
     await auditProject(tx, actor, p.id, { action: "training.project.create", summary: `Proyek ${code} "${p.name}" dibuat`, after: { code, name: p.name, kind: p.kind, programId: p.programId } });
@@ -269,8 +280,18 @@ export async function createProject(actor: Actor, raw: unknown): Promise<{ id: s
       });
       await auditProject(tx, actor, p.id, { action: "training.checklist.apply", summary: `Template checklist "${template.name}" diterapkan (${template.items.length} item)`, after: { template: template.name, items: template.items.length } });
     }
-    return { id: p.id, code };
+    // Template pemantauan (milestone, item kesiapan, jam kerja) mengikuti jenis program; dapat dimatikan di konfigurasi indikator.
+    let indicatorWarnings: string[] = [];
+    const cfg = (await loadConfig(tx)).config;
+    if (cfg.autoApplyOnCreate) indicatorWarnings = (await applyTemplatesTx(tx, actor, toProgramRow(p), cfg)).warnings;
+    return { id: p.id, code, indicatorWarnings };
   });
+}
+
+/** Aturan angka & tanggal program: maksimum ≥ minimum; tutup pendaftaran tidak setelah hari pertama. */
+function assertProgramNumbers(min: number | null | undefined, max: number | null | undefined, start: string | null | undefined, close: string | null | undefined): void {
+  if (min != null && max != null && max < min) throw Errors.validation("Peserta maksimum tidak boleh lebih kecil dari peserta minimum.", { participantsMax: "Lebih kecil dari minimum" });
+  if (start && close && close > start) throw Errors.validation("Tutup pendaftaran tidak boleh setelah tanggal mulai.", { registrationCloseDate: "Setelah tanggal mulai" });
 }
 
 export async function updateProject(actor: Actor, id: string, raw: unknown): Promise<void> {
@@ -290,15 +311,47 @@ export async function updateProject(actor: Actor, id: string, raw: unknown): Pro
     const e = "endDate" in next ? next.endDate : b.endDate ? dateToIso(b.endDate) : null;
     if (s && e && e < s) throw Errors.validation("Tanggal selesai tidak boleh sebelum tanggal mulai.", { endDate: "Sebelum tanggal mulai" });
     if (b.status !== "DRAFT" && (!s || !e)) throw Errors.validation("Proyek yang sudah masuk persiapan wajib memiliki tanggal mulai dan selesai.", { startDate: "Wajib diisi" });
-    for (const k of ["name", "programId", "kind", "clientName", "deliveryMode", "location", "description", "notes"] as const) if (k in next) (data as Record<string, unknown>)[k] = next[k];
+    const close = "registrationCloseDate" in next ? next.registrationCloseDate : b.registrationCloseDate ? dateToIso(b.registrationCloseDate) : null;
+    assertProgramNumbers("participantsMin" in next ? next.participantsMin : b.participantsMin, "participantsMax" in next ? next.participantsMax : b.participantsMax, s, close);
+    for (const k of ["name", "programId", "kind", "clientName", "deliveryMode", "location", "description", "notes", "track", "bnsp", "participantsMin", "participantsMax"] as const) if (k in next) (data as Record<string, unknown>)[k] = next[k];
     if ("startDate" in next) data.startDate = next.startDate ? isoToDate(next.startDate) : null;
     if ("endDate" in next) data.endDate = next.endDate ? isoToDate(next.endDate) : null;
-    const before = { name: b.name, programId: b.programId, kind: b.kind, clientName: b.clientName, deliveryMode: b.deliveryMode, location: b.location, startDate: b.startDate ? dateToIso(b.startDate) : null, endDate: b.endDate ? dateToIso(b.endDate) : null, description: b.description, notes: b.notes };
+    if ("requestDate" in next) data.requestDate = next.requestDate ? isoToDate(next.requestDate) : null;
+    if ("registrationCloseDate" in next) data.registrationCloseDate = next.registrationCloseDate ? isoToDate(next.registrationCloseDate) : null;
+    const before = {
+      name: b.name, programId: b.programId, kind: b.kind, clientName: b.clientName, deliveryMode: b.deliveryMode, location: b.location, startDate: b.startDate ? dateToIso(b.startDate) : null, endDate: b.endDate ? dateToIso(b.endDate) : null,
+      description: b.description, notes: b.notes, track: b.track, bnsp: b.bnsp, participantsMin: b.participantsMin, participantsMax: b.participantsMax,
+      requestDate: b.requestDate ? dateToIso(b.requestDate) : null, registrationCloseDate: b.registrationCloseDate ? dateToIso(b.registrationCloseDate) : null,
+    };
     const after = { ...before, ...Object.fromEntries(Object.entries(data).map(([k, v]) => [k, v instanceof Date ? dateToIso(v) : v])) };
     const d = diffFields(before, after);
     if (d.changed.length === 0) return;
+    const trackChanged = d.changed.includes("track") && b.indicatorsAppliedAt !== null;
+    if (trackChanged) {
+      // Jenis program menentukan template. Boleh diganti hanya selama belum ada kemajuan yang tercatat (tidak ada milestone selesai, item bukan "terbuka", jam kerja manual).
+      const [doneMs, touchedItems, manualWork] = await Promise.all([
+        tx.trainingMilestone.count({ where: { projectId: id, OR: [{ doneAt: { not: null } }, { notApplicable: true }] } }),
+        tx.trainingReadinessItem.count({ where: { projectId: id, status: { not: "OPEN" } } }),
+        tx.trainingWorkloadTask.count({ where: { projectId: id, OR: [{ source: "MANUAL" }, { status: { not: "OPEN" } }] } }),
+      ]);
+      if (doneMs + touchedItems + manualWork > 0) throw Errors.conflict("Jenis program tidak dapat diganti karena milestone/item kesiapan sudah mulai dikerjakan atau ada jam kerja manual. Buat proyek baru dengan jenis yang benar.");
+    }
     await tx.trainingProject.update({ where: { id }, data });
     await auditProject(tx, actor, id, { action: "training.project.update", summary: `Data proyek ${b.code} diperbarui (${d.changed.join(", ")})`, before: d.before, after: d.after });
+    // Tanggal H/T, peserta acuan, moda, atau jenis program berubah → tugas jam kerja dari template dihitung ulang (yang manual tidak disentuh).
+    if (b.indicatorsAppliedAt && d.changed.some((k) => ["startDate", "endDate", "requestDate", "deliveryMode", "participantsMin", "track"].includes(k))) {
+      const cfg = (await loadConfig(tx)).config;
+      const row = await loadProgramRow(tx, id);
+      if (trackChanged) {
+        await tx.trainingMilestone.deleteMany({ where: { projectId: id } });
+        await tx.trainingReadinessItem.deleteMany({ where: { projectId: id } });
+        await tx.trainingWorkloadTask.deleteMany({ where: { projectId: id, source: "TEMPLATE" } });
+        await applyTemplatesTx(tx, actor, row, cfg);
+      } else {
+        const r = await regenerateWorkloadTx(tx, actor, row, cfg);
+        await auditProject(tx, actor, id, { action: "training.indicator.workload", summary: `Tugas jam kerja dari template dihitung ulang karena data program berubah (${r.created} tugas)`, after: { created: r.created } });
+      }
+    }
   });
 }
 

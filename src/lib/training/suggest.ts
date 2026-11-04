@@ -16,7 +16,7 @@ const RULES: { test: RegExp; level: TrainingLevel; reason: string }[] = [
 
 export function suggestLevel(position: string | null | undefined): LevelSuggestion {
   const p = (position ?? "").trim();
-  if (/direktur/i.test(p)) return { level: null, reason: "Direktur Utama = Super Admin: melihat seluruh proyek dan mengatur akses. Mengubah data hanya bila ia sendiri memberi level Manajer Program." };
+  if (/direktur/i.test(p)) return { level: null, reason: "Direktur Utama = Super Admin: akses penuh ke seluruh proyek (melihat dan mengubah) dan mengatur akses. Tidak perlu level modul." };
   const hit = RULES.find((r) => r.test.test(p));
   return hit ? { level: hit.level, reason: hit.reason } : { level: null, reason: "Tanpa level modul. Cukup ditambahkan sebagai anggota proyek dengan peran yang sesuai (staf, PJ peserta, PJ materi, PJ dokumentasi)." };
 }

@@ -67,19 +67,25 @@ Label SOP keuangan pada bagan (Pembuat, Pemeriksa, Penyetuju, Rekonsiliator, Ver
 
 ### 3a. Lintas proyek (level modul)
 
+Keputusan 4 Nov 2026: **Direktur/Super Admin boleh mengubah data proyek** (kelola penuh seperti Manajer Program); jumlah pemegang level Manajer Program **tidak dibatasi**.
+
 | Kemampuan | Super Admin | Pemantau | Admin Program | Manajer Program |
 |---|:-:|:-:|:-:|:-:|
 | Melihat **semua** proyek, dashboard lintas proyek, laporan | ✓ | ✓ | — *(hanya proyek yang diikuti)* | ✓ |
-| Membuat proyek baru | — | — | ✓ | ✓ |
-| Menetapkan Project Manager (PIC) | — | — | — | ✓ |
-| Mengelola program & template checklist | — | — | — | ✓ |
-| Mengelola direktori instruktur/asesor (+ melihat kontaknya) | — | — | ✓ | ✓ |
+| Membuat proyek baru | ✓ | — | ✓ | ✓ |
+| Menetapkan Project Manager (PIC) | ✓ | — | — | ✓ |
+| Mengelola program & template checklist | ✓ | — | — | ✓ |
+| Mengelola direktori instruktur/asesor (+ melihat kontaknya) | ✓ | — | ✓ | ✓ |
+| Mengubah data pada proyek mana pun | ✓ | — | — | ✓ |
 | Mengatur level modul siapa pun | **✓** | — | — | — |
-| Mengubah data pada proyek mana pun | — | — | — | ✓ |
+| **Melihat** rumus & parameter indikator | ✓ | ✓ | ✓ | ✓ |
+| **Mengubah** rumus & parameter indikator (versi baru, bisa dikembalikan) | **✓** | — | — | — |
+| Mengatur kapasitas per staf (paruh waktu, dst.) | ✓ | — | — | ✓ |
+| Melihat peta beban **seluruh tim** & kepadatan kelas | ✓ | ✓ | — *(hanya bebannya sendiri)* | ✓ |
 
 ### 3b. Pada satu proyek (peran proyek)
 
-| Kemampuan | Manajer Program | PIC | Admin Program | PJ Peserta | PJ Materi / PJ Dokumentasi | Staf | Pemantau / Super Admin |
+| Kemampuan | Manajer Program / Super Admin | PIC | Admin Program | PJ Peserta | PJ Materi / PJ Dokumentasi | Staf | Pemantau |
 |---|:-:|:-:|:-:|:-:|:-:|:-:|:-:|
 | Melihat proyek, tugas, jadwal, peserta (tanpa kontak), dokumen | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | Mengubah data proyek | ✓ | ✓ | ✓ | — | — | — | — |
@@ -97,6 +103,9 @@ Label SOP keuangan pada bagan (Pembuat, Pemeriksa, Penyetuju, Rekonsiliator, Ver
 | Mengunggah dokumen | ✓ | ✓ | ✓ | ✓ | ✓ | — | — |
 | Menghapus dokumen orang lain *(pengunggah selalu boleh menghapus miliknya)* | ✓ | ✓ | ✓ | — | — | — | — |
 | Menautkan surat tugas / mencatat referensi sistem lain | ✓ | ✓ | — | — | — | — | — |
+| Menerapkan template pemantauan; mengubah status item kesiapan, "tidak berlaku" | ✓ | ✓ | ✓ | — | — | — | — |
+| Menyelesaikan milestone *(PIC milestone boleh menyelesaikan miliknya sendiri; wajib bukti)* | ✓ | ✓ | ✓ | milik sendiri | milik sendiri | milik sendiri | — |
+| Melihat jam kerja per staf pada proyek | ✓ | ✓ | ✓ | hanya miliknya | hanya miliknya | hanya miliknya | ✓ |
 
 Aturan tambahan yang dijaga server:
 
@@ -106,16 +115,28 @@ Aturan tambahan yang dijaga server:
 - Menautkan **surat tugas** juga butuh izin HRIS `assignment:view_all`. Modul ini hanya menampilkan nomor, tujuan, tanggal, dan status — **tidak** nominal uang harian atau daftar penerima.
 - Penutupan: semua **checklist wajib** harus selesai. Pengecualian hanya oleh Manajer Program, dengan alasan tertulis; item yang dilewati tercatat di riwayat.
 
-## Keputusan yang perlu Anda ambil
+## Status keputusan
 
-Nilai bawaan sudah aman; ubah hanya bila Anda memutuskan lain.
-
-| # | Keputusan | Bawaan saat ini | Alternatif & dampaknya |
+| # | Keputusan | Status | Catatan |
 |---|---|---|---|
-| 1 | **Apakah Direktur/Super Admin boleh mengubah data proyek?** | Tidak. Hanya memantau, mengatur akses, dan melihat laporan. Untuk mengubah, beri diri sendiri level Manajer Program (tercatat di audit). | Memberi level Manajer Program ke akun Anda secara permanen: lebih praktis, tetapi hilang pemisahan "memantau vs mengeksekusi". |
-| 2 | **Siapa yang memegang level Manajer Program?** | Usulan: Manajer Operasional & Keuangan **dan** Supervisor Adm. & Kurikulum. | Hanya Manajer Ops & Keu → lebih ketat, tetapi semua pembuatan PIC, penutupan, dan pembatalan proyek menumpuk di satu orang yang juga memegang keuangan. |
-| 3 | **Format dokumen yang diizinkan** | PDF, PNG, JPEG (diverifikasi dari isi berkas). | Menambah Word/PowerPoint/Excel membutuhkan verifikasi berkas Office yang lebih ketat (risiko makro). Sementara, ekspor materi ke PDF. |
-| 4 | **Penghapusan permanen & retensi dokumen** | "Hapus" = disembunyikan; berkas tetap ada sebagai jejak. | Kebijakan retensi (mis. 5 tahun lalu dihapus otomatis) perlu keputusan hukum/operasional. |
-| 5 | **Rumus indikator "beban tim", "kesiapan kegiatan", "ketepatan waktu"** | Tidak ditampilkan sebagai persen; hanya jumlah tugas terbuka/terlambat per orang. | Sepakati rumus & data masukannya dulu, baru ditambahkan. |
-| 6 | **Batas ukuran dokumen** | `MAX_DOCUMENT_UPLOAD_MB` = 10 MB, disimpan di PostgreSQL. | Volume foto dokumentasi besar sebaiknya pindah ke penyimpanan objek (butuh persetujuan & konfigurasi). |
-| 7 | **Manajer Marketing & Relations sebagai Pemantau** | Tidak diberi (opsional). | Beri bila ingin memantau pelaksanaan in-house tanpa bertanya ke tim. |
+| 1 | **Direktur/Super Admin boleh mengubah data proyek?** | ✅ **Diputuskan: YA** (4 Nov 2026) | Diterapkan di kode & tes. Pemisahan "memantau vs mengeksekusi" tidak lagi dipakai; setiap perubahan tetap tercatat di audit dengan nama pelaku. |
+| 2 | **Siapa yang memegang level Manajer Program?** | ✅ **Diputuskan: Direktur yang memberi akses, tanpa batas jumlah** | Tidak ada pembatasan 1–2 orang di kode; ada tes yang membuktikan banyak pemegang. Setiap pemberian/pencabutan tercatat. |
+| 3 | **Izinkan dokumen Word/PowerPoint/Excel?** | ⏳ **Penjelasan diberikan; menunggu keputusan Anda** | Lihat penjelasan di bawah. Sampai diputuskan: hanya PDF/PNG/JPEG. |
+| 4 | **Retensi & penghapusan permanen dokumen** | ⏳ **Menunggu persetujuan Direktur** | Belum dibangun apa pun: tidak ada penghapusan otomatis maupun permanen. "Hapus" tetap = disembunyikan. Setelah masa retensi diputuskan, ditambah aksi penghapusan permanen khusus Direktur (beralasan, tercatat di audit). |
+| 5 | **Rumus indikator beban tim, kesiapan, ketepatan waktu** | ✅ **Diputuskan: memakai dokumen v1.0, dapat diedit di aplikasi** | Rumus tetap di kode; semua angka (bobot, ambang, template, jam standar, kapasitas) diubah Direktur di *Rumus Indikator* — berversi, dapat dikembalikan. Rincian & tafsir: TRAINING-OPS.md §3a. |
+| 6 | **Batas ukuran dokumen** | Bawaan | `MAX_DOCUMENT_UPLOAD_MB` = 10 MB, disimpan di PostgreSQL. Volume foto dokumentasi besar sebaiknya pindah ke penyimpanan objek (butuh persetujuan & konfigurasi). |
+| 7 | **Manajer Marketing & Relations sebagai Pemantau** | Bawaan: tidak diberi | Beri bila ingin memantau pelaksanaan in-house tanpa bertanya ke tim. |
+
+### Soal #3 — untuk apa "pemeriksaan keamanan tambahan" pada file Word/PowerPoint/Excel?
+
+Singkatnya: PDF dan gambar relatif "pasif" (tampilannya saja), sedangkan file Office adalah **wadah yang bisa membawa program**.
+
+- **Makro**: file `.docm/.xlsm/.pptm` dan format lama `.doc/.xls/.ppt` dapat memuat kode (VBA) yang jalan otomatis saat dibuka. Ini pintu masuk malware paling umum lewat dokumen.
+- **Objek tertanam & tautan luar**: Office bisa menyisipkan file lain di dalamnya atau menarik data dari alamat internet saat dibuka — dipakai untuk mencuri data atau memicu unduhan.
+- **Berkas ZIP yang disamarkan**: `.docx/.xlsx/.pptx` sebenarnya arsip ZIP. Arsip yang dirancang jahat ("zip bomb") kecil saat diunggah tetapi membengkak berlipat-lipat saat dibuka dan dapat melumpuhkan server.
+- **Pemeriksaan isi**: untuk PDF/PNG/JPEG kami cukup memverifikasi tanda pengenal berkas (magic bytes). Untuk Office, pemeriksaan sejenis tidak cukup: perlu memeriksa struktur arsip, menolak makro/objek berbahaya, dan membatasi ukuran setelah dibuka. Aplikasi ini **belum punya pemindai malware**.
+
+Dampak ke operasional: instruktur/PJ materi sering memegang materi dalam PowerPoint/Word, tetapi PDF memenuhi hampir semua kebutuhan arsip proyek (ekspor satu kali).
+
+**Usulan** (bila Anda ingin mengizinkan): hanya `.docx/.xlsx/.pptx` (bukan format makro/lama), diperiksa struktur arsipnya + batas ukuran terurai, ditolak bila ada makro/objek tertanam/tautan luar, selalu diunduh sebagai lampiran (tidak dibuka di peramban), dan ditambah pemindai malware bila infrastrukturnya tersedia.
+**Alternatif paling aman & tanpa biaya**: tetap PDF/PNG/JPEG (instruktur mengekspor ke PDF). Beri tahu pilihan Anda — sebelum itu, tidak ada perubahan.

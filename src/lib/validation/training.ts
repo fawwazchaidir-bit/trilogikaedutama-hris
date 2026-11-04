@@ -1,6 +1,7 @@
 /** Skema validasi (Zod) modul Training & Operations — dipakai SERVICE agar aturan sama untuk API, halaman, seed, dan tes. */
 import { z } from "zod";
 import { hhmm, isoDate, optionalEmail, optionalPhone, optionalText, requiredText, uuid } from "./common";
+import { ANCHORS, ITEM_COMPONENTS, TRACKS, indicatorConfigSchema } from "@/lib/training/indicators/config";
 import {
   ACTIVITY_KINDS, CHECKLIST_PHASES, CONFIRMATIONS, DELIVERY_MODES, DOC_CATEGORIES, EXTERNAL_SYSTEMS, INSTRUCTOR_KINDS,
   PARTICIPANT_STATUSES, PROJECT_ROLES, PROJECT_STATUSES, SCHEDULE_STATUSES, TASK_PRIORITIES, TASK_STATUSES, TRAINING_LEVELS,
@@ -15,6 +16,17 @@ const bool = z.boolean({ error: "Nilai harus benar/salah" });
 
 // ─────────────────────────── Akses & program ───────────────────────────
 
+/**
+ * Skema UBAH sebagian (PATCH). Zod 4 tetap menerapkan `.default()` walau field dibungkus `.partial()`, sehingga PATCH `{ title }` diam-diam
+ * mengembalikan prioritas/status/jenis ke nilai bawaan. Skema ubah dibangun dari field TANPA default; semuanya opsional.
+ */
+type NoDefault<F> = F extends z.ZodDefault<infer I> ? I : F;
+function patchOf<T extends z.ZodRawShape>(o: z.ZodObject<T>): z.ZodObject<{ [K in keyof T]: z.ZodOptional<NoDefault<T[K]>> }> {
+  const shape: Record<string, z.ZodType> = {};
+  for (const [k, f] of Object.entries(o.shape)) shape[k] = ((f instanceof z.ZodDefault ? f.removeDefault() : f) as z.ZodType).optional();
+  return z.object(shape) as never;
+}
+
 export const accessGrantSchema = z.object({
   userId: uuid,
   level: oneOf(TRAINING_LEVELS, "Level akses"),
@@ -26,7 +38,7 @@ export const programSchema = z.object({
   kind: oneOf(ACTIVITY_KINDS, "Jenis program").default("REGULAR"),
   description: optionalText(1000, "Deskripsi"),
 });
-export const programUpdateSchema = programSchema.partial().extend({ isActive: bool.optional() });
+export const programUpdateSchema = patchOf(programSchema).extend({ isActive: bool.optional() });
 
 // ─────────────────────────── Proyek ───────────────────────────
 
@@ -47,6 +59,13 @@ const projectFields = {
   endDate: optDate,
   description: optionalText(2000, "Deskripsi"),
   notes: optionalText(2000, "Catatan penting"),
+  // Pemantauan: jenis program & data pelaksana indikator.
+  track: oneOf(TRACKS, "Jenis program").default("REGULAR"),
+  participantsMin: z.number({ error: "Harus berupa angka" }).int("Harus bilangan bulat").min(0).max(100000).nullish().transform((v) => v ?? null),
+  participantsMax: z.number({ error: "Harus berupa angka" }).int("Harus bilangan bulat").min(0).max(100000).nullish().transform((v) => v ?? null),
+  bnsp: bool.default(false),
+  requestDate: optDate,
+  registrationCloseDate: optDate,
 };
 
 export const projectCreateSchema = z.object({
@@ -57,7 +76,7 @@ export const projectCreateSchema = z.object({
   picEmployeeId: optUuid,
 }).superRefine(dateOrder);
 
-export const projectUpdateSchema = z.object(projectFields).partial().superRefine(dateOrder);
+export const projectUpdateSchema = patchOf(z.object(projectFields)).superRefine(dateOrder);
 
 export const projectStatusSchema = z.object({ to: oneOf(["PREPARATION", "RUNNING"] as const, "Status tujuan") });
 
@@ -104,7 +123,7 @@ export const taskCreateSchema = z.object({
   priority: oneOf(TASK_PRIORITIES, "Prioritas").default("NORMAL"),
   requiresReview: bool.default(false),
 });
-export const taskUpdateSchema = taskCreateSchema.partial();
+export const taskUpdateSchema = patchOf(taskCreateSchema);
 export const taskStatusSchema = z.object({ status: oneOf(TASK_STATUSES, "Status tugas"), note: optionalText(500, "Catatan") });
 export const taskCommentSchema = z.object({ body: requiredText(1, 2000, "Komentar") });
 export const myTasksSchema = z.object({
@@ -179,8 +198,10 @@ export const participantSchema = z.object({
   email: optionalEmail,
   status: oneOf(PARTICIPANT_STATUSES, "Status peserta").default("REGISTERED"),
   note: optionalText(500, "Catatan"),
+  /** Terkonfirmasi (pembayaran diverifikasi / nama diterima dari klien) — dicatat manual, dihitung pada indikator Kesiapan. */
+  confirmed: bool.optional(),
 });
-export const participantUpdateSchema = participantSchema.partial();
+export const participantUpdateSchema = patchOf(participantSchema);
 export const participantListSchema = z.object({
   q: z.string().trim().max(100).optional(),
   status: oneOf(PARTICIPANT_STATUSES, "Status").optional(),
@@ -198,7 +219,7 @@ export const instructorSchema = z.object({
   phone: optionalPhone,
   email: optionalEmail,
 });
-export const instructorUpdateSchema = instructorSchema.partial().extend({ isActive: bool.optional() });
+export const instructorUpdateSchema = patchOf(instructorSchema).extend({ isActive: bool.optional() });
 export const instructorAssignSchema = z.object({
   instructorId: uuid,
   kind: oneOf(INSTRUCTOR_KINDS, "Jenis peran"),
@@ -224,3 +245,44 @@ export const externalRefSchema = z.object({
   externalId: requiredText(1, 100, "ID / nomor referensi"),
   label: optionalText(120, "Keterangan"),
 });
+
+// ─────────────────────────── Indikator pemantauan ───────────────────────────
+
+export const indicatorConfigSaveSchema = z.object({ config: indicatorConfigSchema, note: optionalText(300, "Catatan perubahan") });
+
+const offsetInput = {
+  anchor: oneOf(ANCHORS, "Acuan tenggat"),
+  days: z.number({ error: "Harus berupa angka" }).int().min(-730).max(730).default(0),
+  work: bool.default(false),
+  ref: z.string().trim().max(20).nullish().transform((v) => v || null),
+  manualDate: optDate,
+};
+
+export const milestoneCompleteSchema = z.object({ doneAt: optDate, evidence: optionalText(500, "Bukti") });
+export const milestoneAddSchema = z.object({
+  code: requiredText(1, 20, "Kode"), name: requiredText(3, 200, "Nama milestone"), ...offsetInput,
+  weight: z.number({ error: "Harus berupa angka" }).int().min(0).max(1000), critical: bool.default(false), assigneeId: optUuid, reference: optionalText(80, "Rujukan"),
+});
+export const milestoneUpdateSchema = z.object({
+  name: requiredText(3, 200, "Nama milestone").optional(), weight: z.number().int().min(0).max(1000).optional(), critical: bool.optional(),
+  assigneeId: optUuid.optional(), manualDate: optDate.optional(), notApplicable: bool.optional(), reference: optionalText(80, "Rujukan").optional(),
+});
+export const readinessStatusSchema = z.object({ status: z.enum(["OPEN", "DONE", "NOT_APPLICABLE"], { error: "Status tidak valid" }) });
+export const readinessAddSchema = z.object({
+  component: z.enum(ITEM_COMPONENTS, { error: "Komponen tidak valid" }), name: requiredText(3, 200, "Nama item"), ...offsetInput,
+  critical: bool.default(false), assigneeId: optUuid,
+});
+export const workloadSchema = z.object({
+  employeeId: uuid, name: requiredText(3, 200, "Nama tugas"),
+  hours: z.number({ error: "Jam harus berupa angka" }).min(0, "Tidak boleh negatif").max(2000), startDate: isoDate, endDate: isoDate,
+}).superRefine((v, ctx) => { if (v.endDate < v.startDate) ctx.addIssue({ code: "custom", path: ["endDate"], message: "Tanggal selesai tidak boleh sebelum tanggal mulai" }); });
+export const workloadUpdateSchema = z.object({
+  name: requiredText(3, 200, "Nama tugas").optional(), hours: z.number().min(0).max(2000).optional(), startDate: isoDate.optional(), endDate: isoDate.optional(),
+  status: z.enum(["OPEN", "DONE", "CANCELLED"]).optional(),
+});
+export const staffCapacitySchema = z.object({
+  hoursPerDay: z.number({ error: "Harus berupa angka" }).gt(0).max(24).nullish().transform((v) => v ?? null),
+  workDays: z.array(z.number().int().min(1).max(7)).min(1, "Pilih minimal satu hari kerja").max(7), note: optionalText(200, "Catatan"),
+});
+export const heatmapQuerySchema = z.object({ weeks: z.coerce.number().int().min(1).max(12).optional() });
+export const densityQuerySchema = z.object({ from: isoDate.optional(), days: z.coerce.number().int().min(1).max(92).optional() });
