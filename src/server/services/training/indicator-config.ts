@@ -64,6 +64,8 @@ function sectionsChanged(a: IndicatorConfig, b: IndicatorConfig): string[] {
 }
 
 async function persist(tx: Tx, actor: Actor, config: IndicatorConfig, note: string | null, summaryPrefix: string): Promise<{ version: number; changed: string[] }> {
+  // Dua penyimpanan serentak tidak boleh memakai nomor versi yang sama (kolom version unik): serialkan lewat kunci advisory transaksi.
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('training:indicator-config'))`;
   const cur = await loadConfig(tx);
   const version = cur.version + 1;
   const changed = sectionsChanged(cur.config, config);

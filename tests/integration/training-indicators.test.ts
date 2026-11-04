@@ -111,6 +111,14 @@ describe("konfigurasi indikator (dapat diubah di aplikasi)", () => {
     expect((await fail(saveIndicatorConfig(fx.superAdmin, { config: ghost })))?.status).toBe(422);
   });
 
+  it("dua penyimpanan serentak menghasilkan dua versi berbeda (tanpa tabrakan nomor versi)", async () => {
+    const a = defaultIndicatorConfig(); a.thresholds.spi = { greenMin: 0.9, yellowMin: 0.8 };
+    const b = defaultIndicatorConfig(); b.thresholds.spi = { greenMin: 0.92, yellowMin: 0.82 };
+    const rs = await Promise.all([saveIndicatorConfig(fx.superAdmin, { config: a }), saveIndicatorConfig(fx.superAdmin, { config: b })]);
+    expect(rs.map((r) => r.version).sort()).toEqual([1, 2]);
+    expect(await prisma.trainingIndicatorConfigVersion.count()).toBe(2);
+  });
+
   it("reset ke bawaan = VERSI BARU (riwayat tidak dihapus), pemegang jabatan dipertahankan; riwayat append-only di database", async () => {
     await setConfig((c) => { c.thresholds.spi = { greenMin: 0.9, yellowMin: 0.8 }; });
     const r = await resetIndicatorConfig(fx.superAdmin);
