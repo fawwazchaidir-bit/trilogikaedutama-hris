@@ -40,6 +40,8 @@
 - **Dokumen Saya**: kontrak kerja dan dokumen kepegawaian Anda; klik **Lihat** untuk membuka PDF di aplikasi (di sebagian peramban ponsel gunakan *Buka di tab baru* / *Unduh PDF*).
 - **Tombol mata** pada isian password menampilkan/menyembunyikan isinya (pastikan tidak ada yang melihat layar Anda).
 
+- **Atasan & Persetujuan Tim:** atasan langsung Anda tampil di *Profil & Jadwal*. Bila Anda atasan seseorang, menu **Persetujuan Tim** muncul: tinjau cuti, izin, sakit, dan lembur bawahan Anda di sana, dan tunjuk **pengganti** saat Anda cuti atau dinas luar. Anda tidak dapat memproses pengajuan sendiri. Lihat [ORGANISASI-ATASAN.md](ORGANISASI-ATASAN.md).
+
 ## C. Admin / HR
 
 - **Absensi**: pilih tanggal → lihat siapa hadir/terlambat/belum absen. **Koreksi** (alasan wajib) untuk lupa absen/salah jam, atau hapus catatan keliru. Riwayat koreksi tampil di bawah dan di detail karyawan.
@@ -58,6 +60,7 @@
 - **Surat Tugas** (menu; halaman *Surat Tugas & Uang Harian* — HR atau Pimpinan): **Terbitkan Surat Tugas** → isi maksud, lokasi, tanggal, pilih karyawan dan **uang harian per hari** (kolom *Hari* kosong = seluruh lama penugasan, hari kalender). Karyawan diberi notifikasi. Setelah uang diserahkan (tunai/transfer), klik **Terbitkan bukti penerimaan** pada penerimanya → unduh PDF, cetak, penerima menandatangani basah. HR tidak dapat menugaskan/menerbitkan bukti untuk dirinya sendiri (Super Admin). Salah? Surat tugas dibatalkan beralasan (hanya bila tidak ada bukti aktif); **bukti** hanya dapat dibatalkan Super Admin, lalu boleh diterbitkan ulang. Uang harian **tidak masuk slip gaji**.
 - **Dokumen**: **Unggah dokumen** (PDF; kontrak wajib bertanggal mulai, tanggal berakhir kosong = tanpa batas waktu). Tab ringkasan menunjukkan *Perlu keputusan pimpinan*, *Menunggu kontrak perpanjangan*, dan *Segera berakhir*. Setelah pimpinan memutuskan **lanjut**, klik **Unggah perpanjangan** (kontrak lama ditandai *Sudah diperpanjang*). Salah unggah → **Arsipkan** (alasan wajib; berkas tetap tersimpan).
 - **Kebijakan cuti per karyawan**: *Karyawan → detail → Kebijakan cuti karyawan* → **Ubah kebijakan** (berhak sejak / kuota / saldo negatif; alasan wajib). **Beri kuota {tahun}** memberi saldo awal satu karyawan sesuai kebijakannya; *Pengajuan & Cuti → Terapkan kuota* melakukannya untuk semua karyawan aktif yang belum punya saldo awal — yang belum berhak dilewati dan disebutkan. Jalankan lagi saat ada karyawan yang baru berhak.
+- **Organisasi & atasan:** di *Detail karyawan → Organisasi & atasan langsung*, tetapkan atasan dan ubah divisi/jabatan/status dengan **tanggal berlaku**; riwayat tercatat otomatis. HR tetap melihat semua pengajuan dan dapat memprosesnya bila atasan tidak sempat (tercatat sebagai diproses HR).
 - **Penting:** koreksi absensi *setelah* gaji terbit **tidak** mengubah slip; periode ditandai "Data berubah" sebagai pengingat. Sebelum slip terbit, perubahan **komponen gaji** (nominal, rumus, masa berlaku, tambah/nonaktif) sesudah Hitung juga menandai karyawan itu "Data berubah" dan memblokir Ajukan/Setujui/Terbitkan sampai Anda menekan **Hitung ulang** (Kembalikan ke Draf dulu bila sudah diajukan).
 
 ## D. Super Admin / Pimpinan

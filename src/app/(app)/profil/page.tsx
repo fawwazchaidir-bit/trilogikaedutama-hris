@@ -3,6 +3,7 @@ import Link from "next/link";
 import { KeyRound, UserRound } from "lucide-react";
 import { requirePageSelf } from "@/server/auth/current";
 import { getEmployee } from "@/server/services/employees";
+import { getOrgProfile } from "@/server/services/org";
 import { getEmployeeRange } from "@/server/services/attendance";
 import { env } from "@/server/env";
 import { Card, CardHeader, PageHeader } from "@/components/ui/card";
@@ -19,7 +20,7 @@ export const dynamic = "force-dynamic";
 export default async function ProfilePage() {
   const user = await requirePageSelf();
   const today = todayIso(env().APP_TIMEZONE);
-  const [e, week] = await Promise.all([getEmployee(user, user.employeeId), getEmployeeRange(user, user.employeeId, today, addDays(today, 13))]);
+  const [e, week, org] = await Promise.all([getEmployee(user, user.employeeId), getEmployeeRange(user, user.employeeId, today, addDays(today, 13)), getOrgProfile(user, user.employeeId)]);
   const row = (k: string, v: React.ReactNode) => (<div className="grid grid-cols-[8rem_1fr] gap-2 py-2 text-sm"><dt className="text-muted">{k}</dt><dd className="font-medium">{v || "—"}</dd></div>);
   return (
     <div>
@@ -34,7 +35,7 @@ export default async function ProfilePage() {
             <div><p className="text-lg font-semibold">{e.fullName}</p><p className="text-sm text-muted">{e.position}{e.divisionName ? ` · ${e.divisionName}` : ""}</p><div className="mt-1 flex gap-1"><Badge>{EMPLOYMENT_LABEL[e.employmentStatus]}</Badge>{!e.isActive && <Badge tone="red">Nonaktif</Badge>}</div></div>
           </div>
           <dl className="divide-y divide-line px-5">
-            {row("No. Induk", e.employeeNo)}{row("Mulai bekerja", formatDateLong(e.joinDate))}{row("Telepon", e.phone)}{row("Email", e.email)}{row("Alamat", e.address)}
+            {row("No. Induk", e.employeeNo)}{row("Atasan langsung", org.supervisor ? `${org.supervisor.name} · ${org.supervisor.position}` : null)}{row("Jabatan berlaku sejak", formatDateLong(org.effectiveFrom))}{row("Mulai bekerja", formatDateLong(e.joinDate))}{row("Telepon", e.phone)}{row("Email", e.email)}{row("Alamat", e.address)}
             {row("Rekening gaji", e.bankAccountMasked ? `${e.bankName ?? ""} ${e.bankAccountMasked}` : null)}
           </dl>
         </Card>

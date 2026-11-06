@@ -11,7 +11,8 @@ import { dateToIso, isoToDate } from "../json";
 import { countScheduledDays, type DayPart } from "@/lib/attendance";
 import { employeeLite, loadRangeContext } from "./context";
 import { getSettings } from "./settings";
-import { notifyUsers, reviewerUserIds } from "./notifications";
+import { notifyUsers } from "./notifications";
+import { assertMayReview, authorizeReview, reviewableMap, submitReviewers } from "./org";
 import { diffDays, rangesOverlap, todayIso } from "@/lib/time";
 import { effectiveLeavePolicy, isEntitledOn, quotaForYear, type EffectiveLeavePolicy, type LeaveDefaults } from "@/lib/leave-policy";
 import { isoDate, optionalText, requiredText, uuid } from "@/lib/validation/common";
@@ -60,6 +61,8 @@ export interface LeaveDto {
   workingDays: number | null;
   attachmentUrl: string | null;
   reviewedBy: string | null;
+  /** Dalam kapasitas apa diputuskan: SUPERVISOR | DELEGATE | ESCALATION | HR (null = belum diputuskan / data lama). */
+  reviewedAs: "SUPERVISOR" | "DELEGATE" | "ESCALATION" | "HR" | null;
   reviewedAt: string | null;
   reviewNote: string | null;
   cancelledAt: string | null;
@@ -80,7 +83,7 @@ async function toDtos(rows: Row[]): Promise<LeaveDto[]> {
     id: r.id, employeeId: r.employeeId, employeeName: r.employee.fullName, employeeNo: r.employee.employeeNo, division: r.employee.division?.name ?? null,
     type: r.type, startDate: dateToIso(r.startDate), endDate: dateToIso(r.endDate), reason: r.reason, status: r.status, dayPart: r.dayPart, workingDays: r.workingDays,
     attachmentUrl: r.attachmentFileId ? `/api/files/${r.attachmentFileId}` : null,
-    reviewedBy: r.reviewedById ? name.get(r.reviewedById) ?? null : null, reviewedAt: r.reviewedAt?.toISOString() ?? null, reviewNote: r.reviewNote,
+    reviewedBy: r.reviewedById ? name.get(r.reviewedById) ?? null : null, reviewedAs: r.reviewedAs, reviewedAt: r.reviewedAt?.toISOString() ?? null, reviewNote: r.reviewNote,
     cancelledAt: r.cancelledAt?.toISOString() ?? null, cancelReason: r.cancelReason, createdAt: r.createdAt.toISOString(),
   }));
 }
@@ -396,9 +399,10 @@ export async function submitLeave(actor: Actor, raw: unknown): Promise<LeaveDto>
       action: "leave.submit", entityType: "LeaveRequest", entityId: created.id,
       summary: `${LEAVE_TYPE_LABEL[input.type]} ${formatDateRange(input.startDate, input.endDate)}${input.dayPart === "FULL" ? "" : input.dayPart === "MORNING" ? " (setengah hari pagi)" : " (setengah hari siang)"} (${formatDays(wd.total)} hari kerja) diajukan`, after: { type: input.type, startDate: input.startDate, endDate: input.endDate, dayPart: input.dayPart, workingDays: wd.total },
     });
-    await notifyUsers(tx, await reviewerUserIds(tx, actor.userId), {
+    const routing = await submitReviewers(tx, employeeId, actor.userId);
+    await notifyUsers(tx, routing.userIds, {
       type: "leave.submitted", title: `Pengajuan ${LEAVE_TYPE_LABEL[input.type].toLowerCase()} baru`,
-      body: `${emp.fullName} · ${formatDateRange(input.startDate, input.endDate)}`, href: "/pengajuan?status=PENDING",
+      body: `${emp.fullName} · ${formatDateRange(input.startDate, input.endDate)}`, href: routing.routed ? "/persetujuan-tim" : "/pengajuan?status=PENDING",
     });
     return (await toDtos([created]))[0]!;
   });
@@ -429,6 +433,17 @@ export async function listLeaves(actor: Actor, raw: unknown = {}): Promise<Paged
   return { items: await toDtos(rows), total, page, pageSize, pageCount: Math.max(Math.ceil(total / pageSize), 1) };
 }
 
+/** Pengajuan cuti/izin/sakit tim yang boleh ditinjau pelaku (atasan langsung, pengganti, eskalasi). Bukan pengganti `listLeaves` milik HR. */
+export async function listTeamLeaves(actor: Actor, raw: unknown = {}): Promise<{ items: LeaveDto[]; capacity: Record<string, string> }> {
+  const map = await reviewableMap(actor);
+  if (map.size === 0) throw Errors.forbidden();
+  const f = parseInput(leaveListSchema, raw);
+  const rows = await prisma.leaveRequest.findMany({
+    where: { employeeId: { in: [...map.keys()] }, ...(f.status ? { status: f.status } : { status: "PENDING" }) }, include, orderBy: { createdAt: "asc" }, take: 100,
+  });
+  return { items: await toDtos(rows), capacity: Object.fromEntries(map) };
+}
+
 const reviewSchema = z.object({
   decision: z.enum(["APPROVE", "REJECT"]),
   note: optionalText(300, "Catatan"),
@@ -441,13 +456,12 @@ const reviewSchema = z.object({
  * penyetujuan cuti memotong saldo per tahun (USAGE) dalam transaksi yang sama.
  */
 export async function reviewLeave(actor: Actor, id: string, raw: unknown): Promise<LeaveDto> {
-  assertCan(actor, "leave:review");
+  await assertMayReview(actor, "leave:review");
   const input = parseInput(reviewSchema, raw);
   const req0 = await prisma.leaveRequest.findUnique({ where: { id } });
   if (!req0) throw Errors.notFound("Pengajuan");
-  if (req0.employeeId === actor.employeeId && actor.role !== "SUPER_ADMIN") {
-    throw Errors.forbidden("Anda tidak dapat memproses pengajuan Anda sendiri. Minta Super Admin untuk memprosesnya.");
-  }
+  // Atasan langsung / pengganti / eskalasi, atau HR & Super Admin (izin peran). Tidak ada yang boleh memproses pengajuannya sendiri.
+  const capacity = await authorizeReview(prisma, actor, req0.employeeId, "leave:review", "leave");
   const start = dateToIso(req0.startDate), end = dateToIso(req0.endDate);
   const wd = input.decision === "APPROVE" ? await workingDaysOf(req0.employeeId, start, end, req0.dayPart) : null;
   if (wd && wd.total === 0) throw Errors.validation("Rentang pengajuan tidak lagi mencakup hari kerja terjadwal (jadwal/kalender berubah). Tolak atau minta pengajuan ulang.");
@@ -486,7 +500,7 @@ export async function reviewLeave(actor: Actor, id: string, raw: unknown): Promi
     const r = await tx.leaveRequest.updateMany({
       where: { id, status: "PENDING" },
       data: {
-        status: input.decision === "APPROVE" ? "APPROVED" : "REJECTED", reviewedById: actor.userId, reviewedAt: now, reviewNote: input.note,
+        status: input.decision === "APPROVE" ? "APPROVED" : "REJECTED", reviewedById: actor.userId, reviewedAs: capacity, reviewedAt: now, reviewNote: input.note,
         ...(wd ? { workingDays: wd.total } : {}),
       },
     });

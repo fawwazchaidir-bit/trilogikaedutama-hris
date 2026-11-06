@@ -15,6 +15,7 @@ import { maskAccount } from "@/lib/payroll";
 import { TAX_STATUSES, type TaxStatus } from "@/lib/statutory";
 import { EMPLOYMENT_LABEL, type EmploymentStatus } from "@/lib/labels";
 import { todayIso } from "@/lib/time";
+import { ensureOrgBaseline, recordOrgChangeFromUpdate } from "./org";
 import type { Paged } from "@/lib/types";
 
 // ─────────────────────────── Skema ───────────────────────────
@@ -245,6 +246,7 @@ export async function createEmployee(actor: Actor, raw: unknown): Promise<Employ
       action: "employee.create", entityType: "Employee", entityId: e.id, summary: `Karyawan ${e.fullName} (${e.employeeNo}) ditambahkan`,
       after: { employeeNo: e.employeeNo, fullName: e.fullName, position: e.position, employmentStatus: e.employmentStatus, joinDate: input.joinDate },
     });
+    await ensureOrgBaseline(tx, actor, e.id); // riwayat jabatan dimulai dari data awal
     return toEmployeeDto(e);
   });
 }
@@ -258,6 +260,7 @@ export async function updateEmployee(actor: Actor, id: string, raw: unknown): Pr
     await assertUnique(tx, input.employeeNo, id);
     await assertDivision(tx, input.divisionId);
     if (before.endDate && input.joinDate > dateToIso(before.endDate)) throw Errors.validation("Tanggal mulai tidak boleh setelah tanggal berhenti.", { joinDate: "Setelah tanggal berhenti" });
+    await ensureOrgBaseline(tx, actor, id); // jejak "sebelum" untuk karyawan lama yang belum punya riwayat
     const data = {
       employeeNo: input.employeeNo, fullName: input.fullName, divisionId: input.divisionId ?? null, position: input.position,
       employmentStatus: input.employmentStatus, joinDate: isoToDate(input.joinDate), phone: input.phone, email: input.email,
@@ -266,6 +269,7 @@ export async function updateEmployee(actor: Actor, id: string, raw: unknown): Pr
       ...statutoryFields(input),
     } satisfies Prisma.EmployeeUncheckedUpdateInput;
     const e = await tx.employee.update({ where: { id }, data, include });
+    await recordOrgChangeFromUpdate(tx, actor, { divisionId: before.divisionId, position: before.position, employmentStatus: before.employmentStatus }, id);
     const flat = (r: Row) => ({
       employeeNo: r.employeeNo, fullName: r.fullName, divisionId: r.divisionId, position: r.position, employmentStatus: r.employmentStatus,
       joinDate: dateToIso(r.joinDate), phone: r.phone, email: r.email, address: r.address, bankName: r.bankName,

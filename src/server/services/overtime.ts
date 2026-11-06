@@ -9,7 +9,8 @@ import { actorCan, assertCan, requireSelf, type Actor } from "../actor";
 import { writeAudit } from "../audit";
 import { dateToIso, isoToDate } from "../json";
 import { getSettings } from "./settings";
-import { notifyUsers, reviewerUserIds } from "./notifications";
+import { notifyUsers } from "./notifications";
+import { assertMayReview, authorizeReview, reviewableMap, submitReviewers } from "./org";
 import type { OvertimeApproval } from "@/lib/payroll";
 import { addDays, timeToMinutes, todayIso, minutesToTime } from "@/lib/time";
 import { formatDateShort, formatDuration } from "@/lib/format";
@@ -55,6 +56,8 @@ export interface OvertimeDto {
   status: RequestStatus;
   approvedMinutes: number | null;
   reviewedBy: string | null;
+  /** Dalam kapasitas apa diputuskan: SUPERVISOR | DELEGATE | ESCALATION | HR (null = belum diputuskan / data lama). */
+  reviewedAs: "SUPERVISOR" | "DELEGATE" | "ESCALATION" | "HR" | null;
   reviewedAt: string | null;
   reviewNote: string | null;
   cancelledAt: string | null;
@@ -74,7 +77,7 @@ async function toDtos(rows: Row[]): Promise<OvertimeDto[]> {
     return {
       id: r.id, employeeId: r.employeeId, employeeName: r.employee.fullName, employeeNo: r.employee.employeeNo, division: r.employee.division?.name ?? null,
       date: dateToIso(r.date), startTime: r.startTime, endTime: minutesToTime(endMin % 1440), endsNextDay: endMin >= 1440, minutes: r.minutes, reason: r.reason,
-      status: r.status, approvedMinutes: r.approvedMinutes, reviewedBy: r.reviewedById ? name.get(r.reviewedById) ?? null : null,
+      status: r.status, approvedMinutes: r.approvedMinutes, reviewedBy: r.reviewedById ? name.get(r.reviewedById) ?? null : null, reviewedAs: r.reviewedAs,
       reviewedAt: r.reviewedAt?.toISOString() ?? null, reviewNote: r.reviewNote, cancelledAt: r.cancelledAt?.toISOString() ?? null,
       cancelReason: r.cancelReason, createdAt: r.createdAt.toISOString(),
     };
@@ -120,8 +123,9 @@ export async function submitOvertime(actor: Actor, raw: unknown): Promise<Overti
       action: "overtime.submit", entityType: "OvertimeRequest", entityId: created.id,
       summary: `Lembur ${formatDateShort(input.date)} ${input.startTime} (${formatDuration(input.minutes)}) diajukan`, after: { date: input.date, startTime: input.startTime, minutes: input.minutes },
     });
-    await notifyUsers(tx, await reviewerUserIds(tx, actor.userId), {
-      type: "overtime.submitted", title: "Pengajuan lembur baru", body: `${emp.fullName} · ${formatDateShort(input.date)} · ${formatDuration(input.minutes)}`, href: "/lembur?status=PENDING",
+    const routing = await submitReviewers(tx, employeeId, actor.userId);
+    await notifyUsers(tx, routing.userIds, {
+      type: "overtime.submitted", title: "Pengajuan lembur baru", body: `${emp.fullName} · ${formatDateShort(input.date)} · ${formatDuration(input.minutes)}`, href: routing.routed ? "/persetujuan-tim" : "/lembur?status=PENDING",
     });
     return (await toDtos([created]))[0]!;
   });
@@ -131,6 +135,17 @@ export async function listMyOvertime(actor: Actor): Promise<OvertimeDto[]> {
   const employeeId = requireSelf(actor);
   const rows = await prisma.overtimeRequest.findMany({ where: { employeeId }, include, orderBy: [{ date: "desc" }, { createdAt: "desc" }], take: 100 });
   return toDtos(rows);
+}
+
+/** Pengajuan lembur tim yang boleh ditinjau pelaku (atasan langsung, pengganti, eskalasi). */
+export async function listTeamOvertime(actor: Actor, raw: unknown = {}): Promise<{ items: OvertimeDto[]; capacity: Record<string, string> }> {
+  const map = await reviewableMap(actor);
+  if (map.size === 0) throw Errors.forbidden();
+  const f = parseInput(overtimeListSchema, raw);
+  const rows = await prisma.overtimeRequest.findMany({
+    where: { employeeId: { in: [...map.keys()] }, ...(f.status ? { status: f.status } : { status: "PENDING" }) }, include, orderBy: { createdAt: "asc" }, take: 100,
+  });
+  return { items: await toDtos(rows), capacity: Object.fromEntries(map) };
 }
 
 export async function listOvertime(actor: Actor, raw: unknown = {}): Promise<Paged<OvertimeDto>> {
@@ -182,13 +197,12 @@ async function payrollNoticesFor(tx: Prisma.TransactionClient | typeof prisma, d
 export interface OvertimeReviewResult { overtime: OvertimeDto; payrollNotices: string[] }
 
 export async function reviewOvertime(actor: Actor, id: string, raw: unknown): Promise<OvertimeReviewResult> {
-  assertCan(actor, "overtime:review");
+  await assertMayReview(actor, "overtime:review");
   const input = parseInput(reviewSchema, raw);
   const req0 = await prisma.overtimeRequest.findUnique({ where: { id } });
   if (!req0) throw Errors.notFound("Pengajuan lembur");
-  if (req0.employeeId === actor.employeeId && actor.role !== "SUPER_ADMIN") {
-    throw Errors.forbidden("Anda tidak dapat memproses pengajuan lembur Anda sendiri. Minta Super Admin untuk memprosesnya.");
-  }
+  // Atasan langsung / pengganti / eskalasi, atau HR & Super Admin (izin peran). Tidak ada yang boleh memproses pengajuannya sendiri.
+  const capacity = await authorizeReview(prisma, actor, req0.employeeId, "overtime:review", "overtime");
   if (input.decision === "APPROVE" && input.approvedMinutes !== undefined && input.approvedMinutes > req0.minutes) {
     throw Errors.validation(`Menit disetujui tidak boleh melebihi yang diajukan (${req0.minutes} menit).`, { approvedMinutes: "Melebihi yang diajukan" });
   }
@@ -200,7 +214,7 @@ export async function reviewOvertime(actor: Actor, id: string, raw: unknown): Pr
     const approved = input.decision === "APPROVE" ? input.approvedMinutes ?? req.minutes : null;
     const r = await tx.overtimeRequest.updateMany({
       where: { id, status: "PENDING" },
-      data: { status: input.decision === "APPROVE" ? "APPROVED" : "REJECTED", approvedMinutes: approved, reviewedById: actor.userId, reviewedAt: new Date(), reviewNote: input.note },
+      data: { status: input.decision === "APPROVE" ? "APPROVED" : "REJECTED", approvedMinutes: approved, reviewedById: actor.userId, reviewedAs: capacity, reviewedAt: new Date(), reviewNote: input.note },
     });
     if (r.count === 0) throw Errors.conflict("Pengajuan sudah diproses oleh pengguna lain.");
     const dateIso = dateToIso(req.date);

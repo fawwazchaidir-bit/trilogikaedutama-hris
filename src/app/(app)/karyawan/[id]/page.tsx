@@ -5,7 +5,8 @@ import { ArrowLeft, UserRound } from "lucide-react";
 import { requirePagePermission } from "@/server/auth/current";
 import { actorCan } from "@/server/actor";
 import { AppError } from "@/server/errors";
-import { getEmployee, listDivisions } from "@/server/services/employees";
+import { getEmployee, listDivisions, listEmployeeOptions } from "@/server/services/employees";
+import { getOrgProfile, listOrgHistory } from "@/server/services/org";
 import { listComponents } from "@/server/services/components";
 import { getBalance, getLedger, getLeavePolicy } from "@/server/services/leave";
 import { listCorrections } from "@/server/services/attendance";
@@ -15,6 +16,7 @@ import { Badge } from "@/components/ui/badge";
 import { EmployeeActions } from "@/components/employee-forms";
 import { ComponentsManager } from "@/components/components-manager";
 import { BalanceCard } from "@/components/balance-card";
+import { OrgCard } from "@/components/org-card";
 import { LeavePolicyCard } from "@/components/leave-policy-card";
 import { formatClock, formatDateLong, formatDateTime } from "@/lib/format";
 import { EMPLOYMENT_LABEL } from "@/lib/labels";
@@ -32,13 +34,16 @@ export default async function EmployeeDetailPage({ params }: { params: Promise<{
   try { e = await getEmployee(user, id); } catch (err) { if (err instanceof AppError) notFound(); throw err; }
   const today = todayIso(env().APP_TIMEZONE);
   const year = Number(today.slice(0, 4));
-  const [divisions, comps, balance, ledger, leavePolicy, corrections] = await Promise.all([
+  const [divisions, comps, balance, ledger, leavePolicy, corrections, org, orgHistory, people] = await Promise.all([
     listDivisions(user),
     actorCan(user, "payroll:components") ? listComponents(user, id) : Promise.resolve(null),
     actorCan(user, "leave:view_all") ? getBalance(user, id, year) : Promise.resolve(null),
     actorCan(user, "leave:view_all") ? getLedger(user, id, year) : Promise.resolve([]),
     actorCan(user, "leave:view_all") ? getLeavePolicy(user, id) : Promise.resolve(null),
     actorCan(user, "attendance:view_all") ? listCorrections(user, { employeeId: id, limit: 10 }) : Promise.resolve([]),
+    getOrgProfile(user, id),
+    listOrgHistory(user, id),
+    listEmployeeOptions(user),
   ]);
   const row = (k: string, v: React.ReactNode) => (<div className="grid grid-cols-[9rem_1fr] gap-2 py-2 text-sm"><dt className="text-muted">{k}</dt><dd className="font-medium">{v || "—"}</dd></div>);
   return (
@@ -59,6 +64,7 @@ export default async function EmployeeDetailPage({ params }: { params: Promise<{
           <div className="divide-y divide-line">{row("Bank", e.bankName)}{row("No. rekening", e.bankAccountMasked)}{row("Atas nama", e.bankAccountHolder)}{row("Catatan", e.notes)}</div>
         </dl>
       </Card>
+      <OrgCard profile={org} history={orgHistory} divisions={divisions} people={people} canManage={actorCan(user, "employee:manage") && e.isActive} today={today} />
       {comps && <ComponentsManager employeeId={id} items={comps} today={today} />}
       {leavePolicy && <LeavePolicyCard policy={leavePolicy} canManage={actorCan(user, "leave_policy:manage") && !(user.employeeId === id && user.role !== "SUPER_ADMIN")} canGrant={actorCan(user, "leave_balance:manage")} />}
       {balance && <BalanceCard employeeId={id} balance={balance} ledger={ledger} canManage={actorCan(user, "leave_balance:manage")} />}

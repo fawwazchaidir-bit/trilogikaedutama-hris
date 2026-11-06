@@ -27,6 +27,15 @@ enum Role {
   EMPLOYEE
 }
 
+/// Dalam kapasitas apa seseorang memutuskan pengajuan (untuk jejak audit): atasan langsung, pengganti yang ditunjuk, atasan dari atasan
+/// (eskalasi saat atasan tidak ada), atau HR/Super Admin (memproses bila diperlukan).
+enum ReviewCapacity {
+  SUPERVISOR
+  DELEGATE
+  ESCALATION
+  HR
+}
+
 enum EmploymentStatus {
   PERMANENT
   CONTRACT
@@ -394,6 +403,52 @@ model PasswordResetToken {
 
 // ───────────────────────────── Data karyawan ─────────────────────────────
 
+/// Riwayat divisi/jabatan/status/atasan seorang karyawan. APPEND-ONLY (trigger). Kolom pada `employees` = keadaan SAAT INI;
+/// baris di sini = jejak tiap perubahan beserta tanggal mulai berlakunya. Karyawan lama tanpa riwayat mendapat baris awal saat pertama kali diubah.
+model EmployeeOrgHistory {
+  id               String           @id @default(uuid()) @db.Uuid
+  employeeId       String           @db.Uuid
+  effectiveFrom    DateTime         @db.Date
+  divisionId       String?          @db.Uuid
+  divisionName     String?
+  position         String
+  employmentStatus EmploymentStatus
+  supervisorId     String?          @db.Uuid
+  supervisorName   String?
+  /// Apa yang berubah pada baris ini: BASELINE, DIVISION, POSITION, STATUS, SUPERVISOR.
+  changes          String[]
+  note             String?
+  createdById      String           @db.Uuid
+  createdAt        DateTime         @default(now())
+
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+
+  @@index([employeeId, effectiveFrom, createdAt])
+  @@map("employee_org_history")
+}
+
+/// Penunjukan pengganti peninjau: selama rentang tanggal, `delegateId` boleh meninjau pengajuan bawahan langsung `supervisorId`.
+/// Tidak dihapus; dibatalkan dengan mengisi cancelledAt (trigger).
+model SupervisorDelegation {
+  id            String    @id @default(uuid()) @db.Uuid
+  supervisorId  String    @db.Uuid
+  delegateId    String    @db.Uuid
+  startDate     DateTime  @db.Date
+  endDate       DateTime  @db.Date
+  reason        String?
+  createdById   String    @db.Uuid
+  createdAt     DateTime  @default(now())
+  cancelledAt   DateTime?
+  cancelledById String?   @db.Uuid
+
+  supervisor Employee @relation("DelegationSupervisor", fields: [supervisorId], references: [id], onDelete: Restrict)
+  delegate   Employee @relation("DelegationDelegate", fields: [delegateId], references: [id], onDelete: Restrict)
+
+  @@index([supervisorId, startDate, endDate])
+  @@index([delegateId])
+  @@map("supervisor_delegations")
+}
+
 model Division {
   id        String   @id @default(uuid()) @db.Uuid
   name      String
@@ -430,6 +485,11 @@ model Employee {
   isActive          Boolean          @default(true)
   notes             String?
 
+  /// ATASAN LANGSUNG (kepegawaian) — berbeda dari PIC proyek Training. NULL = belum ditetapkan: pengajuan diproses HR/Super Admin seperti semula.
+  supervisorId          String?   @db.Uuid
+  /// Tanggal mulai berlaku divisi/jabatan/status saat ini. NULL = sejak tanggal mulai bekerja.
+  positionEffectiveFrom DateTime? @db.Date
+
   // Atribut statutori (BPJS & PPh 21). Hanya dipakai bila perhitungan otomatis diaktifkan di Pengaturan.
   taxStatus              TaxStatus @default(TK0)
   hasNpwp                Boolean   @default(true)
@@ -450,23 +510,28 @@ model Employee {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  user           User?                   @relation(fields: [userId], references: [id], onDelete: Restrict)
-  division       Division?               @relation(fields: [divisionId], references: [id], onDelete: Restrict)
-  photo          StoredFile?             @relation("EmployeePhoto", fields: [photoFileId], references: [id], onDelete: Restrict)
-  attendances    Attendance[]
-  corrections    AttendanceCorrection[]
-  leaves         LeaveRequest[]
-  balance        LeaveBalanceEntry[]
-  components     SalaryComponent[]
-  assignments    ScheduleAssignment[]
-  payrollItems   PayrollItem[]
-  payslips       Payslip[]
-  overtimes      OvertimeRequest[]
-  locationChecks LocationCheck[]
-  photos         AttendancePhoto[]
-  documents      EmployeeDocument[]
-  assignees      AssignmentAssignee[]
-  allowances     DailyAllowanceReceipt[]
+  user                User?                   @relation(fields: [userId], references: [id], onDelete: Restrict)
+  division            Division?               @relation(fields: [divisionId], references: [id], onDelete: Restrict)
+  supervisor          Employee?               @relation("Supervision", fields: [supervisorId], references: [id], onDelete: SetNull)
+  reports             Employee[]              @relation("Supervision")
+  orgHistory          EmployeeOrgHistory[]
+  delegationsGiven    SupervisorDelegation[]  @relation("DelegationSupervisor")
+  delegationsReceived SupervisorDelegation[]  @relation("DelegationDelegate")
+  photo               StoredFile?             @relation("EmployeePhoto", fields: [photoFileId], references: [id], onDelete: Restrict)
+  attendances         Attendance[]
+  corrections         AttendanceCorrection[]
+  leaves              LeaveRequest[]
+  balance             LeaveBalanceEntry[]
+  components          SalaryComponent[]
+  assignments         ScheduleAssignment[]
+  payrollItems        PayrollItem[]
+  payslips            Payslip[]
+  overtimes           OvertimeRequest[]
+  locationChecks      LocationCheck[]
+  photos              AttendancePhoto[]
+  documents           EmployeeDocument[]
+  assignees           AssignmentAssignee[]
+  allowances          DailyAllowanceReceipt[]
 
   // Training & Operations (relasi balik saja; tidak ada kolom baru pada tabel employees).
   trainingMemberships      TrainingProjectMember[]
@@ -597,25 +662,26 @@ model AttendanceCorrection {
 // ───────────────────────────── Pengajuan izin / sakit / cuti ─────────────────────────────
 
 model LeaveRequest {
-  id               String        @id @default(uuid()) @db.Uuid
-  employeeId       String        @db.Uuid
+  id               String          @id @default(uuid()) @db.Uuid
+  employeeId       String          @db.Uuid
   type             LeaveType
-  startDate        DateTime      @db.Date
-  endDate          DateTime      @db.Date
+  startDate        DateTime        @db.Date
+  endDate          DateTime        @db.Date
   reason           String
-  attachmentFileId String?       @db.Uuid
-  status           RequestStatus @default(PENDING)
+  attachmentFileId String?         @db.Uuid
+  status           RequestStatus   @default(PENDING)
   /// FULL = seluruh hari. MORNING/AFTERNOON = setengah hari (hanya untuk pengajuan satu hari).
-  dayPart          LeaveDayPart  @default(FULL)
+  dayPart          LeaveDayPart    @default(FULL)
   /// Jumlah hari kerja terjadwal yang tercakup (kelipatan 0,5) — dihitung ulang saat disetujui, lalu dibekukan.
   workingDays      Float?
-  reviewedById     String?       @db.Uuid
+  reviewedById     String?         @db.Uuid
+  reviewedAs       ReviewCapacity?
   reviewedAt       DateTime?
   reviewNote       String?
   cancelledAt      DateTime?
   cancelReason     String?
-  createdAt        DateTime      @default(now())
-  updatedAt        DateTime      @updatedAt
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
 
   employee   Employee            @relation(fields: [employeeId], references: [id], onDelete: Restrict)
   attachment StoredFile?         @relation("LeaveAttachment", fields: [attachmentFileId], references: [id], onDelete: Restrict)
@@ -965,25 +1031,26 @@ model NotificationDelivery {
 
 /// Pengajuan lembur: ada alur persetujuan; hanya lembur disetujui yang dapat dibayar (mode "APPROVED").
 model OvertimeRequest {
-  id              String        @id @default(uuid()) @db.Uuid
-  employeeId      String        @db.Uuid
+  id              String          @id @default(uuid()) @db.Uuid
+  employeeId      String          @db.Uuid
   /// Tanggal kerja (tanggal mulai lembur).
-  date            DateTime      @db.Date
+  date            DateTime        @db.Date
   /// Jam mulai lembur "HH:mm" (waktu lokal).
   startTime       String
   /// Durasi yang diajukan (menit); boleh melewati tengah malam.
   minutes         Int
   reason          String
-  status          RequestStatus @default(PENDING)
+  status          RequestStatus   @default(PENDING)
   /// Menit yang disetujui (≤ diajukan; pimpinan/HR boleh menyetujui lebih sedikit).
   approvedMinutes Int?
-  reviewedById    String?       @db.Uuid
+  reviewedById    String?         @db.Uuid
+  reviewedAs      ReviewCapacity?
   reviewedAt      DateTime?
   reviewNote      String?
   cancelledAt     DateTime?
   cancelReason    String?
-  createdAt       DateTime      @default(now())
-  updatedAt       DateTime      @updatedAt
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
 
   employee Employee @relation(fields: [employeeId], references: [id], onDelete: Restrict)
 
