@@ -154,6 +154,11 @@ export interface DayFractions {
 const zeroFractions = (): DayFractions => ({ present: 0, izin: 0, sakit: 0, cuti: 0, absent: 0, pending: 0 });
 const LEAVE_KEY = { IZIN: "izin", SAKIT: "sakit", CUTI: "cuti" } as const;
 
+/** Penugasan (surat tugas TERBIT) yang mencakup seorang karyawan pada sebuah rentang — hanya KONTEKS jadwal, bukan bukti kehadiran. */
+export interface DutyLite { letterId: string; number: string; employeeId: string; startDate: string; endDate: string; destination: string }
+/** Penugasan yang berlaku pada satu hari. Tidak memengaruhi status, pecahan hari, rekap, maupun gaji: kehadiran tetap dari catatan absensi. */
+export interface DutyInfo { letterId: string; number: string; destination: string; label: string }
+
 export interface DayResult {
   date: string;
   status: DayStatus;
@@ -192,6 +197,8 @@ export interface DayResult {
   fractions: DayFractions;
   /** Penjelasan perhitungan satu baris untuk ditampilkan kepada pengguna. */
   explain: string;
+  /** Ada surat tugas terbit pada hari ini ("Dinas luar — Surakarta"). Hanya penanda: TIDAK berarti hadir dan tidak mengubah status/rekap/gaji. */
+  duty: DutyInfo | null;
 }
 
 export const STATUS_LABEL: Record<DayStatus, string> = {
@@ -223,7 +230,7 @@ export function deriveDay(input: DayInput): DayResult {
     scheduleName: schedule?.name ?? null, scheduleStart: null, scheduleEnd: null, endsNextDay: false, shiftStartAt: null, shiftEndAt: null,
     checkInAt: null, checkOutAt: null, checkInTime: null, checkOutTime: null, checkInNextDay: false, checkOutNextDay: false,
     late: false, lateMinutes: 0, workedMinutes: 0, missingCheckout: false, incomplete: false, afterEndMinutes: 0,
-    leaveType: null, leaveRequestId: null, dayPart: null, fractions: zeroFractions(), explain: "",
+    leaveType: null, leaveRequestId: null, dayPart: null, fractions: zeroFractions(), explain: "", duty: null,
   };
 
   // 1. Di luar masa kerja
@@ -468,7 +475,11 @@ export interface RangeContext {
   calendar: Map<string, { kind: "HOLIDAY" | "SPECIAL_WORKDAY"; name: string }>;
   leaves: LeaveLite[];
   attendance: AttendanceLite[];
+  /** Penugasan terbit pada rentang (opsional; dimuat hanya oleh layar yang menampilkannya). */
+  duty?: DutyLite[];
 }
+
+export const dutyLabel = (destination: string): string => `Dinas luar — ${destination}`;
 
 /** Bangun hasil harian satu karyawan untuk seluruh rentang. */
 export function buildEmployeeDays(emp: EmployeeLite, ctx: RangeContext): DayResult[] {
@@ -477,6 +488,8 @@ export function buildEmployeeDays(emp: EmployeeLite, ctx: RangeContext): DayResu
   const leaves = ctx.leaves.filter((l) => l.employeeId === emp.id && l.status === "APPROVED"
     && rangesOverlap(l.startDate, l.endDate, ctx.from, ctx.to));
   const leaveOn = (date: string) => leaves.find((l) => l.startDate <= date && date <= l.endDate) ?? null;
+  const duties = (ctx.duty ?? []).filter((d) => d.employeeId === emp.id && rangesOverlap(d.startDate, d.endDate, ctx.from, ctx.to))
+    .sort((a, b) => a.startDate.localeCompare(b.startDate) || a.number.localeCompare(b.number));
 
   return eachDate(ctx.from, ctx.to, 400).map((date) => {
     const schedule = resolveSchedule({
@@ -485,13 +498,18 @@ export function buildEmployeeDays(emp: EmployeeLite, ctx: RangeContext): DayResu
     });
     const a = att.get(date);
     const l = leaveOn(date);
-    return deriveDay({
+    const day = deriveDay({
       date, now: ctx.now, timeZone: ctx.timeZone, join: emp.joinDate, end: emp.endDate, schedule,
       calendar: ctx.calendar.get(date) ?? null,
       leave: l ? { type: l.type, requestId: l.id, dayPart: l.dayPart ?? "FULL" } : null,
       attendance: a ? { checkInAt: a.checkInAt, checkOutAt: a.checkOutAt } : null,
       lateAfterTolerance: ctx.lateAfterTolerance,
     });
+    // Penugasan hanya ditempelkan SESUDAH status ditentukan: status, pecahan hari, dan rekap tidak pernah bergantung padanya.
+    const d = day.status === "DI_LUAR_MASA_KERJA" ? undefined : duties.find((x) => x.startDate <= date && date <= x.endDate);
+    if (!d) return day;
+    const label = dutyLabel(d.destination);
+    return { ...day, duty: { letterId: d.letterId, number: d.number, destination: d.destination, label }, explain: `${day.explain}${day.explain ? "; " : ""}Penugasan: ${label}` };
   });
 }
 

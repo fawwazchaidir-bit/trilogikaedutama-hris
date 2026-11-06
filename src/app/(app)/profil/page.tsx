@@ -48,7 +48,7 @@ export default async function ProfilePage() {
                 <Td className="whitespace-nowrap font-medium">{formatDateCompact(d.date)}</Td>
                 <Td className="whitespace-nowrap">{d.scheduled ? `${dotTime(d.scheduleStart!)} – ${dotTime(d.scheduleEnd!)}` : "—"}</Td>
                 <Td>{d.scheduled ? d.scheduleName : "—"}</Td>
-                <Td>{d.scheduled ? (d.status === "IZIN" || d.status === "SAKIT" || d.status === "CUTI" || d.checkInAt ? <DayStatusBadge status={d.status} missingCheckout={d.missingCheckout} /> : "Hari kerja") : (d.offReason ?? "Libur")}</Td>
+                <Td>{d.scheduled ? (d.status === "IZIN" || d.status === "SAKIT" || d.status === "CUTI" || d.checkInAt ? <DayStatusBadge status={d.status} missingCheckout={d.missingCheckout} /> : "Hari kerja") : (d.offReason ?? "Libur")}{d.duty && <span className="ml-2 inline-block"><Badge tone="amber">{d.duty.label}</Badge></span>}</Td>
               </tr>
             ))}</tbody>
           </Table></TableWrap>

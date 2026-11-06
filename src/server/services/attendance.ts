@@ -63,7 +63,7 @@ async function resolveWorkDate(
   const today = todayIso(tz, now);
   const yesterday = addDays(today, -1);
   if (dateToIso(emp.joinDate) > yesterday) return today;
-  const ctx = await loadRangeContext(yesterday, yesterday, { employeeIds: [emp.id], now });
+  const ctx = await loadRangeContext(yesterday, yesterday, { employeeIds: [emp.id], now, withDuty: true });
   const sched = resolveSchedule({
     date: yesterday, employeeId: emp.id, divisionId: emp.divisionId, assignments: ctx.assignments, schedules: ctx.schedules, defaultSchedule: ctx.defaultSchedule,
   });
@@ -83,7 +83,7 @@ async function dayContext(employeeId: string, now: Date, forceWorkDate?: string)
   if (!emp) throw Errors.notFound("Karyawan");
   const today = todayIso(env().APP_TIMEZONE, now);
   const workDate = forceWorkDate ?? (await resolveWorkDate(emp, now));
-  const ctx = await loadRangeContext(workDate, workDate, { employeeIds: [employeeId], now });
+  const ctx = await loadRangeContext(workDate, workDate, { employeeIds: [employeeId], now, withDuty: true });
   const lite = employeeLite(emp);
   const { days } = computeEmployeePeriod(lite, ctx);
   const schedule = resolveSchedule({
@@ -210,7 +210,7 @@ export async function getEmployeeRange(actor: Actor, employeeId: string, from: s
   if (actor.employeeId !== employeeId) assertCan(actor, "attendance:view_all");
   const emp = await prisma.employee.findUnique({ where: { id: employeeId } });
   if (!emp) throw Errors.notFound("Karyawan");
-  const ctx = await loadRangeContext(from, to, { employeeIds: [employeeId] });
+  const ctx = await loadRangeContext(from, to, { employeeIds: [employeeId], withDuty: true });
   const { days, totals } = computeEmployeePeriod(employeeLite(emp), ctx);
   return { employee: { id: emp.id, employeeNo: emp.employeeNo, fullName: emp.fullName }, from, to, label: label ?? `${from} – ${to}`, days, totals };
 }

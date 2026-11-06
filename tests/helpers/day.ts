@@ -9,6 +9,6 @@ export function makeDay(over: Partial<DayResult> = {}): DayResult {
     late: false, lateMinutes: 0, workedMinutes: 0, missingCheckout: false, incomplete: false, afterEndMinutes: 0,
     leaveType: null, leaveRequestId: null, dayPart: null,
     fractions: { present: 1, izin: 0, sakit: 0, cuti: 0, absent: 0, pending: 0 },
-    explain: "", ...over,
+    explain: "", duty: null, ...over,
   };
 }

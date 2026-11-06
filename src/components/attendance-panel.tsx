@@ -104,6 +104,7 @@ export function AttendancePanel({ initial }: { initial: TodayState }) {
           </div>
         </div>
 
+        {d.duty && <Notice tone="info"><b>{d.duty.label}</b> ({d.duty.number}). Surat tugas bukan bukti hadir: tetap catat kehadiran sesuai kebijakan absensi.</Notice>}
         {!d.scheduled && d.status === "LIBUR" && <Notice tone="info">Hari ini {d.offReason?.toLowerCase() ?? "libur"}. Anda tetap dapat mencatat kehadiran bila bekerja.</Notice>}
         {state.blockedReason && <Notice tone="warn">{state.blockedReason}</Notice>}
         {!state.hasDefaultSchedule && <Notice tone="warn">Belum ada jadwal kerja yang berlaku untuk Anda. Hubungi Admin/HR.</Notice>}

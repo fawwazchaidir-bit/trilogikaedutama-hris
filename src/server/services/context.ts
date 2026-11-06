@@ -7,7 +7,7 @@ import { getSettings } from "./settings";
 import { selectComponents, type ComponentInput } from "@/lib/payroll";
 import {
   buildEmployeeDays, summarizeDays, type AssignmentLite, type AttendanceLite, type DayResult, type EmployeeLite, type LeaveLite,
-  type RangeContext, type RecapTotals, type ScheduleLite,
+  type DutyLite, type RangeContext, type RecapTotals, type ScheduleLite,
 } from "@/lib/attendance";
 
 /**
@@ -15,7 +15,7 @@ import {
  * dalam beberapa query, lalu menyerahkannya ke mesin murni di `@/lib/attendance`. Satu-satunya jalur penghitungan status
  * harian, sehingga layar absensi, rekap, dashboard, dan penggajian SELALU konsisten.
  */
-export async function loadRangeContext(from: string, to: string, opts: { employeeIds?: string[]; now?: Date } = {}): Promise<RangeContext> {
+export async function loadRangeContext(from: string, to: string, opts: { employeeIds?: string[]; now?: Date; withDuty?: boolean } = {}): Promise<RangeContext> {
   const f = isoToDate(from);
   const t = isoToDate(to);
   const empFilter = opts.employeeIds ? { employeeId: { in: opts.employeeIds } } : {};
@@ -27,6 +27,8 @@ export async function loadRangeContext(from: string, to: string, opts: { employe
     prisma.leaveRequest.findMany({ where: { ...empFilter, status: "APPROVED", startDate: { lte: t }, endDate: { gte: f } } }),
     prisma.attendance.findMany({ where: { ...empFilter, date: { gte: f, lte: t } } }),
   ]);
+  // Penugasan (surat tugas TERBIT) hanya dimuat oleh layar yang menampilkannya; perhitungan rekap/gaji/cuti tidak membutuhkannya.
+  const duty: DutyLite[] = opts.withDuty ? await loadDuty(f, t, opts.employeeIds) : [];
   const lite = (s: (typeof schedules)[number]): ScheduleLite => ({
     id: s.id, name: s.name, workDays: s.workDays, startTime: s.startTime, endTime: s.endTime,
     lateToleranceMinutes: s.lateToleranceMinutes, absentCutoffTime: s.absentCutoffTime,
@@ -43,7 +45,16 @@ export async function loadRangeContext(from: string, to: string, opts: { employe
     calendar: new Map(calendar.map((c) => [dateToIso(c.date), { kind: c.kind, name: c.name }])),
     leaves: leaves.map((l): LeaveLite => ({ id: l.id, employeeId: l.employeeId, type: l.type, startDate: dateToIso(l.startDate), endDate: dateToIso(l.endDate), status: l.status, dayPart: l.dayPart })),
     attendance: attendance.map((a): AttendanceLite => ({ employeeId: a.employeeId, date: dateToIso(a.date), checkInAt: a.checkInAt, checkOutAt: a.checkOutAt })),
+    duty,
   };
+}
+
+async function loadDuty(from: Date, to: Date, employeeIds?: string[]): Promise<DutyLite[]> {
+  const rows = await prisma.assignmentAssignee.findMany({
+    where: { ...(employeeIds ? { employeeId: { in: employeeIds } } : {}), letter: { status: "ISSUED", startDate: { lte: to }, endDate: { gte: from } } },
+    select: { employeeId: true, letter: { select: { id: true, number: true, destination: true, startDate: true, endDate: true } } },
+  });
+  return rows.map((r) => ({ letterId: r.letter.id, number: r.letter.number, employeeId: r.employeeId, startDate: dateToIso(r.letter.startDate), endDate: dateToIso(r.letter.endDate), destination: r.letter.destination }));
 }
 
 export function employeeLite(e: { id: string; divisionId: string | null; joinDate: Date; endDate: Date | null }): EmployeeLite {

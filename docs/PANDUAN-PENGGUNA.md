@@ -40,6 +40,7 @@
 - **Dokumen Saya**: kontrak kerja dan dokumen kepegawaian Anda; klik **Lihat** untuk membuka PDF di aplikasi (di sebagian peramban ponsel gunakan *Buka di tab baru* / *Unduh PDF*).
 - **Tombol mata** pada isian password menampilkan/menyembunyikan isinya (pastikan tidak ada yang melihat layar Anda).
 
+- **Penugasan di jadwal:** bila ada surat tugas untuk Anda, jadwal di *Profil & Jadwal* menampilkan "Dinas luar — tujuan". Itu hanya penanda: kehadiran tetap Anda catat di *Absensi Saya* dan dinilai sesuai kebijakan absensi. Lihat [PENUGASAN-JADWAL.md](PENUGASAN-JADWAL.md).
 - **Atasan & Persetujuan Tim:** atasan langsung Anda tampil di *Profil & Jadwal*. Bila Anda atasan seseorang, menu **Persetujuan Tim** muncul: tinjau cuti, izin, sakit, dan lembur bawahan Anda di sana, dan tunjuk **pengganti** saat Anda cuti atau dinas luar. Anda tidak dapat memproses pengajuan sendiri. Lihat [ORGANISASI-ATASAN.md](ORGANISASI-ATASAN.md).
 
 ## C. Admin / HR

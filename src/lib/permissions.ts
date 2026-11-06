@@ -126,6 +126,7 @@ export const NAV_ITEMS: readonly NavItem[] = [
   { href: "/lembur", label: "Pengajuan Lembur", anyOf: ["overtime:view_all"], group: "sdm" },
   { href: "/lokasi", label: "Tinjauan Lokasi", anyOf: ["location:review"], group: "sdm" },
   { href: "/surat-tugas", label: "Surat Tugas", anyOf: ["assignment:view_all"], group: "sdm" },
+  { href: "/ketersediaan", label: "Ketersediaan Tim", anyOf: ["assignment:view_all"], group: "sdm" },
   { href: "/dokumen", label: "Dokumen", anyOf: ["document:view_all"], group: "sdm" },
   { href: "/rekap", label: "Rekap Absensi", anyOf: ["recap:view_all"], group: "sdm" },
   { href: "/laporan", label: "Laporan & Analisis", anyOf: ["report:view"], group: "sdm" },

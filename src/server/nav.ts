@@ -18,7 +18,12 @@ export async function loadNav(user: Actor & { role: Role }): Promise<{ nav: Pick
   }
   if (trainingEnabled()) {
     const tmod = await getModuleContext(user);
-    if (tmod.canSee) { trainingVisible = true; nav = [...nav, ...trainingNav(tmod.caps, !!user.employeeId)]; }
+    if (tmod.canSee) {
+      trainingVisible = true;
+      nav = [...nav, ...trainingNav(tmod.caps, !!user.employeeId)];
+      // Pemegang level modul (Manajer/Admin Program/Pemantau) melihat ketersediaan tim agar tahu siapa sudah punya penugasan; HR sudah punya menunya.
+      if (tmod.caps.hasModule && !nav.some((i) => i.href === "/ketersediaan")) nav.push({ href: "/ketersediaan", label: "Ketersediaan Tim", group: "training" as const });
+    }
   }
   return { nav, trainingVisible, teamIds };
 }

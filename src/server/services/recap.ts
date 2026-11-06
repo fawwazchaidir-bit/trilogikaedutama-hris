@@ -169,7 +169,7 @@ export async function getRecapDetail(actor: Actor, employeeId: string, raw: unkn
   const { from, to, label } = resolveRange(q, env().APP_TIMEZONE);
   const e = await prisma.employee.findUnique({ where: { id: employeeId }, include: { division: { select: { name: true } } } });
   if (!e) throw Errors.notFound("Karyawan");
-  const ctx = await loadRangeContext(from, to, { employeeIds: [employeeId] });
+  const ctx = await loadRangeContext(from, to, { employeeIds: [employeeId], withDuty: true });
   const { days, totals } = computeEmployeePeriod(employeeLite(e), ctx);
   const photos = await photosForRange(employeeId, from, to);
   return { employee: { id: e.id, employeeNo: e.employeeNo, name: e.fullName, position: e.position, division: e.division?.name ?? null }, from, to, label, days, totals, photos };
