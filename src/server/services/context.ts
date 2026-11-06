@@ -4,6 +4,7 @@ import { prisma } from "../db";
 import { env } from "../env";
 import { dateToIso, isoToDate } from "../json";
 import { getSettings } from "./settings";
+import { selectComponents, type ComponentInput } from "@/lib/payroll";
 import {
   buildEmployeeDays, summarizeDays, type AssignmentLite, type AttendanceLite, type DayResult, type EmployeeLite, type LeaveLite,
   type RangeContext, type RecapTotals, type ScheduleLite,
@@ -73,4 +74,17 @@ export function sourceHash(days: DayResult[], extra = ""): string {
     })
     .join("\n");
   return createHash("sha256").update(extra ? `${canon}\n#${extra}` : canon).digest("hex");
+}
+
+/**
+ * Hash kanonik komponen gaji yang BERLAKU pada periode penggajian (urutan tidak berpengaruh). Dibekukan di item saat dihitung dan
+ * dibandingkan dengan komponen terkini → perubahan nominal, rumus, masa berlaku, atau penambahan/penonaktifan komponen terdeteksi
+ * sebagai "data berubah". Komponen di luar periode tidak ikut, jadi mengubahnya tidak menandai periode ini.
+ */
+export function componentsHash(components: ComponentInput[], period: { start: string; end: string }): string {
+  const canon = selectComponents(components, period)
+    .map((c) => [c.id, c.kind, c.category, c.name, c.calc, c.amount, c.percentBp ?? "", c.recurrence, c.effectiveFrom, c.effectiveTo ?? "", c.taxable ?? "", c.inBpjsBase ?? "", c.description ?? ""].join("|"))
+    .sort()
+    .join("\n");
+  return createHash("sha256").update(canon).digest("hex");
 }

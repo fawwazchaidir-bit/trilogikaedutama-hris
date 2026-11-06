@@ -743,6 +743,9 @@ model PayrollItem {
   attendanceSummary Json
   /// Hash rekap harian sumber — dipakai mendeteksi koreksi absensi setelah penghitungan.
   sourceHash        String
+  /// Hash komponen gaji yang berlaku pada periode saat dihitung — dipakai mendeteksi perubahan komponen setelah penghitungan.
+  /// NULL pada item lama (dihitung sebelum kolom ini ada): tidak dinilai, agar periode lama tidak mendadak ditandai berubah.
+  componentsHash    String?
   /// Rincian BPJS (porsi karyawan & perusahaan) dan PPh 21 yang dihitung otomatis (null bila tidak aktif).
   statutory         Json?
   warnings          Json?

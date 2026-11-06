@@ -221,9 +221,16 @@ export async function balanceOf(db: Prisma.TransactionClient | typeof prisma, em
   const sum = (k: string) => rows.find((r) => r.kind === k)?._sum.days ?? 0;
   const granted = sum("GRANT"), adjustments = sum("ADJUSTMENT"), used = sum("USAGE"), restored = sum("RESTORE");
   const balance = granted + adjustments + used + restored;
-  const pending = await db.leaveRequest.findMany({ where: { employeeId, type: "CUTI", status: "PENDING" }, select: { startDate: true, endDate: true, workingDays: true } });
-  // Cuti yang menunggu dicadangkan pada tahun tanggal mulainya (sama dengan aturan pemotongan saat disetujui, disederhanakan per pengajuan).
-  const reserved = pending.filter((p) => p.startDate.getUTCFullYear() === year).reduce((a, p) => a + (p.workingDays ?? 0), 0);
+  const pending = await db.leaveRequest.findMany({ where: { employeeId, type: "CUTI", status: "PENDING" }, select: { startDate: true, endDate: true, workingDays: true, dayPart: true } });
+  // Cuti yang menunggu dicadangkan PER TAHUN dengan pembagian hari kerja yang sama seperti saat disetujui (`workingDaysOf().byYear`), sehingga
+  // pengajuan lintas tahun tidak menumpuk seluruhnya di tahun mulai. Pengajuan dalam satu tahun tidak butuh perhitungan ulang.
+  let reserved = 0;
+  for (const p of pending) {
+    const first = p.startDate.getUTCFullYear(), last = p.endDate.getUTCFullYear();
+    if (year < first || year > last) continue;
+    if (first === last) reserved += p.workingDays ?? 0;
+    else reserved += (await workingDaysOf(employeeId, dateToIso(p.startDate), dateToIso(p.endDate), p.dayPart)).byYear.get(year) ?? 0;
+  }
   return { year, granted, adjustments, used, restored, balance, reserved, available: balance - reserved };
 }
 

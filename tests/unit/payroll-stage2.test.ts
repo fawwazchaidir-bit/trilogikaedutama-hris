@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { computeItem, overtimePay, type ComponentInput, type PayrollRules } from "@/lib/payroll";
+import { computeItem, overtimeEvidenceMinutes, overtimePay, type ComponentInput, type PayrollRules } from "@/lib/payroll";
+import { zonedInstant } from "@/lib/time";
 import { emptyTotals } from "@/lib/attendance";
 import { defaultStatutoryConfig, type StatutoryConfig } from "@/lib/statutory";
 import { makeDay } from "../helpers/day";
@@ -69,64 +70,116 @@ describe("lembur — tarif & pengali", () => {
 
 describe("lembur — mode APPROVED (hanya yang disetujui & terbukti)", () => {
   const rules: PayrollRules = { ...RULES, overtimeMode: "APPROVED", overtimeRatePerHour: 20_000, overtimeMinMinutes: 60, overtimeMaxMinutesPerDay: 240 };
-  const day = (date: string, afterEndMinutes: number, extra: Partial<ReturnType<typeof makeDay>> = {}) => makeDay({ date, afterEndMinutes, ...extra });
+  const TZ = "Asia/Jakarta";
+  const T = (date: string, hhmm: string) => zonedInstant(date, hhmm, TZ).toISOString();
+  /** Hari kerja 08:00–16:00 dengan check-in/out nyata (default masuk 08:00). `out: null` = belum check-out. */
+  const day = (date: string, out: string | null, inAt = "08:00", extra: Partial<ReturnType<typeof makeDay>> = {}) => makeDay({
+    date, shiftStartAt: T(date, "08:00"), shiftEndAt: T(date, "16:00"), checkInAt: T(date, inAt), checkOutAt: out ? T(date, out) : null, missingCheckout: !out, ...extra,
+  });
+  const ot = (date: string, approvedMinutes: number, startTime = "16:00") => ({ date, startTime, approvedMinutes });
+  const paid = (r: ReturnType<typeof computeItem>) => line(r, (l) => l.source === "RULE_OVERTIME")?.amount;
 
   it("dibayar = min(disetujui, terbukti di absensi); di bawah ambang tidak dibayar + peringatan", () => {
-    const days = [day("2026-10-05", 130), day("2026-10-06", 45)];
     const r = computeItem({
-      components: [BASE], rules, totals: totals(), days, period: PERIOD,
-      overtime: [{ date: "2026-10-05", approvedMinutes: 120 }, { date: "2026-10-06", approvedMinutes: 90 }],
+      components: [BASE], rules, totals: totals(), days: [day("2026-10-05", "18:10"), day("2026-10-06", "16:45")], period: PERIOD,
+      overtime: [ot("2026-10-05", 120), ot("2026-10-06", 90)],
     });
-    const ot = line(r, (l) => l.source === "RULE_OVERTIME")!;
-    expect(ot.amount).toBe(40_000); // hanya 2 jam hari pertama
-    expect(ot.name).toBe("Lembur (disetujui)");
+    expect(paid(r)).toBe(40_000); // hanya 2 jam hari pertama
+    expect(line(r, (l) => l.source === "RULE_OVERTIME")!.name).toBe("Lembur (disetujui)");
     expect(r.warnings.some((w) => w.includes("06/10/2026") && w.includes("tidak dihitung"))).toBe(true);
     expect(r.overtime).toEqual({ approvedMinutes: 210, paidMinutes: 120, days: 1 });
   });
   it("terbukti lebih sedikit dari yang disetujui → dibayar sesuai bukti (+ peringatan)", () => {
-    const r = computeItem({ components: [BASE], rules, totals: totals(), days: [day("2026-10-05", 90)], period: PERIOD, overtime: [{ date: "2026-10-05", approvedMinutes: 180 }] });
-    expect(line(r, (l) => l.source === "RULE_OVERTIME")!.amount).toBe(30_000);
+    const r = computeItem({ components: [BASE], rules, totals: totals(), days: [day("2026-10-05", "17:30")], period: PERIOD, overtime: [ot("2026-10-05", 180)] });
+    expect(paid(r)).toBe(30_000);
     expect(r.warnings.some((w) => w.includes("sesuai bukti absensi"))).toBe(true);
   });
+  it("check-out SEBELUM jam lembur yang disetujui dimulai → tidak dibayar (pulang 16.00, check-out 17.00, lembur 18.00–19.00)", () => {
+    const r = computeItem({ components: [BASE], rules: { ...rules, overtimeMinMinutes: 15 }, totals: totals(), days: [day("2026-10-05", "17:00")], period: PERIOD, overtime: [ot("2026-10-05", 60, "18:00")] });
+    expect(paid(r)).toBeUndefined();
+    expect(r.overtime).toEqual({ approvedMinutes: 60, paidMinutes: 0, days: 0 });
+    expect(r.warnings.join(" ")).toContain("tidak terbukti di absensi");
+    expect(r.warnings.join(" ")).toContain("18:00–19:00");
+  });
+  it("check-out di tengah jendela lembur → hanya irisan yang dibayar (18.00–20.00 disetujui, check-out 19.00 → 60 menit)", () => {
+    const r = computeItem({ components: [BASE], rules, totals: totals(), days: [day("2026-10-05", "19:00")], period: PERIOD, overtime: [ot("2026-10-05", 120, "18:00")] });
+    expect(paid(r)).toBe(20_000);
+  });
+  it("jendela yang dimulai sebelum jam pulang: waktu sebelum jam pulang bukan lembur (15.00–17.00, check-out 17.00 → 60 menit)", () => {
+    const r = computeItem({ components: [BASE], rules, totals: totals(), days: [day("2026-10-05", "17:00")], period: PERIOD, overtime: [ot("2026-10-05", 120, "15:00")] });
+    expect(paid(r)).toBe(20_000);
+  });
+  it("check-in baru setelah jam kerja berakhir: bukti tidak melebihi waktu hadir (check-in 17.30, check-out 19.00, lembur 17.00–19.00 → 90 menit)", () => {
+    const r = computeItem({ components: [BASE], rules, totals: totals(), days: [day("2026-10-05", "19:00", "17:30")], period: PERIOD, overtime: [ot("2026-10-05", 120, "17:00")] });
+    expect(paid(r)).toBe(30_000);
+  });
   it("lembur disetujui tetapi tanpa check-out → tidak dibayar dengan alasan jelas", () => {
-    const r = computeItem({ components: [BASE], rules, totals: totals(), days: [day("2026-10-05", 0, { missingCheckout: true })], period: PERIOD, overtime: [{ date: "2026-10-05", approvedMinutes: 120 }] });
-    expect(line(r, (l) => l.source === "RULE_OVERTIME")).toBeUndefined();
+    const r = computeItem({ components: [BASE], rules, totals: totals(), days: [day("2026-10-05", null)], period: PERIOD, overtime: [ot("2026-10-05", 120)] });
+    expect(paid(r)).toBeUndefined();
     expect(r.warnings.some((w) => w.includes("belum ada check-out"))).toBe(true);
   });
   it("batas maksimal per hari berlaku walau disetujui lebih", () => {
-    const r = computeItem({ components: [BASE], rules: { ...rules, overtimeMaxMinutesPerDay: 120 }, totals: totals(), days: [day("2026-10-05", 400)], period: PERIOD, overtime: [{ date: "2026-10-05", approvedMinutes: 300 }] });
-    expect(line(r, (l) => l.source === "RULE_OVERTIME")!.amount).toBe(40_000);
+    const r = computeItem({ components: [BASE], rules: { ...rules, overtimeMaxMinutesPerDay: 120 }, totals: totals(), days: [day("2026-10-05", "22:40")], period: PERIOD, overtime: [ot("2026-10-05", 300)] });
+    expect(paid(r)).toBe(40_000);
   });
-  it("verifikasi absensi dimatikan → dibayar sesuai yang disetujui", () => {
-    const r = computeItem({ components: [BASE], rules: { ...rules, overtimeRequireAttendance: false }, totals: totals(), days: [day("2026-10-05", 0)], period: PERIOD, overtime: [{ date: "2026-10-05", approvedMinutes: 120 }] });
-    expect(line(r, (l) => l.source === "RULE_OVERTIME")!.amount).toBe(40_000);
+  it("verifikasi absensi dimatikan → dibayar sesuai yang disetujui (jam mulai tidak dinilai)", () => {
+    const r = computeItem({ components: [BASE], rules: { ...rules, overtimeRequireAttendance: false }, totals: totals(), days: [day("2026-10-05", "17:00")], period: PERIOD, overtime: [ot("2026-10-05", 120, "18:00")] });
+    expect(paid(r)).toBe(40_000);
   });
-  it("hari non-kerja (libur): bukti = seluruh menit kerja tercatat", () => {
-    const hol = makeDay({ date: "2026-10-10", scheduled: false, workedMinutes: 300, afterEndMinutes: 0, status: "HADIR" });
-    const r = computeItem({ components: [BASE], rules, totals: totals(), days: [hol], period: PERIOD, overtime: [{ date: "2026-10-10", approvedMinutes: 240 }] });
-    expect(line(r, (l) => l.source === "RULE_OVERTIME")!.amount).toBe(80_000);
+  it("hari non-kerja (libur): bukti = irisan jendela lembur dengan kehadiran (09.00–13.00 disetujui, hadir 09.00–14.00 → 240)", () => {
+    const hol = makeDay({ date: "2026-10-10", scheduled: false, status: "HADIR", checkInAt: T("2026-10-10", "09:00"), checkOutAt: T("2026-10-10", "14:00"), workedMinutes: 300 });
+    const r = computeItem({ components: [BASE], rules, totals: totals(), days: [hol], period: PERIOD, overtime: [ot("2026-10-10", 240, "09:00")] });
+    expect(paid(r)).toBe(80_000);
+  });
+  it("hari libur: jendela lembur di luar jam hadir tidak terbukti", () => {
+    const hol = makeDay({ date: "2026-10-10", scheduled: false, status: "HADIR", checkInAt: T("2026-10-10", "09:00"), checkOutAt: T("2026-10-10", "11:00"), workedMinutes: 120 });
+    const r = computeItem({ components: [BASE], rules, totals: totals(), days: [hol], period: PERIOD, overtime: [ot("2026-10-10", 120, "13:00")] });
+    expect(paid(r)).toBeUndefined();
   });
   it("tanpa pengajuan disetujui → tidak ada baris lembur walau ada menit setelah jam pulang (tidak seperti AUTO)", () => {
-    const r = computeItem({ components: [BASE], rules, totals: totals(), days: [day("2026-10-05", 300)], period: PERIOD, overtime: [] });
-    expect(line(r, (l) => l.source === "RULE_OVERTIME")).toBeUndefined();
+    const r = computeItem({ components: [BASE], rules, totals: totals(), days: [day("2026-10-05", "21:00")], period: PERIOD, overtime: [] });
+    expect(paid(r)).toBeUndefined();
   });
   it("mode MANUAL dengan pengajuan disetujui → tidak dihitung, tetapi ada peringatan", () => {
-    const r = computeItem({ components: [BASE], rules: { ...RULES, overtimeRatePerHour: 20_000 }, totals: totals(), days: [day("2026-10-05", 120)], period: PERIOD, overtime: [{ date: "2026-10-05", approvedMinutes: 120 }] });
-    expect(line(r, (l) => l.source === "RULE_OVERTIME")).toBeUndefined();
+    const r = computeItem({ components: [BASE], rules: { ...RULES, overtimeRatePerHour: 20_000 }, totals: totals(), days: [day("2026-10-05", "18:00")], period: PERIOD, overtime: [ot("2026-10-05", 120)] });
+    expect(paid(r)).toBeUndefined();
     expect(r.warnings.some((w) => w.includes("lembur disetujui"))).toBe(true);
   });
   it("tarif belum diisi → peringatan, tidak ada baris", () => {
-    const r = computeItem({ components: [BASE], rules: { ...rules, overtimeRatePerHour: 0 }, totals: totals(), days: [day("2026-10-05", 120)], period: PERIOD, overtime: [{ date: "2026-10-05", approvedMinutes: 120 }] });
-    expect(line(r, (l) => l.source === "RULE_OVERTIME")).toBeUndefined();
+    const r = computeItem({ components: [BASE], rules: { ...rules, overtimeRatePerHour: 0 }, totals: totals(), days: [day("2026-10-05", "18:00")], period: PERIOD, overtime: [ot("2026-10-05", 120)] });
+    expect(paid(r)).toBeUndefined();
     expect(r.warnings.some((w) => w.includes("tarif lembur"))).toBe(true);
   });
   it("lembur masuk ke penghasilan kena pajak", () => {
     const cfg = defaultStatutoryConfig(); cfg.pph21.enabled = true; cfg.pph21.employerInsuranceInGross = false;
     const r = computeItem({
-      components: [comp({ amount: 5_000_000 })], rules, totals: totals(), days: [day("2026-10-05", 600)], period: PERIOD, overtime: [{ date: "2026-10-05", approvedMinutes: 240 }],
+      components: [comp({ amount: 5_000_000 })], rules, totals: totals(), days: [day("2026-10-05", "22:00")], period: PERIOD, overtime: [ot("2026-10-05", 240)],
       statutory: { config: cfg, employee: { taxStatus: "TK0", hasNpwp: true, healthEnrolled: false, employmentEnrolled: false }, taxMonth: 10, finalPeriod: false, priorMonthsExpected: 0, ytd: null },
     });
     expect(r.statutory!.pph21!.gross).toBe(5_000_000 + 80_000);
+  });
+});
+
+describe("overtimeEvidenceMinutes", () => {
+  const TZ = "Asia/Jakarta";
+  const T = (date: string, hhmm: string) => zonedInstant(date, hhmm, TZ).toISOString();
+  const night = (out: string | null, outDate = "2026-10-06") => makeDay({
+    date: "2026-10-05", endsNextDay: true, shiftStartAt: T("2026-10-05", "22:00"), shiftEndAt: T("2026-10-06", "06:00"),
+    checkInAt: T("2026-10-05", "21:55"), checkOutAt: out ? T(outDate, out) : null,
+  });
+  it("tanpa check-in atau check-out → 0", () => {
+    expect(overtimeEvidenceMinutes(makeDay({ date: "2026-10-05" }), { date: "2026-10-05", startTime: "16:00", approvedMinutes: 60 })).toBe(0);
+    expect(overtimeEvidenceMinutes(undefined, { date: "2026-10-05", startTime: "16:00", approvedMinutes: 60 })).toBe(0);
+  });
+  it("shift malam: jam mulai 06.00 berarti dini hari keesokan harinya (shift 22.00–06.00, check-out 07.30 → 90 menit)", () => {
+    expect(overtimeEvidenceMinutes(night("07:30"), { date: "2026-10-05", startTime: "06:00", approvedMinutes: 120 })).toBe(90);
+  });
+  it("shift malam: check-out sebelum jam pulang → 0", () => {
+    expect(overtimeEvidenceMinutes(night("05:50"), { date: "2026-10-05", startTime: "06:00", approvedMinutes: 60 })).toBe(0);
+  });
+  it("shift malam: jam mulai setelah jam masuk (23.00) tetap pada tanggal shift, hanya bagian setelah jam pulang yang dihitung", () => {
+    // jendela 23.00–03.00 seluruhnya sebelum jam pulang 06.00 → bukan lembur
+    expect(overtimeEvidenceMinutes(night("07:00"), { date: "2026-10-05", startTime: "23:00", approvedMinutes: 240 })).toBe(0);
   });
 });
 

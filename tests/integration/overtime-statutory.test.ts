@@ -174,6 +174,24 @@ describe("lembur disetujui → gaji", () => {
     expect((await fail(submitRun(fx.hr, id)))?.message).toMatch(/berubah/);
   });
 
+  it("jam mulai lembur dinilai: check-out 17:00 untuk lembur 18:00–19:00 tidak dibayar; check-in setelah jam pulang tidak dihitung dari jam pulang", async () => {
+    await seedPayroll();
+    await addAttendance(fx.empIds[AYU], "2026-03-03", "08:00", "17:00"); // pulang 16:00, check-out 17:00, lembur disetujui 18:00–19:00
+    await addAttendance(fx.empIds[AYU], "2026-03-04", "17:30", "19:00"); // baru check-in setelah jam pulang; lembur disetujui 17:00–19:00
+    const a = await submit("2026-03-03", 60, { startTime: "18:00" });
+    const b = await submit("2026-03-04", 120, { startTime: "17:00" });
+    for (const o of [a, b]) await reviewOvertime(fx.hr, o.id, { decision: "APPROVE" });
+
+    const { id } = await createRun(fx.hr, PERIOD);
+    const d = await getItem(fx.hr, (await getRun(fx.hr, id)).items.find((i) => i.employeeNo === "TE-001")!.id);
+    expect(d.lines.find((l) => l.source === "RULE_OVERTIME")!.amount).toBe(30_000); // hanya 90 mnt (17:30–19:00) pada 4 Mar
+    expect(d.attendance.overtime).toEqual({ approvedMinutes: 180, paidMinutes: 90, days: 1 });
+    const w = d.item.warnings.join(" ");
+    expect(w).toContain("03/03/2026");
+    expect(w).toContain("18:00–19:00");
+    expect(w).toContain("tidak terbukti di absensi");
+  });
+
   it("pembatalan lembur disetujui memicu 'data berubah' dan memberi catatan periode gaji yang terdampak", async () => {
     await seedPayroll();
     await addAttendance(fx.empIds[AYU], "2026-03-03", "08:00", "18:10");

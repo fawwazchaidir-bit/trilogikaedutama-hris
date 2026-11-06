@@ -9,11 +9,11 @@ import { parseInput } from "../validate";
 import { assertCan, type Actor } from "../actor";
 import { writeAudit } from "../audit";
 import { dateToIso, isoToDate } from "../json";
-import { computeEmployeePeriod, employeeLite, loadRangeContext, sourceHash } from "./context";
+import { componentsHash, computeEmployeePeriod, employeeLite, loadRangeContext, sourceHash } from "./context";
 import { getSettings, payrollRulesOf, statutoryConfigOf } from "./settings";
 import { approvedOvertimeFor, overtimeTag } from "./overtime";
 import { notifyUsers, superAdminUserIds } from "./notifications";
-import { computeItem, maskAccount, totalsFromLines, type ComponentInput, type PayrollRules, type StatutoryContext } from "@/lib/payroll";
+import { computeItem, maskAccount, totalsFromLines, type ComponentInput, type OvertimeApproval, type PayrollRules, type StatutoryContext } from "@/lib/payroll";
 import { employerContributionLines, type StatutoryConfig, type YtdInput } from "@/lib/statutory";
 import type { DayResult, RecapTotals } from "@/lib/attendance";
 import type { PayslipSnapshot } from "@/lib/payslip";
@@ -87,8 +87,10 @@ export interface ItemSummary {
   totalDeductions: number;
   netPay: number;
   warnings: string[];
-  /** Data absensi/jadwal/pengajuan berubah sejak dihitung. */
+  /** Data absensi/jadwal/pengajuan ATAU komponen gaji berubah sejak dihitung. */
   stale: boolean;
+  /** Bagian dari `stale`: komponen gaji yang berlaku pada periode berubah sejak dihitung. */
+  staleComponents: boolean;
   payslipId: string | null;
   payslipNumber: string | null;
 }
@@ -152,22 +154,57 @@ async function loadRun(id: string): Promise<RunRow> {
   return r;
 }
 
+type SalaryComponentRow = Awaited<ReturnType<typeof prisma.salaryComponent.findMany>>[number];
+
+/** Baris komponen gaji → masukan mesin hitung. Satu-satunya pemetaan, dipakai saat menghitung DAN saat memeriksa perubahan. */
+function toComponentInput(c: SalaryComponentRow): ComponentInput {
+  return {
+    id: c.id, kind: c.kind, category: c.category, name: c.name, calc: c.calc, amount: Number(c.amount), percentBp: c.percentBp, recurrence: c.recurrence,
+    effectiveFrom: dateToIso(c.effectiveFrom), effectiveTo: c.effectiveTo ? dateToIso(c.effectiveTo) : null, description: c.description, isActive: c.isActive,
+    taxable: c.taxable, inBpjsBase: c.inBpjsBase ?? undefined,
+  };
+}
+
+const periodOf = (run: { periodStart: Date; periodEnd: Date }) => ({ start: dateToIso(run.periodStart), end: dateToIso(run.periodEnd) });
+
+/** Komponen gaji hanya relevan selama slip belum terbit; sesudahnya komponen boleh berubah untuk periode berikutnya tanpa menandai periode lama. */
+const COMPONENT_WATCHED: PayrollStatus[] = ["DRAFT", "PENDING_APPROVAL", "APPROVED"];
+
+interface CurrentHash { source: string; components: string }
+
 /**
  * Hash sumber terkini per karyawan untuk mendeteksi data yang berubah sejak dihitung. Lembur disetujui ikut dihash HANYA
- * bila periode itu dihitung dengan mode lembur "APPROVED" (mode diambil dari snapshot aturan periode).
+ * bila periode itu dihitung dengan mode lembur "APPROVED" (mode diambil dari snapshot aturan periode). Komponen gaji yang berlaku
+ * pada periode dihash terpisah (`components`) karena item lama belum menyimpannya.
  */
-async function currentHashes(run: { attendanceStart: Date; attendanceEnd: Date; rulesSnapshot?: unknown }, employeeIds: string[]): Promise<Map<string, string>> {
-  const out = new Map<string, string>();
+async function currentHashes(run: { periodStart: Date; periodEnd: Date; attendanceStart: Date; attendanceEnd: Date; rulesSnapshot?: unknown }, employeeIds: string[]): Promise<Map<string, CurrentHash>> {
+  const out = new Map<string, CurrentHash>();
   if (!employeeIds.length) return out;
   const emps = await prisma.employee.findMany({ where: { id: { in: employeeIds } } });
   const from = dateToIso(run.attendanceStart), to = dateToIso(run.attendanceEnd);
   const mode = (run.rulesSnapshot as PayrollRules | null)?.overtimeMode ?? (await getSettings()).overtimeMode;
-  const [ctx, ot] = await Promise.all([
+  const [ctx, ot, comps] = await Promise.all([
     loadRangeContext(from, to, { employeeIds }),
-    mode === "APPROVED" ? approvedOvertimeFor(employeeIds, from, to) : Promise.resolve(new Map<string, { date: string; approvedMinutes: number }[]>()),
+    mode === "APPROVED" ? approvedOvertimeFor(employeeIds, from, to) : Promise.resolve(new Map<string, OvertimeApproval[]>()),
+    prisma.salaryComponent.findMany({ where: { employeeId: { in: employeeIds }, isActive: true } }),
   ]);
-  for (const e of emps) out.set(e.id, sourceHash(computeEmployeePeriod(employeeLite(e), ctx).days, overtimeTag(ot.get(e.id))));
+  const compsBy = new Map<string, ComponentInput[]>();
+  for (const c of comps) compsBy.set(c.employeeId, [...(compsBy.get(c.employeeId) ?? []), toComponentInput(c)]);
+  const period = periodOf(run);
+  for (const e of emps) {
+    out.set(e.id, {
+      source: sourceHash(computeEmployeePeriod(employeeLite(e), ctx).days, overtimeTag(ot.get(e.id))),
+      components: componentsHash(compsBy.get(e.id) ?? [], period),
+    });
+  }
   return out;
+}
+
+/** Item "berubah" bila hash sumber absensi berbeda, atau (selama belum terbit) komponen gaji berbeda dari yang dibekukan saat dihitung. */
+function staleOf(status: PayrollStatus, item: { sourceHash: string; componentsHash: string | null }, now: CurrentHash | undefined): { stale: boolean; components: boolean } {
+  if (!now) return { stale: false, components: false };
+  const components = item.componentsHash !== null && COMPONENT_WATCHED.includes(status) && now.components !== item.componentsHash;
+  return { stale: components || now.source !== item.sourceHash, components };
 }
 
 export interface RunDetail {
@@ -192,14 +229,17 @@ export async function getRun(actor: Actor, id: string): Promise<RunDetail> {
     getSettings(),
     prisma.payslip.findMany({ where: { runId: id }, select: { id: true, itemId: true, number: true } }),
   ]);
-  const hashes = run.status === "CANCELLED" ? new Map<string, string>() : await currentHashes(run, items.map((i) => i.employeeId));
+  const hashes = run.status === "CANCELLED" ? new Map<string, CurrentHash>() : await currentHashes(run, items.map((i) => i.employeeId));
   const slipByItem = new Map(slips.map((s) => [s.itemId, s]));
-  const summaries: ItemSummary[] = items.map((i) => ({
-    id: i.id, employeeId: i.employeeId, employeeNo: i.employeeNo, name: i.employeeName, position: i.position, division: i.divisionName,
-    baseSalary: Number(i.baseSalary), totalEarnings: Number(i.totalEarnings), totalDeductions: Number(i.totalDeductions), netPay: Number(i.netPay),
-    warnings: (i.warnings as string[] | null) ?? [], stale: hashes.has(i.employeeId) && hashes.get(i.employeeId) !== i.sourceHash,
-    payslipId: slipByItem.get(i.id)?.id ?? null, payslipNumber: slipByItem.get(i.id)?.number ?? null,
-  }));
+  const summaries: ItemSummary[] = items.map((i) => {
+    const st = staleOf(run.status, i, hashes.get(i.employeeId));
+    return {
+      id: i.id, employeeId: i.employeeId, employeeNo: i.employeeNo, name: i.employeeName, position: i.position, division: i.divisionName,
+      baseSalary: Number(i.baseSalary), totalEarnings: Number(i.totalEarnings), totalDeductions: Number(i.totalDeductions), netPay: Number(i.netPay),
+      warnings: (i.warnings as string[] | null) ?? [], stale: st.stale, staleComponents: st.components,
+      payslipId: slipByItem.get(i.id)?.id ?? null, payslipNumber: slipByItem.get(i.id)?.number ?? null,
+    };
+  });
   const [dto] = await toRunDtos([run]);
   return {
     run: dto!, items: summaries, rules: payrollRulesOf(settings), rulesConfirmedAt: settings.payrollRulesConfirmedAt?.toISOString() ?? null,
@@ -242,8 +282,8 @@ export async function getItem(actor: Actor, itemId: string): Promise<ItemDetail>
   const ctx = await loadRangeContext(from, to, { employeeIds: [emp.id] });
   const { days } = computeEmployeePeriod(employeeLite(emp), ctx);
   const snap = run.rulesSnapshot as (PayrollRules & { statutory?: StatutoryConfig | null }) | null;
-  const ot = snap?.overtimeMode === "APPROVED" ? await approvedOvertimeFor([emp.id], from, to) : new Map();
-  const stale = run.status !== "CANCELLED" && sourceHash(days, overtimeTag(ot.get(emp.id))) !== item.sourceHash;
+  const now = run.status === "CANCELLED" ? undefined : (await currentHashes(run, [emp.id])).get(emp.id);
+  const { stale, components: staleComponents } = staleOf(run.status, item, now);
   const [dto] = await toRunDtos([run]);
   const summary = item.attendanceSummary as unknown as { totals: RecapTotals; overtime?: { approvedMinutes: number; paidMinutes: number; days: number } | null };
   const stored = item.statutory as unknown as ItemStatutoryStored | null;
@@ -252,7 +292,7 @@ export async function getItem(actor: Actor, itemId: string): Promise<ItemDetail>
     item: {
       id: item.id, employeeId: item.employeeId, employeeNo: item.employeeNo, name: item.employeeName, position: item.position, division: item.divisionName,
       baseSalary: Number(item.baseSalary), totalEarnings: Number(item.totalEarnings), totalDeductions: Number(item.totalDeductions), netPay: Number(item.netPay),
-      warnings: (item.warnings as string[] | null) ?? [], stale, payslipId: item.payslip?.id ?? null, payslipNumber: item.payslip?.number ?? null,
+      warnings: (item.warnings as string[] | null) ?? [], stale, staleComponents, payslipId: item.payslip?.id ?? null, payslipNumber: item.payslip?.number ?? null,
       slipNote: item.slipNote, employmentStatus: item.employmentStatus, bankName: item.bankName, bankAccountMasked: item.bankAccountMasked,
     },
     lines: item.lines.map((l) => ({ id: l.id, kind: l.kind, category: l.category, name: l.name, source: l.source, amount: Number(l.amount), formula: l.formula, reason: l.reason })),
@@ -331,15 +371,7 @@ export async function calculateRun(actor: Actor, runId: string): Promise<{ itemC
     statActive && statCfg.pph21.enabled ? ytdFor(ids, taxYear, period.start, runId) : Promise.resolve(new Map<string, YtdInput>()),
   ]);
   const compsBy = new Map<string, ComponentInput[]>();
-  for (const c of comps) {
-    const arr = compsBy.get(c.employeeId) ?? [];
-    arr.push({
-      id: c.id, kind: c.kind, category: c.category, name: c.name, calc: c.calc, amount: Number(c.amount), percentBp: c.percentBp, recurrence: c.recurrence,
-      effectiveFrom: dateToIso(c.effectiveFrom), effectiveTo: c.effectiveTo ? dateToIso(c.effectiveTo) : null, description: c.description, isActive: c.isActive,
-      taxable: c.taxable, inBpjsBase: c.inBpjsBase ?? undefined,
-    });
-    compsBy.set(c.employeeId, arr);
-  }
+  for (const c of comps) compsBy.set(c.employeeId, [...(compsBy.get(c.employeeId) ?? []), toComponentInput(c)]);
   const adjBy = new Map<string, typeof oldAdj>();
   for (const a of oldAdj) adjBy.set(a.item.employeeId, [...(adjBy.get(a.item.employeeId) ?? []), a]);
   const noteBy = new Map(oldItems.map((i) => [i.employeeId, i.slipNote]));
@@ -360,7 +392,7 @@ export async function calculateRun(actor: Actor, runId: string): Promise<{ itemC
       employee: { taxStatus: e.taxStatus, hasNpwp: e.hasNpwp, healthEnrolled: e.bpjsHealthEnrolled, employmentEnrolled: e.bpjsEmploymentEnrolled },
       taxMonth, finalPeriod, priorMonthsExpected, ytd: ytdMap.get(e.id) ?? null,
     } : null;
-    const calc = computeItem({ components: compsBy.get(e.id) ?? [], rules, totals, days, period, overtime: approvals, statutory });
+    const calc = computeItem({ components: compsBy.get(e.id) ?? [], rules, totals, days, period, overtime: approvals, statutory, timeZone: env().APP_TIMEZONE });
     const adj = adjBy.get(e.id) ?? [];
     // Dilewati bila tidak ada komponen gaji sama sekali: baris dari aturan (potongan/lembur otomatis) saja tidak cukup
     // untuk memasukkan karyawan ke penggajian — kalau tidak, karyawan tanpa gaji akan bergaji bersih negatif.
@@ -395,6 +427,7 @@ export async function calculateRun(actor: Actor, runId: string): Promise<{ itemC
       baseSalary: BigInt(calc.baseSalary), totalEarnings: BigInt(t.totalEarnings), totalDeductions: BigInt(t.totalDeductions), netPay: BigInt(t.netPay),
       attendanceSummary: { totals, from: attFrom, to: attTo, overtime: calc.overtime } as unknown as Prisma.InputJsonValue,
       sourceHash: sourceHash(days, rules.overtimeMode === "APPROVED" ? overtimeTag(approvals) : ""),
+      componentsHash: componentsHash(compsBy.get(e.id) ?? [], period),
       statutory: stored ? (stored as unknown as Prisma.InputJsonValue) : Prisma.DbNull,
       warnings: warnings as unknown as Prisma.InputJsonValue,
       slipNote: noteBy.get(e.id) ?? null,
@@ -527,12 +560,18 @@ export async function setSlipNote(actor: Actor, itemId: string, raw: unknown): P
 // ─────────────────────────── Alur status ───────────────────────────
 
 async function assertFresh(run: RunRow): Promise<void> {
-  const items = await prisma.payrollItem.findMany({ where: { runId: run.id }, select: { employeeId: true, sourceHash: true, employeeName: true } });
+  const items = await prisma.payrollItem.findMany({ where: { runId: run.id }, select: { employeeId: true, sourceHash: true, componentsHash: true, employeeName: true } });
   const now = await currentHashes(run, items.map((i) => i.employeeId));
-  const stale = items.filter((i) => now.get(i.employeeId) !== i.sourceHash);
-  if (stale.length) {
-    throw Errors.conflict(`Data absensi/jadwal/pengajuan berubah sejak penghitungan untuk ${stale.length} karyawan (${stale.slice(0, 3).map((s) => s.employeeName).join(", ")}${stale.length > 3 ? ", …" : ""}). Kembalikan ke Draf dan hitung ulang.`);
-  }
+  const states = items.map((i) => ({ name: i.employeeName, ...staleOf(run.status, i, now.get(i.employeeId) ?? { source: "", components: i.componentsHash ?? "" }) }));
+  const names = (list: { name: string }[]) => `${list.length} karyawan (${list.slice(0, 3).map((s) => s.name).join(", ")}${list.length > 3 ? ", …" : ""})`;
+  const comp = states.filter((s) => s.components);
+  const data = states.filter((s) => s.stale && !s.components);
+  if (!comp.length && !data.length) return;
+  const parts = [
+    data.length ? `Data absensi/jadwal/pengajuan berubah sejak penghitungan untuk ${names(data)}.` : "",
+    comp.length ? `Komponen gaji berubah sejak penghitungan untuk ${names(comp)}.` : "",
+  ].filter(Boolean);
+  throw Errors.conflict(`${parts.join(" ")} Kembalikan ke Draf dan hitung ulang.`);
 }
 
 async function transition(

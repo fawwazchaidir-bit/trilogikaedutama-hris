@@ -9,7 +9,7 @@ import { isoToDate } from "@/server/json";
 import { correctAttendance } from "@/server/services/attendance";
 import { getRecap, getRecapDetail, recapTable } from "@/server/services/recap";
 import { toCsv } from "@/server/export";
-import { createComponent, setComponentActive } from "@/server/services/components";
+import { createComponent, setComponentActive, updateComponent } from "@/server/services/components";
 import {
   addAdjustment, approveRun, calculateRun, cancelRun, createRevision, createRun, getItem, getRun, issueRun, listRuns, removeAdjustment, returnRun, submitRun,
 } from "@/server/services/payroll";
@@ -296,6 +296,95 @@ describe("penggajian — alur lengkap", () => {
     await correctAttendance(fx.hr, { employeeId: fx.empIds[E1], date: "2026-01-09", action: "set", checkIn: "08:00", checkOut: "16:00", reason: "Melengkapi check-out" });
     await confirmPayrollRules(fx.superAdmin);
     expect((await fail(approveRun(fx.superAdmin, id)))?.message).toMatch(/berubah sejak penghitungan/);
+  });
+
+  describe("perubahan komponen gaji setelah dihitung", () => {
+    const compOf = (employeeId: string, name: string) => prisma.salaryComponent.findFirstOrThrow({ where: { employeeId, name } });
+    const edit = async (id: string, over: Record<string, unknown>) => {
+      const c = await prisma.salaryComponent.findUniqueOrThrow({ where: { id } });
+      return updateComponent(fx.hr, id, {
+        employeeId: c.employeeId, category: c.category, name: c.name, calc: c.calc, recurrence: c.recurrence, amount: Number(c.amount), percent: c.percentBp === null ? null : c.percentBp / 100,
+        effectiveFrom: c.effectiveFrom.toISOString().slice(0, 10), effectiveTo: c.effectiveTo ? c.effectiveTo.toISOString().slice(0, 10) : null, ...over,
+      });
+    };
+
+    it("gaji pokok diubah (5 jt → 6 jt) setelah dihitung → item ditandai 'data berubah'; ajukan diblokir sampai dihitung ulang", async () => {
+      await setup();
+      const { id } = await createRun(fx.hr, PERIOD);
+      const before = (await getRun(fx.hr, id)).items.find((i) => i.employeeNo === "TE-001")!;
+      expect(before.stale).toBe(false);
+      expect(before.baseSalary).toBe(5_000_000);
+
+      await edit((await compOf(fx.empIds[E1], "Gaji pokok")).id, { amount: 6_000_000 });
+      const run = await getRun(fx.hr, id);
+      const ayu = run.items.find((i) => i.employeeNo === "TE-001")!;
+      expect(run.staleCount).toBe(1);
+      expect(ayu.stale).toBe(true);
+      expect(ayu.staleComponents).toBe(true);
+      expect(run.items.find((i) => i.employeeNo === "TE-002")!.stale).toBe(false);
+      const detail = await getItem(fx.hr, ayu.id);
+      expect(detail.item.stale).toBe(true);
+      expect(detail.item.staleComponents).toBe(true);
+      expect(detail.item.baseSalary).toBe(5_000_000); // angka lama tetap sampai dihitung ulang
+
+      const err = await fail(submitRun(fx.hr, id));
+      expect(err?.message).toMatch(/Komponen gaji berubah sejak penghitungan untuk 1 karyawan \(.*Ayu/);
+      expect(err?.message).toMatch(/hitung ulang/);
+
+      await calculateRun(fx.hr, id);
+      const after = await getRun(fx.hr, id);
+      expect(after.staleCount).toBe(0);
+      expect(after.items.find((i) => i.employeeNo === "TE-001")!.baseSalary).toBe(6_000_000);
+      await submitRun(fx.hr, id);
+    });
+
+    it("komponen dinonaktifkan atau ditambah setelah dihitung juga ditandai; saat menunggu persetujuan, persetujuan diblokir", async () => {
+      await setup();
+      const { id } = await createRun(fx.hr, PERIOD);
+      await setComponentActive(fx.hr, (await compOf(fx.empIds[E1], "Transport harian")).id, false);
+      expect((await getRun(fx.hr, id)).staleCount).toBe(1);
+      await calculateRun(fx.hr, id);
+      expect((await getRun(fx.hr, id)).staleCount).toBe(0);
+
+      await submitRun(fx.hr, id);
+      await confirmPayrollRules(fx.superAdmin);
+      await addComponent(fx.empIds[E2], fx.hr.userId, { category: "MEAL_ALLOWANCE", name: "Uang makan tetap", amount: 300_000 });
+      expect((await getRun(fx.hr, id)).items.find((i) => i.employeeNo === "TE-002")!.staleComponents).toBe(true);
+      expect((await fail(approveRun(fx.superAdmin, id)))?.message).toMatch(/Komponen gaji berubah sejak penghitungan/);
+    });
+
+    it("komponen yang tidak berlaku pada periode ini (bonus Februari) tidak menandai periode Januari", async () => {
+      await setup();
+      const { id } = await createRun(fx.hr, PERIOD);
+      await edit((await compOf(fx.empIds[E1], "Bonus Februari")).id, { amount: 1_500_000 });
+      expect((await getRun(fx.hr, id)).staleCount).toBe(0);
+      await submitRun(fx.hr, id);
+    });
+
+    it("sesudah slip terbit, perubahan komponen (untuk periode berikutnya) tidak menandai periode lama dan slip tidak berubah", async () => {
+      await setup();
+      const { id } = await createRun(fx.hr, PERIOD);
+      await submitRun(fx.hr, id);
+      await confirmPayrollRules(fx.superAdmin);
+      await approveRun(fx.superAdmin, id);
+      await issueRun(fx.hr, id);
+      const item = (await getRun(fx.hr, id)).items.find((i) => i.employeeNo === "TE-001")!;
+      const slip = await getPayslip(fx.hr, item.payslipId!);
+
+      await edit((await compOf(fx.empIds[E1], "Gaji pokok")).id, { amount: 9_000_000 });
+      const after = await getRun(fx.hr, id);
+      expect(after.staleCount).toBe(0);
+      expect(after.items.find((i) => i.employeeNo === "TE-001")!.staleComponents).toBe(false);
+      expect((await getPayslip(fx.hr, item.payslipId!)).snapshot).toEqual(slip.snapshot);
+    });
+
+    it("item yang dihitung sebelum kolom hash ada (NULL) tidak dinilai: periode lama tidak mendadak ditandai", async () => {
+      await setup();
+      const { id } = await createRun(fx.hr, PERIOD);
+      await prisma.payrollItem.updateMany({ where: { runId: id }, data: { componentsHash: null } });
+      await edit((await compOf(fx.empIds[E1], "Gaji pokok")).id, { amount: 6_000_000 });
+      expect((await getRun(fx.hr, id)).staleCount).toBe(0);
+    });
   });
 
   it("gaji bersih negatif tidak dapat diajukan; periode yang belum berakhir tidak dapat diajukan", async () => {

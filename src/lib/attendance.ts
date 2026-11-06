@@ -183,7 +183,7 @@ export interface DayResult {
   missingCheckout: boolean;
   /** Belum check-out DAN harinya (shift) sudah selesai → dihitung "absensi belum lengkap". */
   incomplete: boolean;
-  /** Menit melewati jam pulang terjadwal (dasar lembur otomatis). */
+  /** Menit hadir setelah jam pulang terjadwal (dasar lembur otomatis); tidak pernah melebihi lama kerja aktual. */
   afterEndMinutes: number;
   leaveType: LeaveKind | null;
   leaveRequestId: string | null;
@@ -286,7 +286,8 @@ export function deriveDay(input: DayInput): DayResult {
       r.late = isLate;
       r.lateMinutes = isLate ? (input.lateAfterTolerance ? offset - tol : offset) : 0;
       r.status = isLate ? "TERLAMBAT" : "HADIR";
-      if (outAt) r.afterEndMinutes = Math.max(0, Math.floor((outAt.getTime() - win.end.getTime()) / 60_000));
+      // Hanya waktu HADIR setelah jam pulang: check-in yang baru terjadi setelah jam pulang tidak menghitung selisih sebelum check-in.
+      if (outAt) r.afterEndMinutes = Math.max(0, Math.floor((outAt.getTime() - Math.max(win.end.getTime(), inAt.getTime())) / 60_000));
       const startTxt = localTime(effStart, timeZone);
       const limitTxt = `${startTxt} + toleransi ${tol} mnt = ${localTime(new Date(effStart.getTime() + tol * 60_000), timeZone)}`;
       const inTxt = `${r.checkInTime}${r.checkInNextDay ? " (+1 hari)" : ""}`;

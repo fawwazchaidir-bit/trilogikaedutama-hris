@@ -12,6 +12,7 @@
 import { formatRupiah, roundDivHalfUp } from "./money";
 import { formatDateShort, formatDays, formatDuration } from "./format";
 import type { DayResult, RecapTotals } from "./attendance";
+import { DEFAULT_TIMEZONE, addDays, minutesToTime, timeToMinutes, zonedInstant } from "./time";
 import { computeStatutory, type StatutoryConfig, type StatutoryResult, type TaxStatus, type YtdInput } from "./statutory";
 
 export type ComponentKind = "EARNING" | "DEDUCTION";
@@ -103,7 +104,32 @@ export interface LineDraft {
   componentId: string | null;
 }
 
-export interface OvertimeApproval { date: string; approvedMinutes: number }
+/** Lembur DISETUJUI: tanggal + jam mulai yang diajukan + menit yang disetujui (jendela lembur = mulai … mulai + menit). */
+export interface OvertimeApproval { date: string; startTime: string; approvedMinutes: number }
+
+/**
+ * Menit lembur yang TERBUKTI oleh absensi untuk satu persetujuan: irisan antara jendela lembur yang disetujui
+ * [jam mulai, jam mulai + menit disetujui] dengan kehadiran nyata [check-in, check-out] — dan, pada hari kerja terjadwal,
+ * hanya waktu SETELAH jam pulang terjadwal (waktu sebelum jam pulang adalah jam kerja biasa, bukan lembur).
+ *
+ * Contoh: pulang 16.00, check-out 17.00, lembur disetujui 18.00–19.00 → 0 menit (belum sampai jam lembur).
+ * Shift malam: jam mulai yang lebih awal dari jam masuk shift (mis. 06.00 pada shift 22.00–06.00) berarti dini hari
+ * keesokan harinya.
+ */
+export function overtimeEvidenceMinutes(day: DayResult | undefined, a: OvertimeApproval, timeZone: string = DEFAULT_TIMEZONE): number {
+  if (!day?.checkInAt || !day.checkOutAt) return 0;
+  let startMs = zonedInstant(a.date, a.startTime, timeZone).getTime();
+  if (day.endsNextDay && day.shiftStartAt && startMs < Date.parse(day.shiftStartAt)) {
+    startMs = zonedInstant(addDays(a.date, 1), a.startTime, timeZone).getTime();
+  }
+  let from = Math.max(startMs, Date.parse(day.checkInAt));
+  if (day.scheduled && day.shiftEndAt) from = Math.max(from, Date.parse(day.shiftEndAt));
+  const to = Math.min(startMs + a.approvedMinutes * 60_000, Date.parse(day.checkOutAt));
+  return Math.max(0, Math.floor((to - from) / 60_000));
+}
+
+const overtimeWindowText = (a: OvertimeApproval): string =>
+  `${a.startTime}–${minutesToTime((timeToMinutes(a.startTime) + a.approvedMinutes) % 1440)}`;
 
 export interface StatutoryContext {
   config: StatutoryConfig | null;
@@ -196,6 +222,8 @@ export function computeItem(args: {
   /** Pengajuan lembur DISETUJUI pada rentang absensi (dipakai bila mode lembur = APPROVED). */
   overtime?: OvertimeApproval[];
   statutory?: StatutoryContext | null;
+  /** Zona waktu perusahaan — dasar mengubah jam mulai lembur menjadi instan. */
+  timeZone?: string;
 }): ItemComputation {
   const { rules, totals, days } = args;
   const warnings: string[] = [];
@@ -275,12 +303,12 @@ export function computeItem(args: {
       for (const a of [...approvals].sort((x, y) => x.date.localeCompare(y.date))) {
         approvedTotal += a.approvedMinutes;
         const day = days.find((d) => d.date === a.date);
-        const evidence = !day ? 0 : day.scheduled ? day.afterEndMinutes : day.workedMinutes;
+        const evidence = overtimeEvidenceMinutes(day, a, args.timeZone);
         const verified = rules.overtimeRequireAttendance === false ? a.approvedMinutes : Math.min(a.approvedMinutes, evidence);
         const capped = Math.min(verified, rules.overtimeMaxMinutesPerDay);
         if (capped < rules.overtimeMinMinutes || capped <= 0) {
           warnings.push(`Lembur ${formatDateShort(a.date)} (disetujui ${formatDuration(a.approvedMinutes)}) tidak dihitung: ${evidence === 0 && rules.overtimeRequireAttendance !== false
-            ? (day?.missingCheckout ? "belum ada check-out" : "tidak terbukti di absensi (check-out tidak melewati jam pulang)")
+            ? (day?.missingCheckout ? "belum ada check-out" : `tidak terbukti di absensi (kehadiran tidak mencakup jam lembur yang disetujui ${overtimeWindowText(a)})`)
             : `hanya ${formatDuration(capped)} yang terbukti (minimal ${formatDuration(rules.overtimeMinMinutes)}/hari)`}.`);
           continue;
         }

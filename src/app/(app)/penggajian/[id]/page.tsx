@@ -44,7 +44,7 @@ export default async function PayrollRunPage({ params }: { params: Promise<{ id:
       {d.staleCount > 0 && run.status !== "CANCELLED" && (
         <Notice tone={issued ? "info" : "warn"}>{issued
           ? <>Ada <strong>{d.staleCount}</strong> karyawan dengan koreksi absensi/jadwal/pengajuan <em>setelah</em> penghitungan. Slip yang sudah terbit <strong>tidak berubah</strong>; bila perlu, pimpinan dapat membatalkan dan HR membuat revisi.</>
-          : <>Data absensi/jadwal/pengajuan berubah sejak penghitungan untuk <strong>{d.staleCount}</strong> karyawan. {run.status === "DRAFT" ? "Klik Hitung ulang." : "Kembalikan ke Draf lalu hitung ulang."}</>}</Notice>
+          : <>Data absensi/jadwal/pengajuan{d.items.some((i) => i.staleComponents) ? " atau komponen gaji" : ""} berubah sejak penghitungan untuk <strong>{d.staleCount}</strong> karyawan. {run.status === "DRAFT" ? "Klik Hitung ulang." : "Kembalikan ke Draf lalu hitung ulang."}</>}</Notice>
       )}
       {d.negativeCount > 0 && run.status === "DRAFT" && <Notice tone="danger">{d.negativeCount} karyawan bergaji bersih negatif — sesuaikan sebelum diajukan.</Notice>}
       {!d.rulesConfirmedAt && ["DRAFT", "PENDING_APPROVAL"].includes(run.status) && <Notice tone="warn">Aturan penggajian belum dikonfirmasi pimpinan; persetujuan akan ditolak sampai dikonfirmasi di Pengaturan.</Notice>}

@@ -256,17 +256,17 @@ export async function cancelOvertime(actor: Actor, id: string, raw: unknown): Pr
 
 // ─────────────────────────── Dipakai penggajian ───────────────────────────
 
-/** Lembur DISETUJUI per karyawan dalam rentang tanggal (menit disetujui). */
+/** Lembur DISETUJUI per karyawan dalam rentang tanggal (jam mulai + menit disetujui). */
 export async function approvedOvertimeFor(employeeIds: string[], from: string, to: string): Promise<Map<string, OvertimeApproval[]>> {
   const out = new Map<string, OvertimeApproval[]>();
   if (!employeeIds.length) return out;
   const rows = await prisma.overtimeRequest.findMany({
     where: { employeeId: { in: employeeIds }, status: "APPROVED", date: { gte: isoToDate(from), lte: isoToDate(to) } },
-    select: { employeeId: true, date: true, approvedMinutes: true }, orderBy: { date: "asc" },
+    select: { employeeId: true, date: true, startTime: true, approvedMinutes: true }, orderBy: { date: "asc" },
   });
   for (const r of rows) {
     const arr = out.get(r.employeeId) ?? [];
-    arr.push({ date: dateToIso(r.date), approvedMinutes: r.approvedMinutes ?? 0 });
+    arr.push({ date: dateToIso(r.date), startTime: r.startTime, approvedMinutes: r.approvedMinutes ?? 0 });
     out.set(r.employeeId, arr);
   }
   return out;

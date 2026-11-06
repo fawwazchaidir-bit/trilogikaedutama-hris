@@ -38,7 +38,7 @@ responsif (komputer & ponsel), tampilan mengikuti aplikasi invoice Trilogika aga
 |---|---|
 | **Shift lintas tengah malam** | Jadwal 22.00–06.00 dst. (maks. 16 jam); shift milik tanggal ia dimulai; check-out dini hari menutup shift kemarin (masa tenggang 6 jam); koreksi admin & dashboard mengikuti. |
 | **Izin/sakit/cuti setengah hari** | Pagi/siang, pecahan 0,5 di rekap, saldo, buku saldo, gaji; jam masuk efektif cuti pagi = tengah shift. |
-| **Lembur dengan persetujuan** | Pengajuan → setujui/kurangi/tolak → dibayar sesuai bukti absensi; tarif tetap atau gaji ÷ pembagi; pengali jam; periode gaji ditandai "Data berubah" bila persetujuan berubah. |
+| **Lembur dengan persetujuan** | Pengajuan → setujui/kurangi/tolak → dibayar sesuai bukti absensi; tarif tetap atau gaji ÷ pembagi; pengali jam; bukti = irisan jam lembur disetujui dengan kehadiran nyata; periode gaji ditandai "Data berubah" bila persetujuan lembur atau komponen gaji berubah setelah dihitung. |
 | **BPJS & PPh 21 otomatis** | BPJS (Kesehatan, JHT, JP, JKK, JKM; porsi karyawan & perusahaan), PPh 21 TER + true-up masa pajak terakhir; semua tarif/tabel dapat diubah; komponen manual menggantikan otomatis; konfirmasi Super Admin wajib. **Nonaktif secara bawaan & wajib diverifikasi.** |
 | **Lupa password mandiri** | Email, tautan sekali pakai 30 menit, anti-enumerasi, dibatasi, akun ber-2FA wajib kode. |
 | **2FA (TOTP)** | Aplikasi autentikator + QR, 10 kode pemulihan, anti-replay, dapat diwajibkan untuk admin, reset oleh Super Admin. |

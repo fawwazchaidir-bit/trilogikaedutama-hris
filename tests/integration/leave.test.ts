@@ -189,6 +189,31 @@ describe("saldo cuti", () => {
     expect((await getBalance(fx.hr, fx.empIds[2], 2027)).balance).toBe(5 - 2);
   });
 
+  it("cuti lintas tahun yang MENUNGGU dicadangkan per tahun (2 hari 2026 + 2 hari 2027), bukan seluruhnya di tahun mulai", async () => {
+    await setBalance(fx.hr, { employeeId: fx.empIds[2], year: 2026, targetDays: 5, note: "Saldo 2026" });
+    await setBalance(fx.hr, { employeeId: fx.empIds[2], year: 2027, targetDays: 5, note: "Saldo 2027" });
+    const r = await submitLeave(fx.emp3, { type: "CUTI", startDate: "2026-12-30", endDate: "2027-01-04", reason: "Akhir tahun" }); // 30, 31 Des | 1, 4 Jan
+    expect(r.workingDays).toBe(4);
+    expect(await getBalance(fx.emp3, fx.empIds[2], 2026)).toMatchObject({ balance: 5, reserved: 2, available: 3 });
+    expect(await getBalance(fx.emp3, fx.empIds[2], 2027)).toMatchObject({ balance: 5, reserved: 2, available: 3 });
+    expect((await getBalance(fx.emp3, fx.empIds[2], 2028)).reserved).toBe(0);
+    // sesudah disetujui, cadangan berpindah menjadi pemotongan per tahun yang sama
+    await reviewLeave(fx.hr, r.id, { decision: "APPROVE" });
+    expect(await getBalance(fx.emp3, fx.empIds[2], 2026)).toMatchObject({ balance: 3, reserved: 0, available: 3 });
+    expect(await getBalance(fx.emp3, fx.empIds[2], 2027)).toMatchObject({ balance: 3, reserved: 0, available: 3 });
+  });
+
+  it("cadangan per tahun menentukan pengajuan lain: tahun 2027 tidak lolos melewati saldo, tahun 2026 tidak ditolak keliru", async () => {
+    await setBalance(fx.hr, { employeeId: fx.empIds[2], year: 2026, targetDays: 5, note: "Saldo 2026" });
+    await setBalance(fx.hr, { employeeId: fx.empIds[2], year: 2027, targetDays: 3, note: "Saldo 2027" });
+    await submitLeave(fx.emp3, { type: "CUTI", startDate: "2026-12-30", endDate: "2027-01-04", reason: "Akhir tahun" }); // cadangan: 2026 = 2, 2027 = 2
+    // 2027: tersedia 3 − 2 = 1, diminta 2 (11–12 Jan) → ditolak saat diajukan (dulu lolos karena cadangan 2027 dianggap 0, lalu gagal saat persetujuan)
+    const over = await fail(submitLeave(fx.emp3, { type: "CUTI", startDate: "2027-01-11", endDate: "2027-01-12", reason: "Tambahan Januari" }));
+    expect(over?.message).toMatch(/Saldo cuti 2027 tidak cukup: tersedia 1 hari/);
+    // 2026: tersedia 5 − 2 = 3, diminta 3 (21–23 Des) → diterima (dulu ditolak keliru karena cadangan 2026 dianggap 4)
+    expect(await fail(submitLeave(fx.emp3, { type: "CUTI", startDate: "2026-12-21", endDate: "2026-12-23", reason: "Sebelum akhir tahun" }))).toBeNull();
+  });
+
   it("atur saldo: pertama GRANT, selanjutnya ADJUSTMENT selisih; catatan wajib; sama = ditolak", async () => {
     await setBalance(fx.hr, { employeeId: fx.empIds[0], year: 2027, targetDays: 10, note: "Saldo awal" });
     await setBalance(fx.hr, { employeeId: fx.empIds[0], year: 2027, targetDays: 8, note: "Koreksi 2 hari" });

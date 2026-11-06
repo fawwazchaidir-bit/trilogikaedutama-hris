@@ -87,6 +87,11 @@ describe("deriveDay — belum check-out & belum lengkap", () => {
     const early = day({ date: "2026-10-27", attendance: { checkInAt: at("2026-10-27", "08:00"), checkOutAt: at("2026-10-27", "15:00") } });
     expect(early.afterEndMinutes).toBe(0);
   });
+  it("check-in baru setelah jam pulang: menit setelah jam pulang dihitung dari check-in, bukan dari jam pulang (tidak melebihi lama kerja)", () => {
+    const r = day({ date: "2026-10-26", attendance: { checkInAt: at("2026-10-26", "17:30"), checkOutAt: at("2026-10-26", "18:00") } });
+    expect(r.workedMinutes).toBe(30);
+    expect(r.afterEndMinutes).toBe(30);
+  });
 });
 
 describe("deriveDay — tanpa check-in", () => {
