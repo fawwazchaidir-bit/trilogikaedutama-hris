@@ -174,7 +174,7 @@ Notifikasi memakai outbox yang sudah ada: dalam aplikasi selalu; email/WhatsApp 
 | **Merah pada H-7…H-1** | Manajer Operasional + SPV Kurikulum (+ Manajer Pemasaran untuk kerjasama: klien diberi tahu tertulis) | episode Merah |
 | Milestone terlambat > ambang (3 hari) | atasan langsung pemegang **jabatan milestone itu** (naik satu tingkat); tanpa atasan di portal → Direktur | milestone |
 | Beban staf Overload **2 minggu berturut-turut** | Manajer Operasional dan Keuangan (bukan orangnya sendiri) | staf + minggu |
-| **Pengingat tenggat H-1 dan hari-H**: tugas (Belum/Proses), milestone, item kesiapan, dimulainya pelaksanaan program | penanggung jawab (milestone/item tanpa PIC → PIC program); program: seluruh anggota aktif | entitas + tanggal tenggat + H-1/H + penerima |
+| **Pengingat tenggat H-1 dan hari-H**: tugas (Belum/Proses), milestone, item kesiapan, dimulainya pelaksanaan program | penanggung jawab **yang masih boleh membuka proyek** (level modul / Super Admin, atau anggota aktif); bila sudah dikeluarkan dari proyek atau tidak lagi berhak → **PIC program** (tugas diberi judul "Tugas tanpa penanggung jawab aktif…"; milestone/item tanpa penanggung jawab yang berhak → PIC). Program: seluruh anggota aktif | entitas + tanggal tenggat + H-1/H + penerima |
 
 Aturan penting:
 - **Deret berturut-turut** dihitung dari *snapshot status harian* (`training_status_snapshots`, satu baris per program per tanggal WIB; pekerja menimpa baris hari yang sama). Hanya **hari kerja** yang dihitung; akhir pekan dilewati (tidak memutus). Hari kerja tanpa snapshot **memutus** deret — tanpa data tidak ada klaim "berturut-turut". Karena status dinilai saat pekerja berjalan, Kuning pagi yang sudah Hijau siang tetap tercatat pagi itu.
@@ -261,12 +261,12 @@ Mengaktifkan flag tidak memberi siapa pun akses otomatis: Super Admin harus memb
 | Jenis | Berkas | Jumlah |
 |---|---|---:|
 | Unit (logika murni: akses, status, indikator dashboard, validasi, usulan level) | `tests/unit/training-access.test.ts`, `training-rules.test.ts` | 32 |
-| Integrasi — gerbang akses, IDOR, tim, penjaga DB | `tests/integration/training-access.test.ts` | 26 |
+| Integrasi — gerbang akses, IDOR, tim, penjaga DB, aturan akses untuk pekerja latar belakang | `tests/integration/training-access.test.ts` | 27 |
 | Integrasi — alur bisnis (proyek→penutupan, dashboard, jadwal, peserta, dokumen, referensi) | `tests/integration/training-flow.test.ts` | 35 |
 | Integrasi — modul dimatikan | `tests/integration/training-flag.test.ts` | 3 |
 | Unit — mesin indikator, konfigurasi, skema PATCH, eskalasi & deret hari kerja, waktu relatif | `tests/unit/training-indicators.test.ts`, `training-validation.test.ts`, `training-escalation.test.ts`, `nav-pref.test.ts`, `format-timeago.test.ts` | 60 |
-| Integrasi — indikator, konfigurasi berversi, template, hak akses, beban/KP | `tests/integration/training-indicators.test.ts` | 43 |
-| Integrasi — otomasi: pengingat H-1/hari-H, snapshot, eskalasi, Kuning berturut-turut, beban berlebih, catatan pemulihan | `tests/integration/training-automation.test.ts` | 21 |
+| Integrasi — indikator, konfigurasi berversi, template, hak akses, beban/KP | `tests/integration/training-indicators.test.ts` | 45 |
+| Integrasi — otomasi: pengingat H-1/hari-H, snapshot, eskalasi, Kuning berturut-turut, beban berlebih, catatan pemulihan | `tests/integration/training-automation.test.ts` | 23 |
 | Integrasi — data beranda (lingkup akses) & pemicu pekerja harian (401/200/idempoten) | `tests/integration/training-home.test.ts`, `training-daily-route.test.ts` | 5 |
 | E2E browser (build produksi) | `tests/e2e/05f-training.spec.ts`, `05g-sidebar.spec.ts`, `05h-indicators.spec.ts`, `05i-portal.spec.ts` | 26 (8 + 5 + 7 + 6) |
 

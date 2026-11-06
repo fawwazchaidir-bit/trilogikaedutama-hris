@@ -370,13 +370,24 @@ export async function getTeamHeatmap(actor: Actor, raw: unknown = {}): Promise<H
     if (e?.isActive) people = [{ id: e.id, name: e.fullName, divisionId: e.divisionId, divisionName: e.division?.name ?? null }];
   }
 
+  // Rincian tugas (kode & nama proyek, nama tugas) hanya dari proyek yang BOLEH dibuka pelaku. Beban (jam, persen) tetap menghitung semua tugas
+  // orang itu, tetapi tugas di proyek lain hanya tampil sebagai satu baris "Proyek lain" tanpa identitas proyek/tugas.
+  const visible = all ? null : new Set((await prisma.trainingProject.findMany({ where: accessibleProjectWhere(actor, mod), select: { id: true } })).map((x) => x.id));
+
   const rows: HeatmapRow[] = people.map((p) => {
     const weeks = env.weeks.map((w) => weekLoadOf(env, p.id, w));
     const peak = Math.max(...weeks.map((w) => w.pct));
     const overloaded = weeks.map((w) => w.band === "OVERLOAD");
     return {
       employeeId: p.id, name: p.name, division: p.divisionName,
-      weeks: weeks.map((w) => ({ ...w, items: env.tasksOf(p.id).map((t) => ({ t, h: taskHoursInWeek(t, w.weekStart, env.capacityOf(p.id).cal) })).filter((x) => x.h > 0).map((x) => ({ projectCode: x.t.projectCode, projectName: x.t.projectName, task: x.t.task, hours: Math.round(x.h * 10) / 10 })) })),
+      weeks: weeks.map((w) => {
+        const used = env.tasksOf(p.id).map((t) => ({ t, h: taskHoursInWeek(t, w.weekStart, env.capacityOf(p.id).cal) })).filter((x) => x.h > 0);
+        const items: HeatmapRow["weeks"][number]["items"] = used.filter((x) => !visible || visible.has(x.t.projectId))
+          .map((x) => ({ projectCode: x.t.projectCode, projectName: x.t.projectName, task: x.t.task, hours: Math.round(x.h * 10) / 10 }));
+        const hidden = used.filter((x) => visible && !visible.has(x.t.projectId)).reduce((a, x) => a + x.h, 0);
+        if (hidden > 0) items.push({ projectCode: "Proyek lain", projectName: "Proyek lain", task: "(di luar akses Anda)", hours: Math.round(hidden * 10) / 10 });
+        return { ...w, items };
+      }),
       peak, peakBand: loadBand(peak, th), overloadStreak: overloaded.some((v, i) => v && overloaded[i + 1] === true),
     };
   });

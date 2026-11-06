@@ -14,7 +14,7 @@ import { addMember, changeProjectStatus, createProject, endMember, getProject, l
 import { changeTaskStatus, addComment, createTask, getTask, listChecklist, listProjectTasks, updateChecklistItem, addChecklistItem, saveTemplate, applyChecklistTemplate } from "@/server/services/training/work";
 import { addParticipant, createSchedule, listProjectParticipants, updateParticipant, updateSchedule, uploadDocument } from "@/server/services/training/operations";
 import { getTrainingDashboard } from "@/server/services/training/insights";
-import { listAccessRows, listDirectory, revokeAccessLevel, setAccessLevel } from "@/server/services/training/access";
+import { canUserViewProject, listAccessRows, listDirectory, loadProjectAccess, revokeAccessLevel, setAccessLevel } from "@/server/services/training/access";
 
 let fx: TrainingFixtures;
 beforeEach(async () => {
@@ -292,5 +292,29 @@ describe("penjaga database (defense in depth)", () => {
     const tpl = await prisma.trainingChecklistTemplate.findFirstOrThrow();
     await applyChecklistTemplate(fx.mgr, id, { templateId: tpl.id });
     expect({ u: await prisma.user.count(), e: await prisma.employee.count(), roles: await prisma.user.findMany({ select: { id: true, role: true }, orderBy: { id: "asc" } }) }).toEqual(before);
+  });
+});
+
+describe("canUserViewProject — aturan yang sama dengan gerbang proyek, untuk pekerja latar belakang", () => {
+  it("anggota aktif ya; setelah keanggotaan diakhiri tidak; Manajer/Pemantau/Super Admin ya tanpa keanggotaan; karyawan tanpa level tidak", async () => {
+    const id = await mkProject(fx.mgr, {});
+    await addTeam(fx.mgr, id, [[fx.empIds[0], "STAFF"]]);
+    const subj = (a: { userId: string; employeeId: string | null }, role: "EMPLOYEE" | "SUPER_ADMIN" = "EMPLOYEE") => ({ userId: a.userId, role, employeeId: a.employeeId });
+    const can = (a: Parameters<typeof subj>[0], role?: "EMPLOYEE" | "SUPER_ADMIN") => canUserViewProject(prisma, subj(a, role), id);
+
+    expect(await can(fx.emp1)).toBe(true);
+    expect(await can(fx.emp2)).toBe(false); // bukan anggota
+    expect(await can(fx.mgr)).toBe(true); // level MANAGER
+    expect(await can(fx.viewer)).toBe(true); // level VIEWER
+    expect(await can(fx.superAdmin, "SUPER_ADMIN")).toBe(true);
+    expect(await can(fx.loner)).toBe(false);
+
+    const m = await prisma.trainingProjectMember.findFirstOrThrow({ where: { projectId: id, employeeId: fx.empIds[0], endedAt: null } });
+    await endMember(fx.mgr, id, m.id);
+    expect(await can(fx.emp1)).toBe(false);
+
+    // identik dengan gerbang yang dipakai halaman/API: yang ditolak di sini juga 404 di sana
+    expect(await fail(loadProjectAccess(fx.emp1, id))).toMatchObject(NOT_FOUND);
+    await expect(loadProjectAccess(fx.mgr, id)).resolves.toBeTruthy();
   });
 });

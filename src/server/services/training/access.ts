@@ -1,6 +1,6 @@
 import "server-only";
 import { z } from "zod";
-import type { Prisma } from "@prisma/client";
+import type { Prisma, Role } from "@prisma/client";
 import { prisma, transaction, type Tx } from "../../db";
 import { trainingEnabled } from "../../env";
 import { Errors } from "../../errors";
@@ -121,6 +121,21 @@ export function assertEditable(project: Pick<ProjectCore, "status">): void {
       ? "Proyek sudah ditutup (Selesai) sehingga datanya dikunci. Manajer Program dapat membukanya kembali dengan alasan."
       : "Proyek sudah dibatalkan sehingga datanya dikunci.");
   }
+}
+
+/**
+ * Apakah akun ini MASIH boleh membuka proyek? Untuk pekerja latar belakang yang tidak punya `Actor` (mis. penerima pengingat).
+ * Aturannya identik dengan `loadProjectAccess`: kemampuan `view` dari level modul / Super Admin atau dari peran proyek yang masih AKTIF
+ * (keanggotaan yang sudah diakhiri tidak dihitung).
+ */
+export async function canUserViewProject(db: Db, subject: { userId: string; role: Role; employeeId: string | null }, projectId: string): Promise<boolean> {
+  const level = await getLevel(db, subject.userId);
+  let memberRole: ProjectRole | null = null;
+  if (subject.employeeId) {
+    const m = await db.trainingProjectMember.findFirst({ where: { projectId, employeeId: subject.employeeId, endedAt: null }, select: { role: true } });
+    memberRole = m?.role ?? null;
+  }
+  return projectAbilities({ role: subject.role, level }, memberRole).has("view");
 }
 
 /** Klausa `where` Prisma: proyek yang boleh dilihat pelaku. Dipakai SEMUA daftar/dashboard/laporan. */

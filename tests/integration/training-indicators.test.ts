@@ -16,7 +16,7 @@ import {
   regenerateProjectWorkload, reopenMilestone, setReadinessStatus, updateMilestone, upsertStaffCapacity,
 } from "@/server/services/training/indicator-data";
 import { getClassDensity, getProgramIndicators, getTeamHeatmap, listProgramCards } from "@/server/services/training/indicator-compute";
-import { createProject, getProject, updateProject } from "@/server/services/training/projects";
+import { createProject, endMember, getProject, updateProject } from "@/server/services/training/projects";
 import { addParticipant, listProjectParticipants, updateParticipant } from "@/server/services/training/operations";
 
 let fx: TrainingFixtures;
@@ -501,6 +501,39 @@ describe("Beban Tim", () => {
     expect(mine.rows.map((r) => r.employeeId)).toEqual([fx.empIds[0]]);
     expect(mine.divisions).toEqual([]);
     expect((await fail(getTeamHeatmap(fx.loner)))?.status).toBe(404);
+  });
+
+  it("peta beban staf biasa: rincian tugas hanya dari proyek yang boleh dibuka; proyek lain (bukan anggota / keanggotaan berakhir) hanya 'Proyek lain' — beban tetap utuh", async () => {
+    const ayu = fx.emp1, e = fx.empIds[0];
+    const whole = { startDate: week(), endDate: endOfIsoWeek(week()) };
+    const proj = async (name: string) => {
+      const id = await mkProject(fx.mgr, { name });
+      return { id, code: (await prisma.trainingProject.findUniqueOrThrow({ where: { id } })).code };
+    };
+    const own = await proj("Pelatihan Milik Ayu");
+    const secret = await proj("Proyek Rahasia Klien X");
+    const left = await proj("Proyek Yang Sudah Ditinggalkan");
+    await addTeam(fx.mgr, own.id, [[e, "STAFF"]]);
+    await addTeam(fx.mgr, left.id, [[e, "STAFF"]]);
+    await endMember(fx.mgr, left.id, (await prisma.trainingProjectMember.findFirstOrThrow({ where: { projectId: left.id, employeeId: e, endedAt: null } })).id);
+    await addWorkloadTask(fx.mgr, own.id, { employeeId: e, name: "Menyusun silabus", hours: 10, ...whole });
+    await addWorkloadTask(fx.mgr, secret.id, { employeeId: e, name: "Negosiasi kontrak rahasia", hours: 8, ...whole });
+    await addWorkloadTask(fx.mgr, left.id, { employeeId: e, name: "Tugas proyek lama", hours: 2, ...whole });
+
+    const mine = (await getTeamHeatmap(ayu)).rows.find((r) => r.employeeId === e)!;
+    const w0 = mine.weeks[0]!;
+    expect(w0.hours).toBe(20); // beban nyata (10 + 8 + 2) tidak dikurangi
+    expect(w0.items).toEqual([
+      { projectCode: own.code, projectName: "Pelatihan Milik Ayu", task: "Menyusun silabus", hours: 10 },
+      { projectCode: "Proyek lain", projectName: "Proyek lain", task: "(di luar akses Anda)", hours: 10 },
+    ]);
+    const dump = JSON.stringify(mine);
+    for (const secretText of [secret.code, "Rahasia Klien", "Negosiasi", left.code, "Ditinggalkan", "proyek lama"]) expect(dump).not.toContain(secretText);
+
+    // yang boleh melihat semua proyek tetap melihat rincian lengkap, dengan beban yang sama
+    const full = (await getTeamHeatmap(fx.viewer)).rows.find((r) => r.employeeId === e)!;
+    expect(full.weeks[0]!.hours).toBe(20);
+    expect(full.weeks[0]!.items.map((i) => i.task).sort()).toEqual(["Menyusun silabus", "Negosiasi kontrak rahasia", "Tugas proyek lama"]);
   });
 
   it("beban program = beban tertinggi staf pemegang milestone yang masih terbuka; nama hanya terlihat bagi yang boleh melihat semua proyek", async () => {

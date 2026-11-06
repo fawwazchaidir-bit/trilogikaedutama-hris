@@ -7,6 +7,7 @@ import { addDays } from "@/lib/time";
 import type { IndicatorConfig } from "@/lib/training/indicators/config";
 import { resolveDueMap, resolveOffset } from "@/lib/training/indicators/engine";
 import { decideProgramEscalations, type EscalationEvent, type RecipientSpec } from "@/lib/training/indicators/escalation";
+import { canUserViewProject } from "./access";
 import { computeActivePrograms, loadData, loadSnapshots, runsOf, weekLoadOf, type Env, type ProgramIndicatorDto } from "./indicator-compute";
 import { dateCtx, specOf, toProgramRow } from "./indicator-data";
 
@@ -36,6 +37,22 @@ class Recipients {
     if (e?.isActive && e.userId) id = (await prisma.user.findFirst({ where: { id: e.userId, isActive: true }, select: { id: true } }))?.id ?? null;
     this.userCache.set(employeeId, id);
     return id;
+  }
+  private viewCache = new Map<string, boolean>();
+  /**
+   * Penerima pengingat HARUS masih boleh membuka proyeknya (level modul / Super Admin, atau keanggotaan proyek yang masih aktif): kode proyek
+   * dan judul tugas tidak boleh dikirim ke orang yang sudah dikeluarkan dari proyek. Akun yang tidak terjangkau → false.
+   */
+  async mayView(projectId: string, employeeId: string | null | undefined): Promise<boolean> {
+    if (!employeeId) return false;
+    const key = `${projectId}:${employeeId}`;
+    const hit = this.viewCache.get(key);
+    if (hit !== undefined) return hit;
+    const userId = await this.userOf(employeeId);
+    const user = userId ? await prisma.user.findUnique({ where: { id: userId }, select: { role: true } }) : null;
+    const ok = !!userId && !!user && (await canUserViewProject(prisma, { userId, role: user.role, employeeId }, projectId));
+    this.viewCache.set(key, ok);
+    return ok;
   }
   async directors(): Promise<string[]> {
     return (this.directorCache ??= (await prisma.user.findMany({ where: { isActive: true, role: "SUPER_ADMIN" }, select: { id: true } })).map((u) => u.id));
@@ -179,7 +196,13 @@ async function reminders(env: Env, cfg: IndicatorConfig, rec: Recipients): Promi
       const due = dateToIso(x.dueDate!);
       const when = due === t ? "H" : "H-1";
       if (!userId) continue;
-      out.push({ dedupeKey: `rem:task:${x.id}:${due}:${when}:${userId}`, kind: "reminder.task", projectId: x.project.id, userId, ...msg(when, "Tugas"), body: `${x.project.code} · ${x.title}`, href: "/training/tugas-saya" });
+      if (await rec.mayView(x.project.id, x.assigneeId)) {
+        out.push({ dedupeKey: `rem:task:${x.id}:${due}:${when}:${userId}`, kind: "reminder.task", projectId: x.project.id, userId, ...msg(when, "Tugas"), body: `${x.project.code} · ${x.title}`, href: "/training/tugas-saya" });
+        continue;
+      }
+      // Penanggung jawab sudah tidak boleh membuka proyek ini (keanggotaan berakhir): tidak dikirimi apa pun; PIC yang menindaklanjuti tugas yatim itu.
+      const pic = await rec.userOf(await rec.pic(x.project.id));
+      if (pic) out.push({ dedupeKey: `rem:task:${x.id}:${due}:${when}:${pic}`, kind: "reminder.task", projectId: x.project.id, userId: pic, ...msg(when, "Tugas tanpa penanggung jawab aktif"), body: `${x.project.code} · ${x.title}`, href: `/training/proyek/${x.project.id}?tab=tugas` });
     }
 
     // Milestone & item kesiapan: tenggat dihitung dari tanggal H/T + offset (tidak disimpan).
@@ -189,7 +212,8 @@ async function reminders(env: Env, cfg: IndicatorConfig, rec: Recipients): Promi
       const row = toProgramRow(p);
       const d = data.get(p.id)!;
       const dues = resolveDueMap(d.milestones.map((m) => ({ code: m.code, spec: specOf(m) })), dateCtx(row), env.cal);
-      const picUser = async (assignee: string | null) => (await rec.userOf(assignee)) ?? (await rec.userOf(await rec.pic(p.id)));
+      // Penanggung jawab hanya diingatkan bila masih boleh membuka proyek; selain itu (tak terjangkau / sudah tak punya akses) ke PIC.
+      const picUser = async (assignee: string | null) => ((await rec.mayView(p.id, assignee)) ? await rec.userOf(assignee) : null) ?? (await rec.userOf(await rec.pic(p.id)));
       for (const m of d.milestones) {
         const due = dues.get(m.code) ?? null;
         if (!due || m.doneAt || m.notApplicable || (m.bnspOnly && !p.bnsp)) continue;

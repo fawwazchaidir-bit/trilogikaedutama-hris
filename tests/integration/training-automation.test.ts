@@ -17,6 +17,7 @@ import { getProgramIndicators } from "@/server/services/training/indicator-compu
 import { runTrainingDailyJob } from "@/server/services/training/automation";
 import { addRecoveryNote, listRecoveryNotes } from "@/server/services/training/recovery";
 import { createTask, changeTaskStatus } from "@/server/services/training/work";
+import { endMember } from "@/server/services/training/projects";
 
 let fx: TrainingFixtures;
 let ayu: Actor, budi: Actor, citra: Actor; // pemegang jabatan yang punya akun
@@ -93,6 +94,49 @@ describe("pengingat tenggat H-1 dan hari-H", () => {
     await runTrainingDailyJob();
     await runTrainingDailyJob();
     expect(await notes(budi, "training.reminder.due_today")).toHaveLength(1);
+  });
+
+  it("penanggung jawab yang sudah dikeluarkan dari proyek tidak menerima pengingat tugas (kode proyek & judul tidak terkirim); PIC diberi tahu sebagai tugas tanpa penanggung jawab aktif", async () => {
+    await setConfig();
+    const id = await program(45);
+    await addTeam(fx.mgr, id, [[fx.empIds[1], "STAFF"], [fx.empIds[2], "STAFF"]]);
+    await createTask(fx.mgr, id, { title: "Tugas Budi yang keluar", assigneeId: fx.empIds[1], dueDate: inDays(1) });
+    await createTask(fx.mgr, id, { title: "Tugas Citra yang tetap", assigneeId: fx.empIds[2], dueDate: inDays(1) });
+    await endMember(fx.mgr, id, (await prisma.trainingProjectMember.findFirstOrThrow({ where: { projectId: id, employeeId: fx.empIds[1], endedAt: null } })).id);
+
+    await runTrainingDailyJob();
+    const code = (await prisma.trainingProject.findUniqueOrThrow({ where: { id } })).code;
+    // (pemberitahuan "ditambahkan"/"tugas baru" dari saat ia masih anggota memang ada; yang dilarang adalah keluaran pekerja: pengingat & eskalasi)
+    const budiGot = await prisma.notification.findMany({ where: { userId: budi.userId, OR: [{ type: { startsWith: "training.reminder" } }, { type: { startsWith: "training.escalation" } }] } });
+    expect(budiGot.filter((n) => n.body?.includes("Tugas Budi") || n.body?.includes(code) || n.title.includes(code))).toHaveLength(0);
+
+    const orphan = (await notes(ayu, "training.reminder.due_tomorrow")).find((n) => n.body!.includes("Tugas Budi yang keluar"))!;
+    expect(orphan.title).toBe("Tugas tanpa penanggung jawab aktif jatuh tempo besok");
+    expect(orphan.href).toBe(`/training/proyek/${id}?tab=tugas`);
+    expect((await notes(citra, "training.reminder.due_tomorrow")).some((n) => n.title === "Tugas jatuh tempo besok" && n.body!.includes("Tugas Citra yang tetap"))).toBe(true);
+    expect((await runTrainingDailyJob()).reminders).toBe(0); // tetap idempoten
+  });
+
+  it("milestone & item kesiapan: pemegang jabatan yang bukan anggota proyek dan tanpa level modul tidak diingatkan (PIC yang menerima); setelah menjadi anggota ia diingatkan", async () => {
+    await setConfig();
+    // PIC = Citra. Ayu pemegang SPV_CURRICULUM (R07, "Silabus dan RPP final") tetapi BUKAN anggota proyek dan tanpa level modul.
+    const id = await mkProject(fx.mgr, { startDate: inDays(18), endDate: inDays(19) });
+    await addTeam(fx.mgr, id, [[fx.empIds[2], "PROJECT_MANAGER"]]);
+    await prisma.trainingProject.update({ where: { id }, data: { status: "PREPARATION" } });
+    const code = (await prisma.trainingProject.findUniqueOrThrow({ where: { id } })).code;
+    const forProject = <T extends { body: string | null }>(list: T[]) => list.filter((n) => n.body?.includes(code));
+
+    await runTrainingDailyJob();
+    expect(forProject(await notes(ayu, "training.reminder.due_tomorrow"))).toHaveLength(0);
+    const pic = forProject(await notes(citra, "training.reminder.due_tomorrow"));
+    expect(pic.some((n) => n.title === "Milestone jatuh tempo besok" && n.body!.includes("R07"))).toBe(true);
+    expect(pic.some((n) => n.title === "Item kesiapan jatuh tempo besok" && n.body!.includes("Silabus dan RPP final"))).toBe(true);
+
+    // setelah ditambahkan sebagai anggota, Ayu boleh membuka proyek → pengingat ke dirinya berjalan
+    await addTeam(fx.mgr, id, [[fx.empIds[0], "STAFF"]]);
+    await runTrainingDailyJob();
+    const got = forProject(await notes(ayu, "training.reminder.due_tomorrow"));
+    expect(got.some((n) => n.title === "Milestone jatuh tempo besok" && n.body!.includes("R07"))).toBe(true);
   });
 
   it("milestone & item kesiapan: pengingat ke PIC-nya (pemegang jabatan) H-1; selesai / tidak berlaku tidak diingatkan", async () => {
