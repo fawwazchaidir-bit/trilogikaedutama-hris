@@ -2,7 +2,7 @@
  * Training & Operations — OTOMASI: snapshot status harian, eskalasi otomatis (dokumen §5.2), aturan "Kuning berturut-turut",
  * pengingat tenggat H-1 / hari-H, dan catatan pemulihan. Pekerja dipanggil langsung (`runTrainingDailyJob`) dan dijamin idempoten.
  */
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { prisma } from "@/server/db";
 import { AppError } from "@/server/errors";
 import { isoToDate } from "@/server/json";
@@ -212,6 +212,11 @@ describe("pengingat tenggat H-1 dan hari-H", () => {
 });
 
 describe("snapshot status & eskalasi Merah", () => {
+  // Eskalasi Merah/Kuning berbasis HARI KERJA (akhir pekan tidak memicu). Bila tes dijalankan pada Sabtu/Minggu, jam aplikasi dipatok ke hari kerja terakhir
+  // agar hasilnya tidak bergantung pada hari tes dijalankan (jam tetap berjalan; hanya Date yang dipatok).
+  beforeEach(() => { if (!isWork(TODAY())) vi.useFakeTimers({ now: new Date(`${lastWorkday(TODAY())}T03:00:00Z`), toFake: ["Date"], shouldAdvanceTime: true }); });
+  afterEach(() => { vi.useRealTimers(); });
+
   it("snapshot harian disimpan satu per program per tanggal (menimpa bila dijalankan lagi)", async () => {
     await setConfig();
     const id = await program(2);
@@ -272,7 +277,7 @@ describe("snapshot status & eskalasi Merah", () => {
 
   it("tanpa pemegang jabatan terisi, pesan Merah tidak hilang: jatuh ke Direktur (Super Admin)", async () => {
     const id = await program(2);
-    await prisma.trainingProjectMember.updateMany({ where: { projectId: id, role: "PROJECT_MANAGER" }, data: { endedAt: new Date(Date.now() + 1000) } });
+    await prisma.trainingProjectMember.updateMany({ where: { projectId: id, role: "PROJECT_MANAGER" }, data: { endedAt: new Date("2100-01-01T00:00:00Z") } }); // tanggal tetap: jam basis data bisa berbeda dari jam aplikasi yang dipatok
     await runTrainingDailyJob();
     expect((await notes(fx.superAdmin, "training.escalation.red")).length).toBeGreaterThanOrEqual(1);
   });

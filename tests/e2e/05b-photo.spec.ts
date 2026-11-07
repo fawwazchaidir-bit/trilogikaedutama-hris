@@ -93,7 +93,7 @@ test("HR melihat foto absensi di rincian rekap; berkas JPEG nyata (bercap), hany
   const found = (await (await hr.request.get("/api/employees?q=Budi")).json()).data.items as { id: string; fullName: string }[];
   const employeeId = found.find((e) => /^Budi/.test(e.fullName))!.id;
   await hr.goto(`/rekap/${employeeId}?view=bulanan`);
-  const link = hr.getByRole("link", { name: "Masuk" }).first();
+  const link = hr.getByRole("main").getByRole("link", { name: "Masuk", exact: true }).first(); // area utama saja: menu samping punya "Masuk & Berhenti"
   await expect(link).toBeVisible();
   const href = (await link.getAttribute("href"))!;
   expect(href).toMatch(/^\/api\/files\/[0-9a-f-]{36}$/);

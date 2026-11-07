@@ -84,9 +84,9 @@ export function EmployeeFormDialog({ open, onClose, employee, divisions, today }
         <TextField label="Email" type="email" value={form.email} onChange={(e) => set("email", e.target.value)} error={fe.email} />
         <fieldset className="grid gap-4 rounded-md border border-line p-4 sm:col-span-2 sm:grid-cols-3">
           <legend className="px-1 text-sm font-medium text-ink-soft">Kontak darurat (dilengkapi saat karyawan masuk)</legend>
-          <TextField label="Nama" value={form.emergencyContactName} onChange={(e) => set("emergencyContactName", e.target.value)} error={fe.emergencyContactName} />
-          <TextField label="Hubungan" placeholder="Mis. istri, orang tua" value={form.emergencyContactRelation} onChange={(e) => set("emergencyContactRelation", e.target.value)} error={fe.emergencyContactRelation} />
-          <TextField label="Telepon" inputMode="tel" value={form.emergencyContactPhone} onChange={(e) => set("emergencyContactPhone", e.target.value)} error={fe.emergencyContactPhone} />
+          <TextField label="Nama kontak darurat" value={form.emergencyContactName} onChange={(e) => set("emergencyContactName", e.target.value)} error={fe.emergencyContactName} />
+          <TextField label="Hubungan kontak darurat" placeholder="Mis. istri, orang tua" value={form.emergencyContactRelation} onChange={(e) => set("emergencyContactRelation", e.target.value)} error={fe.emergencyContactRelation} />
+          <TextField label="No. HP kontak darurat" inputMode="tel" value={form.emergencyContactPhone} onChange={(e) => set("emergencyContactPhone", e.target.value)} error={fe.emergencyContactPhone} />
         </fieldset>
         <div className="sm:col-span-2"><TextAreaField label="Alamat" rows={2} value={form.address} onChange={(e) => set("address", e.target.value)} error={fe.address} /></div>
         <fieldset className="grid gap-4 rounded-md border border-line p-4 sm:col-span-2 sm:grid-cols-3">
