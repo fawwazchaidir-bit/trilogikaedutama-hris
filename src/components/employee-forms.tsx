@@ -17,18 +17,21 @@ interface Div { id: string; name: string }
 type Form = {
   employeeNo: string; fullName: string; divisionId: string; position: string; employmentStatus: EmploymentStatus; joinDate: string;
   phone: string; email: string; address: string; bankName: string; bankAccountNo: string; clearBank: boolean; bankAccountHolder: string; notes: string;
+  emergencyContactName: string; emergencyContactRelation: string; emergencyContactPhone: string;
   taxStatus: TaxStatus; hasNpwp: boolean; bpjsHealthEnrolled: boolean; bpjsEmploymentEnrolled: boolean;
 };
 
 const blank = (today: string): Form => ({
   employeeNo: "", fullName: "", divisionId: "", position: "", employmentStatus: "PERMANENT", joinDate: today, phone: "", email: "", address: "",
   bankName: "", bankAccountNo: "", clearBank: false, bankAccountHolder: "", notes: "",
+  emergencyContactName: "", emergencyContactRelation: "", emergencyContactPhone: "",
   taxStatus: "TK0", hasNpwp: true, bpjsHealthEnrolled: true, bpjsEmploymentEnrolled: true,
 });
 const fromDto = (e: EmployeeDto): Form => ({
   employeeNo: e.employeeNo, fullName: e.fullName, divisionId: e.divisionId ?? "", position: e.position, employmentStatus: e.employmentStatus, joinDate: e.joinDate,
   phone: e.phone ?? "", email: e.email ?? "", address: e.address ?? "", bankName: e.bankName ?? "", bankAccountNo: "", clearBank: false,
   bankAccountHolder: e.bankAccountHolder ?? "", notes: e.notes ?? "",
+  emergencyContactName: e.emergencyContactName ?? "", emergencyContactRelation: e.emergencyContactRelation ?? "", emergencyContactPhone: e.emergencyContactPhone ?? "",
   taxStatus: e.taxStatus, hasNpwp: e.hasNpwp, bpjsHealthEnrolled: e.bpjsHealthEnrolled, bpjsEmploymentEnrolled: e.bpjsEmploymentEnrolled,
 });
 
@@ -46,6 +49,7 @@ export function EmployeeFormDialog({ open, onClose, employee, divisions, today }
     const body = {
       employeeNo: form.employeeNo, fullName: form.fullName, divisionId: form.divisionId || null, position: form.position, employmentStatus: form.employmentStatus,
       joinDate: form.joinDate, phone: form.phone, email: form.email, address: form.address, bankName: form.bankName, bankAccountHolder: form.bankAccountHolder, notes: form.notes,
+      emergencyContactName: form.emergencyContactName, emergencyContactRelation: form.emergencyContactRelation, emergencyContactPhone: form.emergencyContactPhone,
       taxStatus: form.taxStatus, hasNpwp: form.hasNpwp, bpjsHealthEnrolled: form.bpjsHealthEnrolled, bpjsEmploymentEnrolled: form.bpjsEmploymentEnrolled,
       ...(form.clearBank ? { bankAccountNo: null } : form.bankAccountNo.trim() ? { bankAccountNo: form.bankAccountNo.trim() } : {}),
     };
@@ -78,6 +82,12 @@ export function EmployeeFormDialog({ open, onClose, employee, divisions, today }
         <TextField label="Tanggal mulai bekerja" type="date" required value={form.joinDate} onChange={(e) => set("joinDate", e.target.value)} error={fe.joinDate} />
         <TextField label="Telepon" inputMode="tel" value={form.phone} onChange={(e) => set("phone", e.target.value)} error={fe.phone} />
         <TextField label="Email" type="email" value={form.email} onChange={(e) => set("email", e.target.value)} error={fe.email} />
+        <fieldset className="grid gap-4 rounded-md border border-line p-4 sm:col-span-2 sm:grid-cols-3">
+          <legend className="px-1 text-sm font-medium text-ink-soft">Kontak darurat (dilengkapi saat karyawan masuk)</legend>
+          <TextField label="Nama" value={form.emergencyContactName} onChange={(e) => set("emergencyContactName", e.target.value)} error={fe.emergencyContactName} />
+          <TextField label="Hubungan" placeholder="Mis. istri, orang tua" value={form.emergencyContactRelation} onChange={(e) => set("emergencyContactRelation", e.target.value)} error={fe.emergencyContactRelation} />
+          <TextField label="Telepon" inputMode="tel" value={form.emergencyContactPhone} onChange={(e) => set("emergencyContactPhone", e.target.value)} error={fe.emergencyContactPhone} />
+        </fieldset>
         <div className="sm:col-span-2"><TextAreaField label="Alamat" rows={2} value={form.address} onChange={(e) => set("address", e.target.value)} error={fe.address} /></div>
         <fieldset className="grid gap-4 rounded-md border border-line p-4 sm:col-span-2 sm:grid-cols-3">
           <legend className="px-1 text-sm font-medium text-ink-soft">Rekening pembayaran gaji (opsional)</legend>

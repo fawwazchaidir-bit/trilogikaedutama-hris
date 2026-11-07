@@ -120,6 +120,7 @@ export const NAV_ITEMS: readonly NavItem[] = [
   { href: "/profil", label: "Profil & Jadwal", selfService: true, group: "saya" },
   { href: "/akun", label: "Keamanan & Notifikasi", group: "saya" },
   { href: "/karyawan", label: "Karyawan", anyOf: ["employee:view"], group: "sdm" },
+  { href: "/masuk-berhenti", label: "Masuk & Berhenti", anyOf: ["employee:view"], group: "sdm" },
   { href: "/jadwal", label: "Jadwal & Libur", anyOf: ["schedule:manage"], group: "sdm" },
   { href: "/absensi", label: "Absensi", anyOf: ["attendance:view_all"], group: "sdm" },
   { href: "/pengajuan", label: "Pengajuan & Cuti", anyOf: ["leave:view_all"], group: "sdm" },

@@ -12,6 +12,7 @@ import { AppShell } from "@/components/app-shell";
 import { cookies } from "next/headers";
 import { NAV_PREF_COOKIE, parseNavPref } from "@/lib/nav-pref";
 import { teamPendingCount } from "@/server/services/org";
+import { openChecklistCount } from "@/server/services/employee-checklists";
 import { countMyOverdueTasks } from "@/server/services/training/work";
 import pkg from "../../../package.json";
 
@@ -31,11 +32,12 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     can(user.role, "assignment:manage") ? pendingAllowanceCount() : Promise.resolve(0),
   ]);
   const teamPending = teamIds.length ? await teamPendingCount(user, teamIds) : 0;
+  const openLifecycle = can(user.role, "employee:view") ? await openChecklistCount() : 0;
   return (
     <AppShell
       initialNav={navPref} hasEmployee={!!user.employeeId} canSearchProjects={trainingVisible} version={pkg.version}
       user={{ name: user.name, email: user.email, role: user.role, isDemo: user.isDemo }}
-      nav={nav} company={brand} unread={unread} pendingBadges={[{ href: "/pengajuan", count: pending }, { href: "/lembur", count: pendingOt }, { href: "/lokasi", count: openLoc }, { href: "/dokumen", count: docAttention }, { href: "/surat-tugas", count: pendingAllowance }, { href: "/training/tugas-saya", count: overdueTasks }, { href: "/persetujuan-tim", count: teamPending }]}
+      nav={nav} company={brand} unread={unread} pendingBadges={[{ href: "/pengajuan", count: pending }, { href: "/lembur", count: pendingOt }, { href: "/lokasi", count: openLoc }, { href: "/dokumen", count: docAttention }, { href: "/surat-tugas", count: pendingAllowance }, { href: "/training/tugas-saya", count: overdueTasks }, { href: "/persetujuan-tim", count: teamPending }, { href: "/masuk-berhenti", count: openLifecycle }]}
     >
       {children}
     </AppShell>

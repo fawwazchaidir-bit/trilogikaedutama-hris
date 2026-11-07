@@ -14,8 +14,9 @@ import { isoDate, optionalEmail, optionalPhone, optionalText, requiredText, uuid
 import { maskAccount } from "@/lib/payroll";
 import { TAX_STATUSES, type TaxStatus } from "@/lib/statutory";
 import { EMPLOYMENT_LABEL, type EmploymentStatus } from "@/lib/labels";
-import { todayIso } from "@/lib/time";
+import { addDays, todayIso } from "@/lib/time";
 import { ensureOrgBaseline, recordOrgChangeFromUpdate } from "./org";
+import { autoTarget, startChecklistIfNone } from "./employee-checklists";
 import type { Paged } from "@/lib/types";
 
 // ─────────────────────────── Skema ───────────────────────────
@@ -41,6 +42,10 @@ export const employeeSchema = z.object({
   bankAccountNo: accountNo,
   bankAccountHolder: optionalText(120, "Nama pemilik rekening"),
   notes: optionalText(500, "Catatan"),
+  /** Kontak darurat (dilengkapi saat karyawan masuk). undefined/kosong = tidak ada. */
+  emergencyContactName: optionalText(100, "Nama kontak darurat"),
+  emergencyContactRelation: optionalText(50, "Hubungan kontak darurat"),
+  emergencyContactPhone: optionalPhone,
   // Atribut statutori (dipakai bila BPJS/PPh 21 otomatis aktif). undefined = tidak diubah (bawaan saat membuat).
   taxStatus: z.enum(TAX_STATUSES as unknown as [TaxStatus, ...TaxStatus[]]).optional(),
   hasNpwp: z.boolean().optional(),
@@ -78,6 +83,9 @@ export interface EmployeeDto {
   photoUrl: string | null;
   isActive: boolean;
   notes: string | null;
+  emergencyContactName: string | null;
+  emergencyContactRelation: string | null;
+  emergencyContactPhone: string | null;
   userId: string | null;
   userEmail: string | null;
   taxStatus: TaxStatus;
@@ -94,7 +102,7 @@ export const toEmployeeDto = (e: Row): EmployeeDto => ({
   position: e.position, employmentStatus: e.employmentStatus, joinDate: dateToIso(e.joinDate), endDate: e.endDate ? dateToIso(e.endDate) : null,
   phone: e.phone, email: e.email, address: e.address, bankName: e.bankName, bankAccountMasked: maskAccount(e.bankAccountLast4),
   bankAccountHolder: e.bankAccountHolder, photoUrl: e.photoFileId ? `/api/files/${e.photoFileId}` : null,
-  isActive: e.isActive, notes: e.notes, userId: e.userId, userEmail: e.user?.email ?? null,
+  isActive: e.isActive, notes: e.notes, emergencyContactName: e.emergencyContactName, emergencyContactRelation: e.emergencyContactRelation, emergencyContactPhone: e.emergencyContactPhone, userId: e.userId, userEmail: e.user?.email ?? null,
   taxStatus: e.taxStatus, hasNpwp: e.hasNpwp, bpjsHealthEnrolled: e.bpjsHealthEnrolled, bpjsEmploymentEnrolled: e.bpjsEmploymentEnrolled,
 });
 
@@ -237,6 +245,7 @@ export async function createEmployee(actor: Actor, raw: unknown): Promise<Employ
         employeeNo: input.employeeNo, fullName: input.fullName, divisionId: input.divisionId ?? null, position: input.position,
         employmentStatus: input.employmentStatus, joinDate: isoToDate(input.joinDate), phone: input.phone, email: input.email,
         address: input.address, bankName: input.bankName, bankAccountHolder: input.bankAccountHolder, notes: input.notes,
+        emergencyContactName: input.emergencyContactName, emergencyContactRelation: input.emergencyContactRelation, emergencyContactPhone: input.emergencyContactPhone,
         ...bankFields(input),
         ...statutoryFields(input, input.employmentStatus === "INTERN" ? { bpjsHealthEnrolled: false, bpjsEmploymentEnrolled: false } : {}),
       },
@@ -247,6 +256,8 @@ export async function createEmployee(actor: Actor, raw: unknown): Promise<Employ
       after: { employeeNo: e.employeeNo, fullName: e.fullName, position: e.position, employmentStatus: e.employmentStatus, joinDate: input.joinDate },
     });
     await ensureOrgBaseline(tx, actor, e.id); // riwayat jabatan dimulai dari data awal
+    // Karyawan yang BARU bergabung langsung mendapat checklist masuk (data lama/impor tidak dibanjiri checklist).
+    if (input.joinDate >= addDays(todayIso(env().APP_TIMEZONE), -30)) await startChecklistIfNone(tx, actor, e.id, "ONBOARDING", { targetDate: autoTarget(input.joinDate, 14), note: "Dimulai otomatis saat karyawan ditambahkan" });
     return toEmployeeDto(e);
   });
 }
@@ -265,6 +276,7 @@ export async function updateEmployee(actor: Actor, id: string, raw: unknown): Pr
       employeeNo: input.employeeNo, fullName: input.fullName, divisionId: input.divisionId ?? null, position: input.position,
       employmentStatus: input.employmentStatus, joinDate: isoToDate(input.joinDate), phone: input.phone, email: input.email,
       address: input.address, bankName: input.bankName, bankAccountHolder: input.bankAccountHolder, notes: input.notes,
+      emergencyContactName: input.emergencyContactName, emergencyContactRelation: input.emergencyContactRelation, emergencyContactPhone: input.emergencyContactPhone,
       ...bankFields(input),
       ...statutoryFields(input),
     } satisfies Prisma.EmployeeUncheckedUpdateInput;
@@ -274,6 +286,7 @@ export async function updateEmployee(actor: Actor, id: string, raw: unknown): Pr
       employeeNo: r.employeeNo, fullName: r.fullName, divisionId: r.divisionId, position: r.position, employmentStatus: r.employmentStatus,
       joinDate: dateToIso(r.joinDate), phone: r.phone, email: r.email, address: r.address, bankName: r.bankName,
       bankAccountHolder: r.bankAccountHolder, bankAccountLast4: r.bankAccountLast4, notes: r.notes,
+      emergencyContactName: r.emergencyContactName, emergencyContactRelation: r.emergencyContactRelation, emergencyContactPhone: r.emergencyContactPhone,
       taxStatus: r.taxStatus, hasNpwp: r.hasNpwp, bpjsHealthEnrolled: r.bpjsHealthEnrolled, bpjsEmploymentEnrolled: r.bpjsEmploymentEnrolled,
     });
     const d = diffFields(flat(before), flat(e));
@@ -318,6 +331,8 @@ export async function deactivateEmployee(actor: Actor, id: string, raw: unknown)
       await tx.session.updateMany({ where: { userId: e.userId, revokedAt: null }, data: { revokedAt: new Date() } });
     }
     await writeAudit(tx, actor, { action: "employee.deactivate", entityType: "Employee", entityId: id, summary: `Karyawan ${e.fullName} dinonaktifkan (berhenti ${endDate})`, reason: input.reason, after: { endDate } });
+    // Proses berhenti tidak boleh terlupa: checklist berhenti dimulai otomatis bila belum ada yang berjalan.
+    await startChecklistIfNone(tx, actor, id, "OFFBOARDING", { targetDate: autoTarget(endDate, 14), note: "Dimulai otomatis saat karyawan dinonaktifkan" });
   });
 }
 

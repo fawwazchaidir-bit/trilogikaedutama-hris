@@ -36,6 +36,24 @@ enum ReviewCapacity {
   HR
 }
 
+/// Checklist siklus karyawan: proses MASUK (onboarding) dan BERHENTI (offboarding). Cukup berupa daftar centang untuk tim kecil.
+enum ChecklistKind {
+  ONBOARDING
+  OFFBOARDING
+}
+
+enum ChecklistStatus {
+  OPEN
+  COMPLETED
+  CANCELLED
+}
+
+enum ChecklistItemStatus {
+  TODO
+  DONE
+  NOT_APPLICABLE
+}
+
 enum EmploymentStatus {
   PERMANENT
   CONTRACT
@@ -405,6 +423,55 @@ model PasswordResetToken {
 
 /// Riwayat divisi/jabatan/status/atasan seorang karyawan. APPEND-ONLY (trigger). Kolom pada `employees` = keadaan SAAT INI;
 /// baris di sini = jejak tiap perubahan beserta tanggal mulai berlakunya. Karyawan lama tanpa riwayat mendapat baris awal saat pertama kali diubah.
+/// Satu proses masuk/berhenti seorang karyawan: daftar centang. Satu yang TERBUKA per (karyawan, jenis) — indeks unik parsial pada migrasi.
+/// Tidak dihapus; yang selesai/dibatalkan terkunci (trigger).
+model EmployeeChecklist {
+  id            String          @id @default(uuid()) @db.Uuid
+  employeeId    String          @db.Uuid
+  kind          ChecklistKind
+  status        ChecklistStatus @default(OPEN)
+  /// Target selesai (opsional); lewat target = "terlambat".
+  targetDate    DateTime?       @db.Date
+  note          String?
+  startedById   String          @db.Uuid
+  startedAt     DateTime        @default(now())
+  completedById String?         @db.Uuid
+  completedAt   DateTime?
+  cancelledById String?         @db.Uuid
+  cancelledAt   DateTime?
+  cancelReason  String?
+
+  employee Employee                @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  items    EmployeeChecklistItem[]
+
+  @@index([employeeId, kind, status])
+  @@index([status, targetDate])
+  @@map("employee_checklists")
+}
+
+model EmployeeChecklistItem {
+  id          String              @id @default(uuid()) @db.Uuid
+  checklistId String              @db.Uuid
+  /// Kunci butir dari template bawaan, atau "custom-…" untuk butir tambahan HR. Unik per checklist.
+  key         String
+  groupLabel  String
+  title       String
+  hint        String?
+  required    Boolean             @default(true)
+  sortOrder   Int
+  status      ChecklistItemStatus @default(TODO)
+  /// Wajib bila "Tidak berlaku" (alasannya); opsional untuk catatan lain.
+  note        String?
+  doneById    String?             @db.Uuid
+  doneAt      DateTime?
+  createdAt   DateTime            @default(now())
+
+  checklist EmployeeChecklist @relation(fields: [checklistId], references: [id], onDelete: Restrict)
+
+  @@unique([checklistId, key])
+  @@map("employee_checklist_items")
+}
+
 model EmployeeOrgHistory {
   id               String           @id @default(uuid()) @db.Uuid
   employeeId       String           @db.Uuid
@@ -490,6 +557,11 @@ model Employee {
   /// Tanggal mulai berlaku divisi/jabatan/status saat ini. NULL = sejak tanggal mulai bekerja.
   positionEffectiveFrom DateTime? @db.Date
 
+  /// Kontak darurat (dilengkapi saat karyawan masuk; hanya terlihat HR dan karyawan itu sendiri).
+  emergencyContactName     String?
+  emergencyContactRelation String?
+  emergencyContactPhone    String?
+
   // Atribut statutori (BPJS & PPh 21). Hanya dipakai bila perhitungan otomatis diaktifkan di Pengaturan.
   taxStatus              TaxStatus @default(TK0)
   hasNpwp                Boolean   @default(true)
@@ -515,6 +587,7 @@ model Employee {
   supervisor          Employee?               @relation("Supervision", fields: [supervisorId], references: [id], onDelete: SetNull)
   reports             Employee[]              @relation("Supervision")
   orgHistory          EmployeeOrgHistory[]
+  checklists          EmployeeChecklist[]
   delegationsGiven    SupervisorDelegation[]  @relation("DelegationSupervisor")
   delegationsReceived SupervisorDelegation[]  @relation("DelegationDelegate")
   photo               StoredFile?             @relation("EmployeePhoto", fields: [photoFileId], references: [id], onDelete: Restrict)
@@ -547,6 +620,7 @@ model Employee {
   @@index([divisionId])
   @@index([isActive])
   @@index([fullName])
+  @@index([supervisorId])
   @@map("employees")
 }
 
