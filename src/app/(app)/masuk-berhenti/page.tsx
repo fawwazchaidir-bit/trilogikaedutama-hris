@@ -25,7 +25,7 @@ export default async function LifecyclePage() {
   );
   return (
     <div className="space-y-4">
-      <PageHeader title="Masuk & Berhenti" description="Daftar centang proses karyawan baru masuk dan karyawan berhenti. Dimulai otomatis saat karyawan baru ditambahkan atau karyawan dinonaktifkan; buka detail karyawan untuk mengerjakannya." />
+      <PageHeader title="Masuk & Berhenti" description="Daftar centang proses karyawan baru masuk dan karyawan berhenti. Dimulai otomatis saat karyawan baru ditambahkan atau karyawan dinonaktifkan; buka detail karyawan untuk mengerjakannya." actions={<Link href="/masuk-berhenti/template" className="text-sm font-medium text-brand-700 hover:underline">Atur template →</Link>} />
       <Card>
         <CardHeader title={`Proses berjalan (${open.length})`} />
         {open.length === 0 ? <EmptyState title="Tidak ada proses berjalan" description="Semua proses masuk dan berhenti sudah selesai." /> : (

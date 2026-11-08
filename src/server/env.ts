@@ -54,6 +54,7 @@ const schema = z.object({
   CONTRACT_REMINDER_WORKER: bool.default(true),
   /** Jalankan pekerja harian Training & Operations (snapshot status, eskalasi, pengingat tenggat H-1/hari-H) di dalam proses aplikasi (default true; hanya bila modul menyala). Matikan bila memakai pemicu eksternal /api/internal/training-daily. */
   TRAINING_WORKER: bool.default(true),
+  CHECKLIST_REMINDER_WORKER: bool.default(true),
   /**
    * Notifikasi push desktop (Web Push). Kunci VAPID dibuat sekali dengan `npm run push:keys` lalu disimpan di .env (kunci privat RAHASIA).
    * Kosong = fitur nonaktif. `WEB_PUSH_SUBJECT`: `mailto:` admin atau URL https situs (dikirim ke push service sebagai kontak).

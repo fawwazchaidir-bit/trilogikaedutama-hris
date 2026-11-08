@@ -21,7 +21,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const [brand, unread] = await Promise.all([getBrand(), unreadCount(user)]);
   // Preferensi sidebar (disembunyikan / grup dilipat) dari cookie; nilai divalidasi ulang oleh parseNavPref.
   const navPref = parseNavPref((await cookies()).get(NAV_PREF_COOKIE)?.value);
-  const { nav, trainingVisible, teamIds } = await loadNav(user);
+  const { nav, trainingVisible, teamIds, myChecklist } = await loadNav(user);
   // Training & Operations: hanya bila modul diaktifkan DAN pengguna punya akses (level / Super Admin / anggota proyek).
   const overdueTasks = trainingVisible ? await countMyOverdueTasks(user) : 0;
   const [pending, pendingOt, openLoc, docAttention, pendingAllowance] = await Promise.all([
@@ -37,7 +37,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     <AppShell
       initialNav={navPref} hasEmployee={!!user.employeeId} canSearchProjects={trainingVisible} version={pkg.version}
       user={{ name: user.name, email: user.email, role: user.role, isDemo: user.isDemo }}
-      nav={nav} company={brand} unread={unread} pendingBadges={[{ href: "/pengajuan", count: pending }, { href: "/lembur", count: pendingOt }, { href: "/lokasi", count: openLoc }, { href: "/dokumen", count: docAttention }, { href: "/surat-tugas", count: pendingAllowance }, { href: "/training/tugas-saya", count: overdueTasks }, { href: "/persetujuan-tim", count: teamPending }, { href: "/masuk-berhenti", count: openLifecycle }]}
+      nav={nav} company={brand} unread={unread} pendingBadges={[{ href: "/pengajuan", count: pending }, { href: "/lembur", count: pendingOt }, { href: "/lokasi", count: openLoc }, { href: "/dokumen", count: docAttention }, { href: "/surat-tugas", count: pendingAllowance }, { href: "/training/tugas-saya", count: overdueTasks }, { href: "/persetujuan-tim", count: teamPending }, { href: "/masuk-berhenti", count: openLifecycle }, { href: "/checklist-saya", count: myChecklist }]}
     >
       {children}
     </AppShell>

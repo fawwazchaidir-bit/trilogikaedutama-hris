@@ -6,15 +6,19 @@ import { prisma, transaction, type Tx } from "../db";
 import { Errors } from "../errors";
 import { parseInput } from "../validate";
 import { assertCan, type Actor } from "../actor";
+import { can } from "@/lib/permissions";
+import { notifyUsers, reviewerUserIds } from "./notifications";
+import { ensureTemplate } from "./employee-checklist-templates";
 import { writeAudit } from "../audit";
 import { dateToIso, isoToDate } from "../json";
 import { env, trainingEnabled } from "../env";
 import { balanceOf } from "./leave";
 import { loadConfig } from "./training/indicator-config";
+import { assetSignalData } from "./assets";
 import { isoDate, optionalText, requiredText } from "@/lib/validation/common";
-import { addDays, todayIso } from "@/lib/time";
+import { addDays, diffDays, todayIso } from "@/lib/time";
 import { formatDateLong, formatDays } from "@/lib/format";
-import { KIND_LABEL, templateOf, type ChecklistItemStatus, type ChecklistKind, type Signal } from "@/lib/employee-checklist";
+import { KIND_LABEL, type ChecklistItemStatus, type ChecklistKind, type Signal } from "@/lib/employee-checklist";
 
 /**
  * CHECKLIST MASUK & BERHENTI karyawan — daftar centang sederhana agar prosesnya tidak bergantung pada ingatan satu orang.
@@ -28,6 +32,7 @@ type Db = Tx | typeof prisma;
 export interface ChecklistItemDto {
   id: string; key: string; group: string; title: string; hint: string | null; required: boolean; status: ChecklistItemStatus;
   note: string | null; doneBy: string | null; doneAt: string | null; signal: Signal | null;
+  assigneeId: string | null; assigneeName: string | null; dueDate: string | null; overdue: boolean;
 }
 export interface ChecklistProgress { total: number; done: number; notApplicable: number; requiredLeft: number }
 export interface ChecklistDto {
@@ -94,6 +99,12 @@ export async function signalsFor(db: Db, kind: ChecklistKind, employeeId: string
   const parts = [tasks && `${plural(tasks, "tugas Training aktif")}`, projects && `${plural(projects, "keanggotaan proyek aktif")}`, reports && `${plural(reports, "bawahan langsung")}`, roles && `${plural(roles, "jabatan pada Rumus Indikator")}`].filter(Boolean);
   out.handover = parts.length ? { state: "WARN", text: `Masih memegang: ${parts.join(", ")}.` } : { state: "OK", text: "Tidak ada tugas, proyek, bawahan, atau jabatan indikator yang tersisa." };
   out.account_decision = e.user ? (e.user.isActive ? { state: "INFO", text: `Akun ${e.user.email} masih aktif; menonaktifkan karyawan akan menonaktifkan akun dan mengakhiri sesinya.` } : { state: "OK", text: "Akun sudah dinonaktifkan dan sesi diakhiri." }) : { state: "OK", text: "Karyawan tidak punya akun portal." };
+  const ast = await assetSignalData(db, employeeId);
+  out.assets = ast.holding.length
+    ? { state: "WARN", text: `Belum dikembalikan: ${ast.holding.map((a) => `${a.name} (${a.code})`).join(", ")}.` }
+    : ast.everHeld
+      ? { state: "OK", text: `Semua aset yang tercatat sudah dikembalikan (${plural(ast.everHeld, "serah-terima")}${ast.problems ? `, ${plural(ast.problems, "dikembalikan rusak/hilang")}` : ""}).` }
+      : { state: "INFO", text: "Tidak ada aset tercatat atas nama karyawan ini. Bila ada aset yang belum dicatat (laptop, kunci, seragam), catat dulu di menu Aset." };
   const year = Number(today().slice(0, 4));
   const [bal, allowances, loans] = await Promise.all([
     balanceOf(db, employeeId, year),
@@ -117,7 +128,7 @@ const progressOf = (items: { required: boolean; status: string }[]): ChecklistPr
 const isOverdue = (r: { status: string; targetDate: Date | null }) => r.status === "OPEN" && !!r.targetDate && dateToIso(r.targetDate) < today();
 
 async function toDtos(rows: Row[], withSignals: boolean): Promise<ChecklistDto[]> {
-  const ids = [...new Set(rows.flatMap((r) => [r.startedById, r.completedById, ...r.items.map((i) => i.doneById)]).filter((x): x is string => !!x))];
+  const ids = [...new Set(rows.flatMap((r) => [r.startedById, r.completedById, ...r.items.flatMap((i) => [i.doneById, i.assigneeId])]).filter((x): x is string => !!x))];
   const users = ids.length ? await prisma.user.findMany({ where: { id: { in: ids } }, select: { id: true, name: true } }) : [];
   const name = new Map(users.map((u) => [u.id, u.name]));
   const out: ChecklistDto[] = [];
@@ -130,6 +141,8 @@ async function toDtos(rows: Row[], withSignals: boolean): Promise<ChecklistDto[]
       items: r.items.map((i) => ({
         id: i.id, key: i.key, group: i.groupLabel, title: i.title, hint: i.hint, required: i.required, status: i.status, note: i.note,
         doneBy: i.doneById ? name.get(i.doneById) ?? "—" : null, doneAt: i.doneAt?.toISOString() ?? null, signal: sig[i.key] ?? null,
+        assigneeId: i.assigneeId, assigneeName: i.assigneeId ? name.get(i.assigneeId) ?? "—" : null, dueDate: i.dueDate ? dateToIso(i.dueDate) : null,
+        overdue: r.status === "OPEN" && i.status === "TODO" && !!i.dueDate && dateToIso(i.dueDate) < today(),
       })),
     });
   }
@@ -149,13 +162,26 @@ export async function startChecklistIfNone(tx: Tx, actor: Actor, employeeId: str
   const emp = await tx.employee.findUnique({ where: { id: employeeId }, select: { fullName: true, isActive: true } });
   if (!emp) throw Errors.notFound("Karyawan");
   if (await tx.employeeChecklist.findFirst({ where: { employeeId, kind, status: "OPEN" }, select: { id: true } })) return null;
+  // Butir disalin dari TEMPLATE (yang dapat diedit HR): tenggat = hari ini + selisih, penanggung jawab = bawaan template bila akunnya masih aktif.
+  const tpl = (await ensureTemplate(tx, kind)).filter((t) => t.active);
+  if (tpl.length === 0) throw Errors.validation("Template checklist tidak punya butir aktif.");
+  const assigneeIds = [...new Set(tpl.map((t) => t.defaultAssigneeId).filter((x): x is string => !!x))];
+  const activeAssignees = new Set((await tx.user.findMany({ where: { id: { in: assigneeIds }, isActive: true }, select: { id: true } })).map((u) => u.id));
+  const base = today();
   const c = await tx.employeeChecklist.create({
     data: {
       employeeId, kind, targetDate: opts.targetDate ? isoToDate(opts.targetDate) : null, note: opts.note ?? null, startedById: actor.userId,
-      items: { create: templateOf(kind).map((t, i) => ({ key: t.key, groupLabel: t.group, title: t.title, hint: t.hint, required: true, sortOrder: i + 1 })) },
+      items: { create: tpl.map((t, i) => ({
+        key: t.key, groupLabel: t.groupLabel, title: t.title, hint: t.hint, required: t.required, sortOrder: i + 1,
+        dueDate: t.dueOffsetDays !== null ? isoToDate(addDays(base, t.dueOffsetDays)) : null, assigneeId: t.defaultAssigneeId && activeAssignees.has(t.defaultAssigneeId) ? t.defaultAssigneeId : null,
+      })) },
     },
-    select: { id: true },
+    select: { id: true, items: { select: { assigneeId: true } } },
   });
+  for (const uid of new Set(c.items.map((i) => i.assigneeId).filter((x): x is string => !!x))) {
+    const n = c.items.filter((i) => i.assigneeId === uid).length;
+    await notifyUsers(tx, [uid], { type: "checklist.assigned", title: "Anda ditunjuk sebagai penanggung jawab checklist", body: `${emp.fullName} · ${KIND_LABEL[kind]} · ${n} butir`, href: "/checklist-saya" });
+  }
   await writeAudit(tx, actor, { action: "checklist.start", entityType: "EmployeeChecklist", entityId: c.id, summary: `Checklist "${KIND_LABEL[kind]}" untuk ${emp.fullName} dimulai`, after: { kind, targetDate: opts.targetDate ?? null } });
   return c.id;
 }
@@ -220,8 +246,12 @@ async function openItem(tx: Tx, itemId: string) {
   return item;
 }
 
+/** HR/Super Admin (employee:manage) atau penanggung jawab butir itu sendiri boleh menandai butir. Selain itu 403. */
 export async function setChecklistItem(actor: Actor, itemId: string, raw: unknown): Promise<void> {
-  assertCan(actor, "employee:manage");
+  if (!can(actor.role, "employee:manage")) {
+    const mine = await prisma.employeeChecklistItem.findUnique({ where: { id: itemId }, select: { assigneeId: true } });
+    if (!mine || mine.assigneeId !== actor.userId) throw Errors.forbidden();
+  }
   const input = parseInput(itemSchema, raw);
   await transaction(async (tx) => {
     const item = await openItem(tx, itemId);
@@ -291,3 +321,89 @@ export async function cancelChecklist(actor: Actor, checklistId: string, raw: un
 
 /** Target bawaan saat dimulai otomatis: minggu-minggu pertama, tidak pernah di masa lalu. */
 export const autoTarget = (base: string, days: number): string => { const t = addDays(base, days), min = addDays(today(), 7); return t < min ? min : t; };
+
+// ─────────────────────────── Penanggung jawab & tenggat per butir ───────────────────────────
+
+export const assignSchema = z.object({ assigneeId: z.string().uuid("Penanggung jawab tidak valid").nullable(), dueDate: isoDate.nullable().optional() });
+
+/** HR menunjuk/mengganti penanggung jawab dan tenggat sebuah butir. Penanggung jawab diberi tahu. */
+export async function assignChecklistItem(actor: Actor, itemId: string, raw: unknown): Promise<void> {
+  assertCan(actor, "employee:manage");
+  const input = parseInput(assignSchema, raw);
+  await transaction(async (tx) => {
+    const item = await openItem(tx, itemId);
+    if (input.assigneeId) {
+      const u = await tx.user.findUnique({ where: { id: input.assigneeId }, select: { isActive: true } });
+      if (!u?.isActive) throw Errors.validation("Penanggung jawab harus akun pengguna yang aktif.", { assigneeId: "Tidak valid" });
+    }
+    await tx.employeeChecklistItem.update({ where: { id: itemId }, data: { assigneeId: input.assigneeId, ...(input.dueDate !== undefined ? { dueDate: input.dueDate ? isoToDate(input.dueDate) : null } : {}) } });
+    await writeAudit(tx, actor, {
+      action: "checklist.item_assign", entityType: "EmployeeChecklistItem", entityId: itemId, summary: `Butir "${item.title}" (${item.checklist.employee.fullName}): penanggung jawab/tenggat diubah`,
+      before: { assigneeId: item.assigneeId, dueDate: item.dueDate ? dateToIso(item.dueDate) : null }, after: { assigneeId: input.assigneeId, dueDate: input.dueDate ?? null },
+    });
+    if (input.assigneeId && input.assigneeId !== item.assigneeId) {
+      await notifyUsers(tx, [input.assigneeId], { type: "checklist.assigned", title: "Anda ditunjuk sebagai penanggung jawab butir checklist", body: `${item.checklist.employee.fullName} · ${item.title}${input.dueDate ? ` · tenggat ${formatDateLong(input.dueDate)}` : ""}`, href: "/checklist-saya" });
+    }
+  });
+}
+
+export interface MyChecklistItemDto { itemId: string; checklistId: string; employeeName: string; kind: ChecklistKind; group: string; title: string; hint: string | null; dueDate: string | null; overdue: boolean }
+
+/** Butir yang menjadi tanggung jawab pelaku dan belum selesai (tanpa data sinyal — hanya yang perlu untuk mengerjakannya). */
+export async function listMyChecklistItems(actor: Actor): Promise<MyChecklistItemDto[]> {
+  const rows = await prisma.employeeChecklistItem.findMany({
+    where: { assigneeId: actor.userId, status: "TODO", checklist: { status: "OPEN" } },
+    include: { checklist: { select: { id: true, kind: true, employee: { select: { fullName: true } } } } }, orderBy: [{ dueDate: { sort: "asc", nulls: "last" } }, { sortOrder: "asc" }], take: 200,
+  });
+  return rows.map((r) => ({
+    itemId: r.id, checklistId: r.checklist.id, employeeName: r.checklist.employee.fullName, kind: r.checklist.kind, group: r.groupLabel, title: r.title, hint: r.hint,
+    dueDate: r.dueDate ? dateToIso(r.dueDate) : null, overdue: !!r.dueDate && dateToIso(r.dueDate) < today(),
+  }));
+}
+
+export async function myChecklistCount(userId: string): Promise<number> {
+  return prisma.employeeChecklistItem.count({ where: { assigneeId: userId, status: "TODO", checklist: { status: "OPEN" } } });
+}
+
+// ─────────────────────────── Pengingat otomatis ───────────────────────────
+
+/**
+ * Pengingat butir checklist: H-1, hari-H, dan terlambat (sekali per pekan keterlambatan). Penerima: penanggung jawab; bila tidak ada → HR & Super Admin;
+ * keterlambatan juga dikabarkan ke HR. IDEMPOTEN: kunci dedupe per butir/fase/penerima di `employee_checklist_reminder_log` (aman dijalankan tiap jam, banyak instance).
+ */
+export async function runChecklistReminders(now: Date = new Date()): Promise<{ checked: number; sent: number }> {
+  const t = todayIso(env().APP_TIMEZONE, now), tomorrow = addDays(t, 1);
+  const items = await prisma.employeeChecklistItem.findMany({
+    where: { status: "TODO", dueDate: { not: null, lte: isoToDate(tomorrow) }, checklist: { status: "OPEN" } },
+    include: { checklist: { select: { employeeId: true, kind: true, employee: { select: { fullName: true } } } } }, take: 2000,
+  });
+  if (!items.length) return { checked: 0, sent: 0 };
+  const hr = await reviewerUserIds(prisma);
+  const activeAssignees = new Set((await prisma.user.findMany({ where: { id: { in: [...new Set(items.map((i) => i.assigneeId).filter((x): x is string => !!x))] }, isActive: true }, select: { id: true } })).map((u) => u.id));
+  type Out = { key: string; itemId: string; userId: string; title: string; body: string; href: string };
+  const out: Out[] = [];
+  for (const it of items) {
+    const due = dateToIso(it.dueDate!);
+    const late = due < t ? diffDays(t, due) : 0;
+    const phase = due === tomorrow ? "H-1" : due === t ? "H" : late > 0 ? `T${Math.floor((late - 1) / 7)}` : null;
+    if (!phase) continue;
+    const owner = it.assigneeId && activeAssignees.has(it.assigneeId) ? it.assigneeId : null;
+    const to = new Map<string, string>();
+    if (owner) to.set(owner, "/checklist-saya");
+    if (!owner || late > 0) for (const u of hr) if (!to.has(u)) to.set(u, `/karyawan/${it.checklist.employeeId}`);
+    const title = phase === "H-1" ? "Butir checklist jatuh tempo besok" : phase === "H" ? "Butir checklist jatuh tempo hari ini" : `Butir checklist terlambat ${late} hari`;
+    const body = `${it.checklist.employee.fullName} · ${KIND_LABEL[it.checklist.kind]} · ${it.title}`;
+    for (const [userId, href] of to) out.push({ key: `chk:${it.id}:${phase}:${due}:${userId}`, itemId: it.id, userId, title, body, href });
+  }
+  if (!out.length) return { checked: items.length, sent: 0 };
+  const sent = await transaction(async (tx) => {
+    const created = await tx.employeeChecklistReminderLog.createManyAndReturn({ data: out.map((o) => ({ dedupeKey: o.key, itemId: o.itemId })), skipDuplicates: true, select: { dedupeKey: true } });
+    const fresh = new Set(created.map((c) => c.dedupeKey));
+    const send = out.filter((o) => fresh.has(o.key));
+    const groups = new Map<string, { o: Out; users: string[] }>();
+    for (const o of send) { const k = `${o.title}|${o.body}|${o.href}`; const g = groups.get(k) ?? { o, users: [] }; g.users.push(o.userId); groups.set(k, g); }
+    for (const g of groups.values()) await notifyUsers(tx, g.users, { type: "checklist.reminder", title: g.o.title, body: g.o.body, href: g.o.href });
+    return send.length;
+  });
+  return { checked: items.length, sent };
+}

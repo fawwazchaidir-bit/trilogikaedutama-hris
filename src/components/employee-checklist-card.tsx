@@ -6,7 +6,7 @@ import { Card, CardHeader, Notice } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
-import { TextAreaField, TextField } from "@/components/ui/field";
+import { SelectField, TextAreaField, TextField } from "@/components/ui/field";
 import { useToast } from "@/components/ui/toast";
 import { api, errorMessage } from "@/lib/api-client";
 import { formatDateLong, formatDateTime } from "@/lib/format";
@@ -20,12 +20,13 @@ const SignalIcon = ({ state }: { state: "OK" | "WARN" | "INFO" }) => state === "
  * Checklist masuk & berhenti satu karyawan. Sistem memberi SINYAL dari data (mis. "atasan belum ditetapkan") tetapi tidak mencentang sendiri:
  * HR menandai Selesai / Tidak berlaku (beralasan) sehingga siapa dan kapan tercatat. `canManage` = HR / Super Admin.
  */
-export function EmployeeChecklistCard({ employeeId, checklists, canManage, isActive }: { employeeId: string; checklists: ChecklistDto[]; canManage: boolean; isActive: boolean }) {
+export function EmployeeChecklistCard({ employeeId, checklists, canManage, isActive, users }: { employeeId: string; checklists: ChecklistDto[]; canManage: boolean; isActive: boolean; users: { id: string; name: string }[] }) {
   const router = useRouter();
   const toast = useToast();
   const [busy, setBusy] = useState(false);
-  const [dlg, setDlg] = useState<null | { kind: "item"; item: ChecklistItemDto; status: "DONE" | "NOT_APPLICABLE" } | { kind: "add"; id: string } | { kind: "cancel"; id: string } | { kind: "complete"; id: string }>(null);
+  const [dlg, setDlg] = useState<null | { kind: "assign"; item: ChecklistItemDto } | { kind: "item"; item: ChecklistItemDto; status: "DONE" | "NOT_APPLICABLE" } | { kind: "add"; id: string } | { kind: "cancel"; id: string } | { kind: "complete"; id: string }>(null);
   const [text, setText] = useState({ note: "", title: "", hint: "" });
+  const [assign, setAssign] = useState({ assigneeId: "", dueDate: "" });
   const [error, setError] = useState<string | null>(null);
   const openOnes = checklists.filter((c) => c.status === "OPEN");
   const closed = checklists.filter((c) => c.status !== "OPEN");
@@ -40,6 +41,7 @@ export function EmployeeChecklistCard({ employeeId, checklists, canManage, isAct
 
   function submit() {
     if (!dlg) return;
+    if (dlg.kind === "assign") return run(() => api(`/api/employee-checklists/item/${dlg.item.id}/assign`, { body: { assigneeId: assign.assigneeId || null, dueDate: assign.dueDate || null } }), "Penanggung jawab dan tenggat disimpan.");
     if (dlg.kind === "item") return run(() => api(`/api/employee-checklists/item/${dlg.item.id}`, { method: "PATCH", body: { status: dlg.status, note: text.note } }), dlg.status === "DONE" ? "Butir ditandai selesai." : "Butir ditandai tidak berlaku.");
     if (dlg.kind === "add") return run(() => api(`/api/employee-checklists/${dlg.id}/items`, { body: { title: text.title, hint: text.hint, required: false } }), "Butir ditambahkan.");
     if (dlg.kind === "cancel") return run(() => api(`/api/employee-checklists/${dlg.id}/cancel`, { body: { reason: text.note } }), "Checklist dibatalkan.");
@@ -80,6 +82,7 @@ export function EmployeeChecklistCard({ employeeId, checklists, canManage, isAct
                         <p className={i.status === "TODO" ? "font-medium" : "font-medium text-muted"}>{i.title}{!i.required && <span className="ml-2 text-xs font-normal text-muted">(opsional)</span>}</p>
                         {i.hint && i.status === "TODO" && <p className="text-xs text-muted">{i.hint}</p>}
                         {i.signal && i.status === "TODO" && <p className={`mt-0.5 flex items-start gap-1 text-xs ${SIGNAL_TONE[i.signal.state]}`}><span className="mt-0.5"><SignalIcon state={i.signal.state} /></span><span>{i.signal.text}</span></p>}
+                        {i.status === "TODO" && (i.assigneeName || i.dueDate) && <p className="text-xs text-muted">{i.assigneeName ? `Penanggung jawab: ${i.assigneeName}` : ""}{i.assigneeName && i.dueDate ? " · " : ""}{i.dueDate ? `tenggat ${formatDateLong(i.dueDate)}` : ""} {i.overdue && <Badge tone="red">Terlambat</Badge>}</p>}
                         {i.status !== "TODO" && <p className="text-xs text-muted">{i.status === "DONE" ? "Selesai" : "Tidak berlaku"} · {i.doneBy} · {formatDateTime(i.doneAt)}{i.note ? ` · ${i.note}` : ""}</p>}
                       </div>
                     </div>
@@ -88,6 +91,7 @@ export function EmployeeChecklistCard({ employeeId, checklists, canManage, isAct
                         {i.status === "TODO" ? (<>
                           <Button size="sm" variant="primary" disabled={busy} onClick={() => quick(i, "DONE")} aria-label={`Tandai selesai: ${i.title}`}>Selesai</Button>
                           <Button size="sm" disabled={busy} onClick={() => { setError(null); setText({ ...text, note: "" }); setDlg({ kind: "item", item: i, status: "NOT_APPLICABLE" }); }} aria-label={`Tidak berlaku: ${i.title}`}>Tidak berlaku</Button>
+                          <Button size="sm" disabled={busy} onClick={() => { setError(null); setAssign({ assigneeId: i.assigneeId ?? "", dueDate: i.dueDate ?? "" }); setDlg({ kind: "assign", item: i }); }} aria-label={`Atur penanggung jawab: ${i.title}`}>Atur</Button>
                           <Button size="sm" disabled={busy} onClick={() => { setError(null); setText({ ...text, note: i.note ?? "" }); setDlg({ kind: "item", item: i, status: "DONE" }); }} aria-label={`Selesai dengan catatan: ${i.title}`}>+ Catatan</Button>
                         </>) : <Button size="sm" disabled={busy} onClick={() => quick(i, "TODO")} aria-label={`Buka lagi: ${i.title}`}>Buka lagi</Button>}
                       </div>
@@ -102,7 +106,7 @@ export function EmployeeChecklistCard({ employeeId, checklists, canManage, isAct
     );
   }
 
-  const titleOf = !dlg ? "" : dlg.kind === "item" ? (dlg.status === "DONE" ? "Selesai dengan catatan" : "Tandai tidak berlaku") : dlg.kind === "add" ? "Tambah butir" : dlg.kind === "cancel" ? "Batalkan checklist" : "Selesaikan proses";
+  const titleOf = !dlg ? "" : dlg.kind === "assign" ? "Penanggung jawab & tenggat" : dlg.kind === "item" ? (dlg.status === "DONE" ? "Selesai dengan catatan" : "Tandai tidak berlaku") : dlg.kind === "add" ? "Tambah butir" : dlg.kind === "cancel" ? "Batalkan checklist" : "Selesaikan proses";
   return (
     <Card>
       <CardHeader title="Checklist masuk & berhenti" description="Daftar centang agar proses tidak bergantung pada ingatan satu orang. Sinyal dari data sistem hanya petunjuk; keputusan selesai tetap dicatat HR."
@@ -119,11 +123,17 @@ export function EmployeeChecklistCard({ employeeId, checklists, canManage, isAct
         <details className="border-t border-line px-5 py-3 text-sm"><summary className="cursor-pointer font-medium text-muted">Riwayat checklist ({closed.length})</summary><div className="-mx-5 mt-2">{closed.map(list)}</div></details>
       )}
       <Dialog open={!!dlg} onClose={() => !busy && setDlg(null)} size="md" title={titleOf}
-        description={dlg?.kind === "item" ? dlg.item.title : dlg?.kind === "complete" ? "Semua butir wajib harus Selesai atau Tidak berlaku. Setelah diselesaikan, checklist terkunci." : undefined}
+        description={dlg?.kind === "item" || dlg?.kind === "assign" ? dlg.item.title : dlg?.kind === "complete" ? "Semua butir wajib harus Selesai atau Tidak berlaku. Setelah diselesaikan, checklist terkunci." : undefined}
         footer={<><Button onClick={() => setDlg(null)} disabled={busy}>Batal</Button><Button variant={dlg?.kind === "cancel" ? "danger" : "primary"} loading={busy} onClick={submit}>{dlg?.kind === "cancel" ? "Batalkan checklist" : dlg?.kind === "complete" ? "Selesaikan" : "Simpan"}</Button></>}>
         <div className="space-y-4">
           {error && <Notice tone="danger">{error}</Notice>}
-          {dlg?.kind === "add" ? (<>
+          {dlg?.kind === "assign" ? (<>
+            <SelectField label="Penanggung jawab" value={assign.assigneeId} onChange={(e) => setAssign({ ...assign, assigneeId: e.target.value })} hint="Boleh menandai butir ini dan menerima pengingat.">
+              <option value="">— HR (tanpa penanggung jawab khusus) —</option>
+              {users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+            </SelectField>
+            <TextField label="Tenggat" type="date" value={assign.dueDate} onChange={(e) => setAssign({ ...assign, dueDate: e.target.value })} hint="Kosongkan bila tanpa tenggat." />
+          </>) : dlg?.kind === "add" ? (<>
             <TextField label="Butir" required value={text.title} onChange={(e) => setText({ ...text, title: e.target.value })} placeholder="Mis. Serahkan seragam kerja" />
             <TextAreaField label="Keterangan (opsional)" rows={2} value={text.hint} onChange={(e) => setText({ ...text, hint: e.target.value })} />
           </>) : (

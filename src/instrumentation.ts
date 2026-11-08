@@ -9,4 +9,6 @@ export async function register(): Promise<void> {
   startContractWorker();
   const { startTrainingWorker } = await import("./server/training-worker");
   startTrainingWorker();
+  const { startChecklistWorker } = await import("./server/checklist-worker");
+  startChecklistWorker();
 }
