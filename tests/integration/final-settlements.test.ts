@@ -210,6 +210,19 @@ describe("alur persetujuan & penguncian", () => {
   });
 });
 
+describe("id yang bukan UUID", () => {
+  it("dijawab tidak ditemukan (404), bukan galat database", async () => {
+    for (const bad of ["ngawur", "123", "00000000-0000-0000-0000-00000000000Z"]) {
+      expect((await fail(getSettlement(fx.hr, bad)))?.code).toBe("NOT_FOUND");
+      expect((await fail(submitSettlement(fx.hr, bad)))?.code).toBe("NOT_FOUND");
+      expect((await fail(approveSettlement(fx.superAdmin, bad)))?.code).toBe("NOT_FOUND");
+      expect((await fail(markSettlementPaid(fx.hr, bad)))?.code).toBe("NOT_FOUND");
+      expect((await fail(recomputeSettlement(fx.hr, bad)))?.code).toBe("NOT_FOUND");
+      expect((await fail(deleteLine(fx.hr, bad)))?.code).toBe("NOT_FOUND");
+    }
+  });
+});
+
 describe("penjaga database", () => {
   it("tidak dihapus, karyawan tidak berganti, loncat status ditolak, satu yang berlaku per karyawan", async () => {
     await salary();

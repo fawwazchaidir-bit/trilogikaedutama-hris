@@ -165,12 +165,16 @@ async function toDto(r: Row, warnings: string[]): Promise<SettlementDto> {
   };
 }
 
+/** Id yang bukan UUID = tidak ditemukan (404), bukan galat database (500). */
+const assertUuid = (id: string): void => { if (!uuid.safeParse(id).success) throw Errors.notFound("Penyelesaian akhir"); };
+
 async function load(db: Db, id: string): Promise<Row> {
+  assertUuid(id);
   const r = await db.finalSettlement.findUnique({ where: { id }, include });
   if (!r) throw Errors.notFound("Penyelesaian akhir");
   return r;
 }
-const lockRow = (tx: Tx, id: string) => tx.$queryRaw`SELECT 1 FROM "final_settlements" WHERE "id" = ${id}::uuid FOR UPDATE`;
+const lockRow = (tx: Tx, id: string) => { assertUuid(id); return tx.$queryRaw`SELECT 1 FROM "final_settlements" WHERE "id" = ${id}::uuid FOR UPDATE`; };
 
 async function refreshTotals(tx: Tx, id: string): Promise<void> {
   const lines = await tx.finalSettlementLine.findMany({ where: { settlementId: id }, select: { kind: true, amount: true } });
@@ -296,6 +300,7 @@ export async function addLine(actor: Actor, id: string, raw: unknown): Promise<S
 }
 
 async function lineOwner(lineId: string): Promise<{ settlementId: string }> {
+  if (!uuid.safeParse(lineId).success) throw Errors.notFound("Baris");
   const l = await prisma.finalSettlementLine.findUnique({ where: { id: lineId }, select: { settlementId: true } });
   if (!l) throw Errors.notFound("Baris");
   return l;

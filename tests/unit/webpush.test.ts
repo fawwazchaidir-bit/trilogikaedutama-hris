@@ -49,6 +49,13 @@ describe("VAPID (RFC 8292)", () => {
     expect(b64u.dec(keys.publicKey)).toHaveLength(65);
     expect(b64u.dec(keys.privateKey)).toHaveLength(32);
   });
+  it("kunci privat selalu 32 byte walau byte pertamanya nol (sekitar 1 dari 256 kunci acak)", () => {
+    for (let i = 0; i < 4000; i++) {
+      const k = generateVapidKeys();
+      expect(b64u.dec(k.privateKey), `kunci ke-${i}`).toHaveLength(32);
+      expect(vapidKeysValid(k)).toBe(true);
+    }
+  });
   it("tajuk Authorization: tanda tangan ES256 sah, aud = asal push service, exp ≤ 24 jam, sub dicantumkan", () => {
     const now = 1_800_000_000;
     const h = vapidAuthorization("https://fcm.googleapis.com/fcm/send/abc", "mailto:admin@trilogika.test", keys, now);

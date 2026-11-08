@@ -16,7 +16,9 @@ export interface VapidKeys { publicKey: string; privateKey: string }
 export function generateVapidKeys(): VapidKeys {
   const e = createECDH("prime256v1");
   e.generateKeys();
-  return { publicKey: b64u.enc(e.getPublicKey()), privateKey: b64u.enc(e.getPrivateKey()) };
+  // Kunci privat 32 byte; Node membuang byte nol di depan (sekitar 1 dari 256 kunci) sehingga harus diberi bantalan agar tetap 32 byte.
+  const priv = e.getPrivateKey();
+  return { publicKey: b64u.enc(e.getPublicKey()), privateKey: b64u.enc(priv.length === 32 ? priv : Buffer.concat([Buffer.alloc(32 - priv.length), priv])) };
 }
 
 /** Kunci publik harus 65 byte berawalan 0x04, privat 32 byte, dan keduanya SEPASANG. */
