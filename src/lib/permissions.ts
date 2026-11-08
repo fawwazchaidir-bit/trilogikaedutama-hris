@@ -133,6 +133,7 @@ export const NAV_ITEMS: readonly NavItem[] = [
   { href: "/rekap", label: "Rekap Absensi", anyOf: ["recap:view_all"], group: "sdm" },
   { href: "/laporan", label: "Laporan & Analisis", anyOf: ["report:view"], group: "sdm" },
   { href: "/penggajian", label: "Penggajian", anyOf: ["payroll:view"], group: "gaji" },
+  { href: "/penyelesaian-akhir", label: "Penyelesaian Akhir", anyOf: ["payroll:view"], group: "gaji" },
   { href: "/audit-log", label: "Audit Log", anyOf: ["audit:view"], group: "sistem" },
   { href: "/pengaturan", label: "Pengaturan", anyOf: ["settings:view"], group: "sistem" },
   { href: "/pengguna", label: "Akun Pengguna", anyOf: ["user:manage", "user:manage_employee"], group: "sistem" },

@@ -34,7 +34,7 @@ Di bawah tiap butir sistem menampilkan petunjuk dari data yang ada, mis. *"Belum
 | Berhenti: serah terima | tugas Training aktif, keanggotaan proyek aktif, bawahan langsung, jabatan di Rumus Indikator |
 | Berhenti: akun | status akun (menonaktifkan karyawan menonaktifkan akun dan mengakhiri sesinya) |
 | Berhenti: aset | aset yang masih dipegang / sudah kembali (modul Aset) |
-| Berhenti: hak & kewajiban | sisa cuti, uang harian belum diterbitkan bukti penerimaannya, kasbon aktif |
+| Berhenti: hak & kewajiban | sisa cuti, uang harian belum diterbitkan bukti penerimaannya, kasbon aktif, status penyelesaian akhir |
 
 Butir **Pengembalian aset** memakai sinyal dari modul **Aset** (lihat `ASET.md`): aset yang belum dikembalikan ditampilkan sebagai peringatan; HR tetap yang menandai butir.
 
@@ -62,7 +62,7 @@ Butir **Pengembalian aset** memakai sinyal dari modul **Aset** (lihat `ASET.md`)
 
 ## Yang belum tercakup
 
-- Template tidak diedit lewat aplikasi (ubah di kode); butir tambahan hanya berlaku pada satu checklist.
-- Belum ada penanggung jawab per butir maupun pengingat otomatis; keterlambatan terlihat pada halaman Masuk & Berhenti dan lencana menu.
+- Butir tambahan pada satu checklist hanya berlaku untuk checklist itu (untuk menambah ke semua checklist baru, ubah template).
 - Menonaktifkan karyawan tetap langsung menonaktifkan akun dan sesinya (perilaku lama, aman). Bila akses perlu bertahan sampai serah terima selesai, nonaktifkan karyawan pada saat itu — jangan lebih awal.
-- Tidak ada modul aset, penggajian akhir (final settlement), atau surat keterangan kerja otomatis.
+- Tidak ada surat keterangan kerja otomatis.
+- Aset dan penyelesaian akhir punya dokumen sendiri: [ASET.md](ASET.md) dan [PENYELESAIAN-AKHIR.md](PENYELESAIAN-AKHIR.md). Pesangon, UPMK, UPH, THR, dan pajak **tidak dihitung sistem**.

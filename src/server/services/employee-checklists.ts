@@ -15,9 +15,11 @@ import { env, trainingEnabled } from "../env";
 import { balanceOf } from "./leave";
 import { loadConfig } from "./training/indicator-config";
 import { assetSignalData } from "./assets";
+import { settlementSignalData } from "./final-settlements";
 import { isoDate, optionalText, requiredText } from "@/lib/validation/common";
 import { addDays, diffDays, todayIso } from "@/lib/time";
 import { formatDateLong, formatDays } from "@/lib/format";
+import { SETTLEMENT_STATUS_LABEL } from "@/lib/final-settlement";
 import { KIND_LABEL, type ChecklistItemStatus, type ChecklistKind, type Signal } from "@/lib/employee-checklist";
 
 /**
@@ -106,13 +108,16 @@ export async function signalsFor(db: Db, kind: ChecklistKind, employeeId: string
       ? { state: "OK", text: `Semua aset yang tercatat sudah dikembalikan (${plural(ast.everHeld, "serah-terima")}${ast.problems ? `, ${plural(ast.problems, "dikembalikan rusak/hilang")}` : ""}).` }
       : { state: "INFO", text: "Tidak ada aset tercatat atas nama karyawan ini. Bila ada aset yang belum dicatat (laptop, kunci, seragam), catat dulu di menu Aset." };
   const year = Number(today().slice(0, 4));
-  const [bal, allowances, loans] = await Promise.all([
+  const [bal, allowances, loans, settlement] = await Promise.all([
     balanceOf(db, employeeId, year),
     db.assignmentAssignee.count({ where: { employeeId, letter: { status: "ISSUED" }, receipts: { none: { status: "ACTIVE" } } } }),
     db.salaryComponent.count({ where: { employeeId, isActive: true, category: "LOAN" } }),
+    settlementSignalData(db, employeeId),
   ]);
-  const ob = [`sisa cuti ${year}: ${formatDays(bal.balance)} hari`, allowances && `${plural(allowances, "uang harian belum diterbitkan bukti penerimaannya")}`, loans && `${plural(loans, "kasbon/pinjaman aktif")}`].filter(Boolean);
-  out.obligations = { state: allowances || loans ? "WARN" : "INFO", text: `${ob.join("; ")}.` };
+  const unpaidSettlement = settlement !== null && settlement !== "PAID";
+  const settlementText = settlement === null ? "penyelesaian akhir belum dibuat (menu Penyelesaian Akhir)" : settlement === "PAID" ? "penyelesaian akhir sudah dibayar" : `penyelesaian akhir ${SETTLEMENT_STATUS_LABEL[settlement].toLowerCase()} (belum dibayar)`;
+  const ob = [`sisa cuti ${year}: ${formatDays(bal.balance)} hari`, allowances && `${plural(allowances, "uang harian belum diterbitkan bukti penerimaannya")}`, loans && `${plural(loans, "kasbon/pinjaman aktif")}`, settlementText].filter(Boolean);
+  out.obligations = { state: allowances || loans || unpaidSettlement ? "WARN" : settlement === "PAID" ? "OK" : "INFO", text: `${ob.join("; ")}.` };
   return out;
 }
 

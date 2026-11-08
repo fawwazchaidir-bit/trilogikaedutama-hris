@@ -627,6 +627,7 @@ model Employee {
   orgHistory          EmployeeOrgHistory[]
   checklists          EmployeeChecklist[]
   assetAssignments    AssetAssignment[]
+  finalSettlements    FinalSettlement[]
   delegationsGiven    SupervisorDelegation[]  @relation("DelegationSupervisor")
   delegationsReceived SupervisorDelegation[]  @relation("DelegationDelegate")
   photo               StoredFile?             @relation("EmployeePhoto", fields: [photoFileId], references: [id], onDelete: Restrict)
@@ -2233,4 +2234,101 @@ model AssetAssignment {
   @@index([employeeId, returnedOn])
   @@index([assetId, assignedOn])
   @@map("asset_assignments")
+}
+
+// ─────────────────────────── Penyelesaian akhir (final settlement) ───────────────────────────
+
+enum SettlementStatus {
+  DRAFT
+  PENDING_APPROVAL
+  APPROVED
+  PAID
+  CANCELLED
+}
+
+enum SettlementBasis {
+  WORKING_DAYS
+  CALENDAR_DAYS
+}
+
+enum SettlementLineCategory {
+  PRORATED_SALARY
+  LEAVE_PAYOUT
+  UNPAID_ALLOWANCE
+  SEVERANCE
+  SERVICE_AWARD
+  ENTITLEMENT
+  THR
+  OTHER_EARNING
+  TAX
+  BPJS
+  LOAN
+  ASSET
+  OTHER_DEDUCTION
+}
+
+enum SettlementLineSource {
+  SYSTEM
+  MANUAL
+}
+
+/// Penyelesaian hak & kewajiban saat karyawan berhenti. Sistem hanya MENGUSULKAN yang dapat dihitung dari data (gaji prorata, uang harian belum dibayar,
+/// uang cuti bila pembagi diisi); pesangon, UPMK, UPH, THR, dan pajak TIDAK dihitung sistem — HR mengisinya sebagai baris manual.
+/// Satu penyelesaian non-batal per karyawan (indeks unik parsial pada migrasi). Baris hanya berubah saat DRAFT; setelah disetujui terkunci (trigger).
+model FinalSettlement {
+  id              String           @id @default(uuid()) @db.Uuid
+  employeeId      String           @db.Uuid
+  status          SettlementStatus @default(DRAFT)
+  lastWorkDate    DateTime         @db.Date
+  basis           SettlementBasis  @default(WORKING_DAYS)
+  /// Pembagi uang cuti (hari kerja per bulan) yang ditetapkan HR; NULL = tidak ada usulan uang cuti.
+  leaveDivisor    Int?
+  note            String?
+  totalEarnings   BigInt           @default(0)
+  totalDeductions BigInt           @default(0)
+  netPayable      BigInt           @default(0)
+  preparedById    String           @db.Uuid
+  submittedById   String?          @db.Uuid
+  submittedAt     DateTime?
+  returnedNote    String?
+  approvedById    String?          @db.Uuid
+  approvedAt      DateTime?
+  approvalNote    String?
+  paidById        String?          @db.Uuid
+  paidAt          DateTime?
+  paidOn          DateTime?        @db.Date
+  payReference    String?
+  cancelledById   String?          @db.Uuid
+  cancelledAt     DateTime?
+  cancelReason    String?
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  employee Employee              @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  lines    FinalSettlementLine[]
+
+  @@index([employeeId, status])
+  @@index([status, createdAt])
+  @@map("final_settlements")
+}
+
+model FinalSettlementLine {
+  id           String                 @id @default(uuid()) @db.Uuid
+  settlementId String                 @db.Uuid
+  kind         ComponentKind
+  category     SettlementLineCategory
+  name         String
+  /// Rupiah, selalu positif; jenis (pendapatan/potongan) menentukan tandanya pada total.
+  amount       BigInt
+  /// Rumus/dasar perhitungan yang ditulis agar dapat diperiksa penyetuju.
+  formula      String?
+  source       SettlementLineSource   @default(MANUAL)
+  note         String?
+  sortOrder    Int
+  createdAt    DateTime               @default(now())
+
+  settlement FinalSettlement @relation(fields: [settlementId], references: [id], onDelete: Restrict)
+
+  @@index([settlementId, sortOrder])
+  @@map("final_settlement_lines")
 }
