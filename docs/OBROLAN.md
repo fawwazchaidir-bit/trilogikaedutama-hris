@@ -29,6 +29,7 @@ SSE hanya sebagai **bel**: `GET /api/chat/stream` memeriksa tiap 2 detik (satu k
 
 - Aliran: maks. 3 per pengguna (yang tertua ditutup), umur 10 menit (klien menyambung ulang otomatis), sesi diperiksa tiap ±60 detik **tanpa menggeser jendela idle**, header `no-transform` + `X-Accel-Buffering: no`.
 - Klien (`ChatProvider`): satu aliran per tab dipakai bersama oleh lencana menu dan halaman; aliran putus/terblokir → **polling cadangan tiap 8 detik**; tab tersembunyi > 5 menit → aliran ditutup.
+- **Status klien disimpan di store eksternal (`useSyncExternalStore`), bukan React Context.** Nilai context yang berubah menjalar ke seluruh pohon dan memaksa batas Suspense yang masih mengalir dihidrasi lebih awal sehingga konten halaman terduplikasi di DOM (terlihat saat uji E2E). Context hanya membawa referensi store yang tidak pernah berubah.
 - Nomor urut per ruang tanpa celah (baris ruang terkunci saat kirim) sehingga kursor `afterSeq` tidak pernah melewatkan pesan. Kirim idempoten lewat `clientMsgId`.
 
 ## Fitur
