@@ -33,6 +33,13 @@ function discover(): Ep[] {
 }
 const ENDPOINTS = discover();
 
+/**
+ * Rute aliran (SSE) tidak pernah selesai bila diminta oleh sesi sah, sehingga tidak ikut disapu sebagai GET biasa (permintaan akan menggantung).
+ * Penjagaannya diuji khusus: anonim → 401 (sapuan otentikasi di atas tetap memuatnya), sedangkan header streaming, isi "hello", dan batas aliran
+ * diuji di tests/e2e/05r-obrolan.spec.ts dan tests/integration/chat-stream.test.ts.
+ */
+const STREAMING = new Set(["/api/chat/stream"]);
+
 /** Rute yang sengaja terbuka tanpa sesi (login/pemulihan/health/pemicu mesin). */
 const PUBLIC = new Set(["/api/health", "/api/auth/login", "/api/auth/2fa", "/api/auth/forgot", "/api/auth/reset", "/api/internal/deliveries", "/api/internal/retention", "/api/internal/contract-reminders", "/api/internal/training-daily", "/api/internal/checklist-reminders"]);
 /** Tidak disapu dengan `{}` karena `{}` SAH dan mengubah data / menutup sesi / mengirim pesan. */
@@ -108,7 +115,7 @@ for (const role of ["employee", "hr", "admin"] as const) {
       if (r.status() >= 500) fail.push(`${label} → ${r.status()} ${body.slice(0, 120)}`);
       else if (r.status() >= 400 && SECRET_LEAK.test(body)) fail.push(`${label} → bocoran detail internal: ${body.slice(0, 160)}`);
     };
-    for (const e of ENDPOINTS.filter((x) => x.route !== "/api/auth/logout")) {
+    for (const e of ENDPOINTS.filter((x) => x.route !== "/api/auth/logout" && !STREAMING.has(x.route))) {
       const tag = `${role} ${e.method} ${e.route}`;
       if (e.method === "GET") {
         await check(`${tag} (uuid)`, send(c, "GET", withQuery(e)));
@@ -275,7 +282,7 @@ test("eskalasi hak dengan badan YANG VALID: Karyawan/HR tidak dapat membuat/meng
 test("Cache-Control: SEMUA respons JSON API (sukses & galat) tidak boleh disimpan cache", async () => {
   const bad: string[] = [];
   const seen = { json: 0 };
-  for (const e of ENDPOINTS.filter((x) => x.method === "GET" && x.route !== "/api/files/[id]" && !x.route.includes("/pdf") && !x.route.includes("/export") && !x.route.includes("/slips") && !x.route.endsWith("/template"))) {
+  for (const e of ENDPOINTS.filter((x) => x.method === "GET" && !STREAMING.has(x.route) && x.route !== "/api/files/[id]" && !x.route.includes("/pdf") && !x.route.includes("/export") && !x.route.includes("/slips") && !x.route.endsWith("/template"))) {
     for (const [role, c] of [["admin", ctxs.admin], ["anon", ctxs.anon]] as const) {
       const r = await send(c, "GET", withQuery(e));
       if (!(r.headers()["content-type"] ?? "").includes("application/json")) continue;

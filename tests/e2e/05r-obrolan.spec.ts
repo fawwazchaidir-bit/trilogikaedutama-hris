@@ -137,3 +137,22 @@ test("aliran SSE diblokir → polling cadangan tetap mengantar pesan (dan status
   await expect(log(c.page).getByText("Pesan lewat jalur cadangan.")).toBeVisible({ timeout: 20_000 });
   await b.close(); await c.close();
 });
+
+test("rute aliran: anonim 401; sesi sah mendapat text/event-stream dengan 'hello' (dibaca sebagian lalu dibatalkan)", async ({ browser }) => {
+  const anon = await pwRequest.newContext({ baseURL: base });
+  expect((await anon.get("/api/chat/stream", { failOnStatusCode: false })).status()).toBe(401);
+  await anon.dispose();
+  const b = await as(browser, USERS.budi);
+  const r = await b.page.evaluate(async () => {
+    const ac = new AbortController();
+    const res = await fetch("/api/chat/stream", { signal: ac.signal });
+    const reader = res.body!.getReader();
+    const first = new TextDecoder().decode((await reader.read()).value);
+    ac.abort();
+    return { type: res.headers.get("content-type"), cache: res.headers.get("cache-control"), first };
+  });
+  expect(r.type).toContain("text/event-stream");
+  expect(r.cache).toContain("no-transform");
+  expect(r.first).toContain("event: hello"); // tiba segera, tidak tertahan kompresi/buffer server produksi
+  await b.close();
+});
