@@ -55,7 +55,7 @@ export function backoffSeconds(attempts: number): number {
   return Math.min(60 * 2 ** Math.max(0, attempts - 1), 3600);
 }
 
-interface Claimed { id: bigint; notificationId: bigint | null; userId: string | null; channel: "EMAIL" | "WHATSAPP" | "PUSH"; toAddress: string; subject: string | null; body: string; attempts: number }
+interface Claimed { id: bigint; notificationId: bigint | null; userId: string | null; channel: "EMAIL" | "WHATSAPP" | "PUSH"; toAddress: string; subject: string | null; body: string; attempts: number; href: string | null; tag: string | null }
 
 /**
  * Proses antrean: klaim baris atomik (FOR UPDATE SKIP LOCKED → aman untuk beberapa instance/pekerja), kirim, lalu tandai.
@@ -68,7 +68,7 @@ export async function processDeliveries(opts: { limit?: number } = {}): Promise<
     WHERE id IN (
       SELECT id FROM notification_deliveries WHERE "status" = 'PENDING' AND "nextAttemptAt" <= now()
       ORDER BY id LIMIT ${limit} FOR UPDATE SKIP LOCKED)
-    RETURNING id, "notificationId", "userId", channel::text AS channel, "toAddress", subject, body, attempts`;
+    RETURNING id, "notificationId", "userId", channel::text AS channel, "toAddress", subject, body, attempts, href, tag`;
   const result: ProcessResult = { claimed: claimed.length, sent: 0, failed: 0, retried: 0, skipped: 0 };
   for (const d of claimed) {
     // Pengguna dinonaktifkan / mematikan saluran setelah antrean dibuat → lewati.
@@ -90,7 +90,7 @@ export async function processDeliveries(opts: { limit?: number } = {}): Promise<
           continue;
         }
         const n = await prisma.notification.findFirst({ where: { id: d.notificationId ?? BigInt(-1) }, select: { id: true, href: true } });
-        await sendPush({ endpoint: sub.endpoint, p256dh: sub.p256dh, auth: sub.auth }, { title: d.subject ?? "Notifikasi baru", body: d.body, href: n?.href ?? "/notifikasi", ...(n ? { tag: `n-${n.id}` } : {}) });
+        await sendPush({ endpoint: sub.endpoint, p256dh: sub.p256dh, auth: sub.auth }, { title: d.subject ?? "Notifikasi baru", body: d.body, href: d.href ?? n?.href ?? "/notifikasi", ...(d.tag ? { tag: d.tag } : n ? { tag: `n-${n.id}` } : {}) });
         await prisma.pushSubscription.update({ where: { id: sub.id }, data: { lastSuccessAt: new Date() } });
       }
       await prisma.notificationDelivery.update({ where: { id: d.id }, data: { status: "SENT", sentAt: new Date(), lastError: null } });

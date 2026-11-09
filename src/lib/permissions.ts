@@ -55,6 +55,8 @@ export const PERMISSIONS = [
   "assignment:view_all",     // melihat Surat Tugas & Bukti Penerimaan Uang Harian
   "assignment:manage",       // menerbitkan / membatalkan surat tugas, menerbitkan bukti penerimaan uang harian
   "assignment:revoke",       // membatalkan bukti penerimaan uang harian yang sudah terbit (pimpinan)
+  "chat:moderate",           // Obrolan: membuat/mengarsipkan kanal publik, menyembunyikan pesan di kanal publik, menerima laporan
+  "chat:audit_access",       // Obrolan: membaca japri siapa pun (hanya Direktur; setiap pembukaan tercatat di Audit Log)
 ] as const;
 
 export type Permission = (typeof PERMISSIONS)[number];
@@ -77,6 +79,7 @@ export const ROLE_PERMISSIONS: Record<Role, ReadonlySet<Permission>> = {
     "location:review",
     "document:view_all", "document:manage",
     "assignment:view_all", "assignment:manage",
+    "chat:moderate",
   ]),
   EMPLOYEE: new Set<Permission>([]),
 };

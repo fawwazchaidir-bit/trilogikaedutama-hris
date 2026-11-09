@@ -11,4 +11,6 @@ export async function register(): Promise<void> {
   startTrainingWorker();
   const { startChecklistWorker } = await import("./server/checklist-worker");
   startChecklistWorker();
+  const { startChatWorker } = await import("./server/chat-worker");
+  startChatWorker();
 }

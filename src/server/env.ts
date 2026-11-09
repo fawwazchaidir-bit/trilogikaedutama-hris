@@ -69,6 +69,15 @@ const schema = z.object({
    * Mati = menu tidak tampil, halaman /training menjawab 404, API /api/training menjawab 404. Data tidak dihapus.
    */
   TRAINING_MODULE_ENABLED: bool.default(false),
+  /**
+   * Obrolan internal (live chat: japri, kanal publik, utas penugasan). DEFAULT MATI. Mati = menu tidak tampil, halaman /obrolan dan API /api/chat menjawab 404.
+   * Data tidak dihapus. Lihat docs/OBROLAN.md.
+   */
+  CHAT_MODULE_ENABLED: bool.default(false),
+  /** Pekerja obrolan di dalam proses aplikasi (retensi pesan + pemulih keanggotaan kanal; idempoten, aman di banyak instance). Hanya aktif bila modul menyala. */
+  CHAT_WORKER: bool.default(true),
+  /** Masa simpan isi pesan (bulan). Lewat batas, isi dihapus (baris tetap) kecuali ruang ditahan (legalHold). */
+  CHAT_RETENTION_MONTHS: int(6, 1, 60),
   /** Kunci AES-256 (32 byte, base64) untuk enkripsi nomor rekening. Buat: `openssl rand -base64 32`. */
   DATA_ENCRYPTION_KEY: z.string().refine((v) => {
     try { return Buffer.from(v, "base64").length === 32; } catch { return false; }
@@ -96,6 +105,9 @@ export const emailConfigured = (): boolean => !!env().SMTP_HOST && !!env().MAIL_
 
 /** Apakah modul Training & Operations diaktifkan (feature flag TRAINING_MODULE_ENABLED). */
 export const trainingEnabled = (): boolean => env().TRAINING_MODULE_ENABLED;
+
+/** Apakah Obrolan internal diaktifkan (feature flag CHAT_MODULE_ENABLED). */
+export const chatEnabled = (): boolean => env().CHAT_MODULE_ENABLED;
 
 export function whatsappConfigured(): boolean {
   const e = env();

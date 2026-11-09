@@ -1139,6 +1139,9 @@ model NotificationDelivery {
   toAddress      String
   subject        String?
   body           String
+  /// Tautan & tag untuk push yang tidak punya baris Notification (obrolan). Kosong = ikuti Notification.
+  href           String?
+  tag            String?
   status         DeliveryStatus  @default(PENDING)
   attempts       Int             @default(0)
   nextAttemptAt  DateTime        @default(now())
@@ -2342,4 +2345,134 @@ model FinalSettlementLine {
 
   @@index([settlementId, sortOrder])
   @@map("final_settlement_lines")
+}
+
+// ─────────────────────────── Obrolan internal (live chat) ───────────────────────────
+// Rancangan: docs/OBROLAN.md. Izin TIDAK pernah bersandar pada tabel anggota: japri = dua anggota, kanal = akun aktif, utas penugasan = gerbang
+// modul asal (Surat Tugas / proyek Training) yang dihitung saat diminta. Tabel anggota hanya menyimpan belum-dibaca & preferensi.
+
+enum ChatRoomKind {
+  /// Japri 1:1 (satu per pasangan, kunci `directKey`).
+  DIRECT
+  /// Kanal publik: semua akun aktif dapat membaca & menulis.
+  CHANNEL
+  /// Utas yang terikat pada satu penugasan (Surat Tugas / proyek / tugas Training).
+  SUBJECT
+}
+
+enum ChatSubjectType {
+  ASSIGNMENT_LETTER
+  TRAINING_PROJECT
+  TRAINING_TASK
+}
+
+enum ChatNotifyMode {
+  ALL
+  MENTIONS
+  NONE
+}
+
+enum ChatMessageKind {
+  TEXT
+  SYSTEM
+}
+
+model ChatRoom {
+  id            String           @id @default(uuid()) @db.Uuid
+  kind          ChatRoomKind
+  /// Kanal saja.
+  name          String?
+  slug          String?          @unique
+  /// "uidKecil:uidBesar" → satu japri per pasangan.
+  directKey     String?          @unique
+  subjectType   ChatSubjectType?
+  subjectId     String?          @db.Uuid
+  archivedAt    DateTime?
+  /// Menahan retensi (mis. sedang ditinjau).
+  legalHold     Boolean          @default(false)
+  /// Nomor urut pesan terakhir; baris ini juga mengunci pengirim bersamaan sehingga nomor urut tanpa celah dan berurutan saat commit.
+  lastSeq       BigInt           @default(0)
+  /// Naik pada setiap perubahan ruang (pesan baru, sunting, hapus, moderasi) → bel SSE tahu kapan klien perlu menyegarkan.
+  rev           BigInt           @default(0)
+  lastMessageAt DateTime?
+  createdById   String           @db.Uuid
+  createdAt     DateTime         @default(now())
+
+  members  ChatMember[]
+  messages ChatMessage[]
+
+  @@unique([subjectType, subjectId])
+  @@index([kind])
+  @@map("chat_rooms")
+}
+
+/// Hanya untuk belum-dibaca & preferensi — BUKAN sumber izin.
+model ChatMember {
+  roomId       String         @db.Uuid
+  userId       String         @db.Uuid
+  joinedAt     DateTime       @default(now())
+  lastReadSeq  BigInt         @default(0)
+  /// Terakhir melihat ruang ini (menekan push saat sedang dibuka).
+  lastActiveAt DateTime?
+  /// Debounce push.
+  lastPushAt   DateTime?
+  notifyMode   ChatNotifyMode @default(ALL)
+  mutedUntil   DateTime?
+
+  room ChatRoom @relation(fields: [roomId], references: [id], onDelete: Restrict)
+
+  @@id([roomId, userId])
+  @@index([userId])
+  @@map("chat_members")
+}
+
+model ChatMessage {
+  id           String          @id @default(uuid()) @db.Uuid
+  roomId       String          @db.Uuid
+  seq          BigInt
+  senderId     String          @db.Uuid
+  kind         ChatMessageKind @default(TEXT)
+  /// ≤ 4000 karakter; NULL setelah retensi (purgedAt terisi).
+  body         String?
+  /// Idempotensi kirim ulang.
+  clientMsgId  String          @db.Uuid
+  replyToId    String?         @db.Uuid
+  /// Rujukan penugasan [{type,id}] (≤ 3); diselesaikan per pembaca.
+  refs         Json?
+  editedAt     DateTime?
+  deletedAt    DateTime?
+  deletedById  String?         @db.Uuid
+  deleteReason String?
+  purgedAt     DateTime?
+  createdAt    DateTime        @default(now())
+
+  room ChatRoom @relation(fields: [roomId], references: [id], onDelete: Restrict)
+
+  @@unique([roomId, seq])
+  @@unique([roomId, senderId, clientMsgId])
+  @@index([roomId, seq(sort: Desc)])
+  @@index([createdAt])
+  @@map("chat_messages")
+}
+
+model ChatMention {
+  messageId String @db.Uuid
+  userId    String @db.Uuid
+  roomId    String @db.Uuid
+  seq       BigInt
+
+  @@id([messageId, userId])
+  @@index([userId, roomId, seq])
+  @@map("chat_mentions")
+}
+
+/// Isi lama sebelum disunting — tambah-saja (trigger).
+model ChatMessageRevision {
+  id        String   @id @default(uuid()) @db.Uuid
+  messageId String   @db.Uuid
+  body      String
+  editedAt  DateTime @default(now())
+
+  @@index([messageId])
+  @@map("chat_message_revisions")
 }

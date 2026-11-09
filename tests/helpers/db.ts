@@ -7,6 +7,7 @@ import type { Role } from "@/lib/permissions";
 import { invalidateSecurityPolicyCache } from "@/server/auth/session";
 
 const TABLES = [
+  "chat_message_revisions", "chat_mentions", "chat_messages", "chat_members", "chat_rooms",
   // Training & Operations (tabel baru; CASCADE tetap menjangkau sisanya, tetapi program/template berdiri sendiri sehingga disebut eksplisit).
   "final_settlement_lines", "final_settlements", "asset_assignments", "assets", "employee_checklist_reminder_log", "employee_checklist_template_items", "employee_checklist_items", "employee_checklists", "supervisor_delegations", "employee_org_history", "push_subscriptions", "portal_announcements", "training_indicator_config_versions", "training_indicator_config", "training_staff_capacity", "training_workload_tasks", "training_readiness_items", "training_milestones",
   "training_project_assignment_links", "training_external_refs", "training_project_documents", "training_participants", "training_schedules", "training_project_instructors", "training_instructors",
