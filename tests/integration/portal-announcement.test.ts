@@ -22,7 +22,7 @@ describe("banner beranda", () => {
     expect(b.postedAt).toBeTruthy();
   });
 
-  it("hanya Super Admin: HR, Manajer Program, Admin Program, Pemantau, dan karyawan ditolak (403); riwayat juga", async () => {
+  it("hanya Super Admin: HR, Koordinator Program, Admin Program, Pemantau, dan karyawan ditolak (403); riwayat juga", async () => {
     for (const a of [fx.hr, fx.mgr, fx.adm, fx.viewer, fx.emp1]) {
       expect((await fail(setBanner(a, { title: "Coba ubah banner" })))?.status, a.email).toBe(403);
       expect((await fail(resetBanner(a)))?.status, a.email).toBe(403);

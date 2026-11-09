@@ -9,7 +9,7 @@ export const TODAY = () => todayIso("Asia/Jakarta");
 export const inDays = (n: number) => addDays(TODAY(), n);
 
 export interface TrainingFixtures extends Fixtures {
-  /** Manajer Program: level MANAGER, EMPLOYEE secara global. */
+  /** Koordinator Program: level MANAGER, EMPLOYEE secara global. */
   mgr: Actor; mgrEmp: string;
   /** Admin Program: level ADMIN_PROGRAM. */
   adm: Actor; admEmp: string;
@@ -34,7 +34,7 @@ export async function seedTraining(): Promise<TrainingFixtures> {
   const adm = await makeUser("andi@uji.test", "Andi Admin", "EMPLOYEE", e2.id);
   const viewer = await makeUser("vina@uji.test", "Vina Viewer", "EMPLOYEE", e3.id);
   const loner = await makeUser("lola@uji.test", "Lola Loner", "EMPLOYEE", e4.id);
-  await grant(mgr.userId, "MANAGER", fx.superAdmin.userId);
+  await grant(mgr.userId, "COORDINATOR", fx.superAdmin.userId);
   await grant(adm.userId, "ADMIN_PROGRAM", fx.superAdmin.userId);
   await grant(viewer.userId, "VIEWER", fx.superAdmin.userId);
   return { ...fx, mgr, mgrEmp: e1.id, adm, admEmp: e2.id, viewer, loner, lonerEmp: e4.id };

@@ -48,7 +48,7 @@ const OPEN: Prisma.TrainingTaskWhereInput["status"] = { in: ["TODO", "IN_PROGRES
 export async function getTrainingDashboard(actor: Actor): Promise<DashboardDto> {
   const mod = await requireModule(actor);
   const level = mod.subject.level;
-  const variant: DashboardVariant = level === "MANAGER" ? "manager" : actor.role === "SUPER_ADMIN" || level === "VIEWER" ? "director" : level === "ADMIN_PROGRAM" ? "admin" : "staff";
+  const variant: DashboardVariant = level === "COORDINATOR" ? "manager" : actor.role === "SUPER_ADMIN" || level === "VIEWER" ? "director" : level === "ADMIN_PROGRAM" ? "admin" : "staff";
   const t = today();
   const td = isoToDate(t);
   const scope = accessibleProjectWhere(actor, mod);

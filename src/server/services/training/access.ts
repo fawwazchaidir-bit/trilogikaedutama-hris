@@ -114,11 +114,11 @@ export function requireAbility(access: ProjectAccess, ability: ProjectAbility, m
   if (!access.abilities.has(ability)) throw Errors.forbidden(message ?? "Anda tidak memiliki izin untuk tindakan ini pada proyek ini.");
 }
 
-/** Proyek yang sudah ditutup/dibatalkan bersifat baca-saja; ubah data lewat "buka kembali" (khusus Manajer Program). */
+/** Proyek yang sudah ditutup/dibatalkan bersifat baca-saja; ubah data lewat "buka kembali" (khusus Koordinator Program). */
 export function assertEditable(project: Pick<ProjectCore, "status">): void {
   if (isFinalProject(project.status)) {
     throw Errors.conflict(project.status === "COMPLETED"
-      ? "Proyek sudah ditutup (Selesai) sehingga datanya dikunci. Manajer Program dapat membukanya kembali dengan alasan."
+      ? "Proyek sudah ditutup (Selesai) sehingga datanya dikunci. Koordinator Program dapat membukanya kembali dengan alasan."
       : "Proyek sudah dibatalkan sehingga datanya dikunci.");
   }
 }

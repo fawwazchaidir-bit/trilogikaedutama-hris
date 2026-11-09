@@ -242,8 +242,8 @@ async function addMemberRow(tx: Tx, actor: Actor, project: { id: string; code: s
 export async function createProject(actor: Actor, raw: unknown): Promise<{ id: string; code: string; indicatorWarnings: string[] }> {
   const mod = await requireGlobalCap(actor, "createProject");
   const input = parseInput(projectCreateSchema, raw);
-  const isManager = mod.caps.fullAccess; // Manajer Program atau Direktur: boleh menetapkan PIC
-  if (input.picEmployeeId && !isManager) throw Errors.forbidden("Hanya Manajer Program yang dapat menetapkan Project Manager (PIC). Proyek dapat dibuat dulu tanpa PIC.");
+  const isManager = mod.caps.fullAccess; // Koordinator Program atau Direktur: boleh menetapkan PIC
+  if (input.picEmployeeId && !isManager) throw Errors.forbidden("Hanya Koordinator Program yang dapat menetapkan Project Manager (PIC). Proyek dapat dibuat dulu tanpa PIC.");
   // Pembuat berlevel Admin Program mengelola proyeknya lewat keanggotaan; tanpa data karyawan ia tidak akan bisa membuka proyeknya sendiri.
   if (!isManager && !actor.employeeId) throw Errors.forbidden("Akun Anda belum tertaut ke data karyawan, sehingga tidak dapat menjadi anggota proyek. Minta HR menautkan akun Anda.");
   const year = Number(today().slice(0, 4));
@@ -381,13 +381,13 @@ export async function changeProjectStatus(actor: Actor, id: string, raw: unknown
 export interface CloseResult { code: string; closedWithOverride: boolean; outstandingRequired: string[]; openTasks: number }
 
 /**
- * Penutupan proyek (Manajer Program). Syarat: semua item checklist WAJIB selesai. Bila ada yang belum, penutupan hanya
+ * Penutupan proyek (Koordinator Program). Syarat: semua item checklist WAJIB selesai. Bila ada yang belum, penutupan hanya
  * boleh dengan alasan pengecualian tertulis, dan daftar item yang dilewati dicatat di audit. Menutup proyek TIDAK
  * mengubah status tugas, surat tugas, uang harian, invoice, sertifikat, atau kompetensi peserta.
  */
 export async function closeProject(actor: Actor, id: string, raw: unknown): Promise<CloseResult> {
   const access = await loadProjectAccess(actor, id);
-  requireAbility(access, "close", "Hanya Manajer Program yang dapat menutup proyek.");
+  requireAbility(access, "close", "Hanya Koordinator Program yang dapat menutup proyek.");
   assertEditable(access.project);
   const input = parseInput(projectCloseSchema, raw);
   return transaction(async (tx) => {
@@ -417,7 +417,7 @@ export async function closeProject(actor: Actor, id: string, raw: unknown): Prom
 
 export async function cancelProject(actor: Actor, id: string, raw: unknown): Promise<void> {
   const access = await loadProjectAccess(actor, id);
-  requireAbility(access, "cancel", "Hanya Manajer Program yang dapat membatalkan proyek.");
+  requireAbility(access, "cancel", "Hanya Koordinator Program yang dapat membatalkan proyek.");
   assertEditable(access.project);
   const { reason } = parseInput(projectReasonSchema, raw);
   await transaction(async (tx) => {
@@ -431,7 +431,7 @@ export async function cancelProject(actor: Actor, id: string, raw: unknown): Pro
 /** Membuka kembali proyek Selesai (salah tutup). Proyek Dibatalkan bersifat final. Catatan penutupan lama tetap ada di audit. */
 export async function reopenProject(actor: Actor, id: string, raw: unknown): Promise<void> {
   const access = await loadProjectAccess(actor, id);
-  requireAbility(access, "reopen", "Hanya Manajer Program yang dapat membuka kembali proyek.");
+  requireAbility(access, "reopen", "Hanya Koordinator Program yang dapat membuka kembali proyek.");
   const { reason } = parseInput(projectReasonSchema, raw);
   await transaction(async (tx) => {
     const p = await tx.trainingProject.findUniqueOrThrow({ where: { id } });
@@ -473,8 +473,8 @@ export async function listMembers(actor: Actor, projectId: string): Promise<Memb
 }
 
 function requireTeamRights(access: Awaited<ReturnType<typeof loadProjectAccess>>, roles: ProjectRole[]): void {
-  requireAbility(access, "manage_team", "Hanya Project Manager atau Manajer Program yang dapat mengatur tim proyek.");
-  if (roles.includes("PROJECT_MANAGER")) requireAbility(access, "manage_pic", "Hanya Manajer Program yang dapat menetapkan, mengganti, atau mengakhiri Project Manager (PIC).");
+  requireAbility(access, "manage_team", "Hanya Project Manager atau Koordinator Program yang dapat mengatur tim proyek.");
+  if (roles.includes("PROJECT_MANAGER")) requireAbility(access, "manage_pic", "Hanya Koordinator Program yang dapat menetapkan, mengganti, atau mengakhiri Project Manager (PIC).");
 }
 
 export async function addMember(actor: Actor, projectId: string, raw: unknown): Promise<void> {

@@ -181,7 +181,7 @@ export function IndicatorConfigEditor({ initial }: { initial: IndicatorConfigDto
           </div>
         </Section>
 
-        <Section title="Kapasitas kerja" desc="Dasar penyebut Beban Tim. Per staf dapat dikecualikan oleh Manajer Program (bagian bawah halaman).">
+        <Section title="Kapasitas kerja" desc="Dasar penyebut Beban Tim. Per staf dapat dikecualikan oleh Koordinator Program (bagian bawah halaman).">
           <div className="grid gap-4 sm:grid-cols-3">
             <Num label="Jam efektif per hari" value={cfg.capacity.hoursPerDay} onChange={(n) => edit((c) => { c.capacity.hoursPerDay = n; })} hint="Dokumen: 6 jam (sisanya rapat, administrasi, dan lain-lain)." />
             <Num label="Minggu ke depan yang dihitung" step="1" value={cfg.capacity.weeksAhead} onChange={(n) => edit((c) => { c.capacity.weeksAhead = Math.trunc(n); })} hint="Selain minggu berjalan." />

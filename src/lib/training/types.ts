@@ -3,17 +3,17 @@
  * (`TrainingLevel`, `TrainingProjectStatus`, dst.) sehingga aman dipakai di sisi klien tanpa mengimpor Prisma.
  */
 
-export type TrainingLevel = "VIEWER" | "ADMIN_PROGRAM" | "MANAGER";
-export const TRAINING_LEVELS: readonly TrainingLevel[] = ["VIEWER", "ADMIN_PROGRAM", "MANAGER"];
+export type TrainingLevel = "VIEWER" | "ADMIN_PROGRAM" | "COORDINATOR";
+export const TRAINING_LEVELS: readonly TrainingLevel[] = ["VIEWER", "ADMIN_PROGRAM", "COORDINATOR"];
 export const TRAINING_LEVEL_LABEL: Record<TrainingLevel, string> = {
   VIEWER: "Pemantau (hanya lihat)",
   ADMIN_PROGRAM: "Admin Program",
-  MANAGER: "Manajer Program",
+  COORDINATOR: "Koordinator Program",
 };
 export const TRAINING_LEVEL_HELP: Record<TrainingLevel, string> = {
   VIEWER: "Melihat seluruh proyek, progres, jadwal, dan laporan. Tidak dapat mengubah data. Cocok untuk manajer atau pihak lain yang perlu memantau. (Direktur sudah memiliki akses penuh sebagai Super Admin.)",
   ADMIN_PROGRAM: "Dapat membuat proyek. Mengelola peserta, dokumen, jadwal, dan tugas hanya pada proyek yang ia ikuti, sesuai peran proyeknya.",
-  MANAGER: "Mengelola seluruh proyek: tim & PIC, tugas, template checklist, program, penutupan/pembatalan proyek. Jumlah pemegang tidak dibatasi; Direktur yang memberi akses.",
+  COORDINATOR: "Mengelola seluruh proyek: tim & PIC, tugas, template checklist, program, penutupan/pembatalan proyek. Jumlah pemegang tidak dibatasi; Direktur yang memberi akses.",
 };
 
 export type ActivityKind = "REGULAR" | "CERTIFICATION" | "IN_HOUSE" | "OTHER";
@@ -34,7 +34,7 @@ export const PROJECT_STATUS_LABEL: Record<ProjectStatus, string> = {
 /** Proyek aktif = berstatus Persiapan atau Berjalan. */
 export const ACTIVE_PROJECT_STATUSES: readonly ProjectStatus[] = ["PREPARATION", "RUNNING"];
 export const isActiveProject = (s: ProjectStatus): boolean => s === "PREPARATION" || s === "RUNNING";
-/** Proyek yang sudah ditutup/dibatalkan hanya dapat dibaca (kecuali dibuka kembali oleh Manajer Program). */
+/** Proyek yang sudah ditutup/dibatalkan hanya dapat dibaca (kecuali dibuka kembali oleh Koordinator Program). */
 export const isFinalProject = (s: ProjectStatus): boolean => s === "COMPLETED" || s === "CANCELLED";
 
 export type ProjectRole = "PROJECT_MANAGER" | "ADMIN_PROGRAM" | "PARTICIPANT_OWNER" | "MATERIAL_OWNER" | "DOCUMENTATION_OWNER" | "STAFF";

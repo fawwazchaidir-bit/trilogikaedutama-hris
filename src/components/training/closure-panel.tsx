@@ -59,7 +59,7 @@ export function ClosurePanel({ project, preview, canClose }: { project: ProjectD
 
       {open && canClose && (
         <Card>
-          <CardHeader title="Tutup proyek" description="Hanya Manajer Program. Tindakan ini tercatat di riwayat." />
+          <CardHeader title="Tutup proyek" description="Hanya Koordinator Program. Tindakan ini tercatat di riwayat." />
           <form className="space-y-4 px-5 py-4" onSubmit={(e) => { e.preventDefault(); reset(); setConfirm(true); }}>
             {needOverride && <Notice tone="warn">Masih ada checklist wajib yang belum selesai. Selesaikan dulu, atau isi alasan pengecualian di bawah (dicatat di riwayat beserta daftar item yang dilewati).</Notice>}
             <TextAreaField label="Catatan hasil pelaksanaan" required rows={3} maxLength={2000} value={f.summary} onChange={(e) => setF({ ...f, summary: e.target.value })} hint="Ringkas hasil pelaksanaan. Minimal 5 karakter." />
@@ -69,10 +69,10 @@ export function ClosurePanel({ project, preview, canClose }: { project: ProjectD
           </form>
         </Card>
       )}
-      {open && !canClose && <Notice tone="info">Penutupan proyek dilakukan oleh Manajer Program setelah checklist wajib selesai.</Notice>}
+      {open && !canClose && <Notice tone="info">Penutupan proyek dilakukan oleh Koordinator Program setelah checklist wajib selesai.</Notice>}
 
       <ConfirmDialog open={confirm} onClose={() => setConfirm(false)} loading={busy} confirmLabel="Ya, tutup proyek" title={`Tutup proyek ${project.code}?`}
-        description="Proyek berstatus Selesai dan datanya dikunci (baca-saja). Manajer Program dapat membukanya kembali dengan alasan."
+        description="Proyek berstatus Selesai dan datanya dikunci (baca-saja). Koordinator Program dapat membukanya kembali dengan alasan."
         onConfirm={() => void run(() => api(`/api/training/projects/${project.id}/close`, { body: { summary: f.summary, followUp: f.followUp, overrideReason: f.overrideReason } }), "Proyek ditutup.", () => setConfirm(false))}>
         {error && <Notice tone="danger">{error}</Notice>}
         {needOverride && <p className="mt-2 text-sm">Ditutup <strong>dengan pengecualian</strong> ({preview.requiredOutstanding.length} checklist wajib dilewati).</p>}

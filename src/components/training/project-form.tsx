@@ -94,7 +94,7 @@ export function ProjectCreateForm({ programs, templates, directory, canSetPic }:
             <option value="">— Tetapkan nanti —</option>
             {directory?.map((d) => <option key={d.id} value={d.id}>{d.fullName} · {d.position}</option>)}
           </SelectField>
-        ) : <Notice tone="info">PIC ditetapkan oleh Manajer Program. Anda otomatis menjadi anggota (Admin Program) proyek ini.</Notice>}
+        ) : <Notice tone="info">PIC ditetapkan oleh Koordinator Program. Anda otomatis menjadi anggota (Admin Program) proyek ini.</Notice>}
       </div>
       <div className="flex justify-end gap-2">
         <Button onClick={() => router.push("/training/proyek")} disabled={busy}>Batal</Button>

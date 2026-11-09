@@ -218,7 +218,7 @@ export async function changeTaskStatus(actor: Actor, taskId: string, raw: unknow
   if (!isAssignee && !canManage) throw Errors.forbidden("Hanya penanggung jawab tugas atau pengelola proyek yang dapat mengubah status tugas.");
   const allowed = allowedTaskTransitions({ status: task.status, requiresReview: task.requiresReview, isAssignee, canManage });
   if (!allowed.includes(input.status)) {
-    if (task.status === "IN_REVIEW" && input.status === "DONE" && isAssignee) throw Errors.forbidden("Anda tidak dapat memeriksa hasil tugas Anda sendiri. Minta Project Manager atau Manajer Program memeriksanya.");
+    if (task.status === "IN_REVIEW" && input.status === "DONE" && isAssignee) throw Errors.forbidden("Anda tidak dapat memeriksa hasil tugas Anda sendiri. Minta Project Manager atau Koordinator Program memeriksanya.");
     if (task.requiresReview && input.status === "DONE" && task.status !== "IN_REVIEW") throw Errors.conflict("Tugas ini perlu diperiksa: kirim dulu ke \"Menunggu pemeriksaan\".");
     throw Errors.conflict(`Status tugas tidak dapat diubah dari "${TASK_STATUS_LABEL[task.status]}" ke "${TASK_STATUS_LABEL[input.status]}".`);
   }
@@ -382,7 +382,7 @@ export async function listMyChecklistItems(actor: Actor): Promise<MyChecklistIte
   return rows.map((r) => ({ id: r.id, projectId: r.projectId, projectCode: r.project.code, projectName: r.project.name, phase: r.phase, title: r.title, isRequired: r.isRequired }));
 }
 
-// ═════════════════════════════ Template checklist (Manajer Program) ═════════════════════════════
+// ═════════════════════════════ Template checklist (Koordinator Program) ═════════════════════════════
 
 export interface TemplateDto {
   id: string; name: string; description: string | null; isActive: boolean;
@@ -428,7 +428,7 @@ export async function saveTemplate(actor: Actor, id: string | null, raw: unknown
   });
 }
 
-/** Membuat template standar HANYA atas tindakan eksplisit Manajer Program (bukan otomatis saat migrasi). Idempoten. */
+/** Membuat template standar HANYA atas tindakan eksplisit Koordinator Program (bukan otomatis saat migrasi). Idempoten. */
 export async function ensureDefaultTemplate(actor: Actor): Promise<{ id: string; created: boolean }> {
   await requireGlobalCap(actor, "managePrograms");
   const existing = await prisma.trainingChecklistTemplate.findFirst({ where: { name: { equals: DEFAULT_TEMPLATE_NAME, mode: "insensitive" } }, select: { id: true } });

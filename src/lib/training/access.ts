@@ -11,7 +11,7 @@
  * penugasan, sehingga pergantian jabatan/rangkap tugas tidak mengubah izin secara diam-diam.
  *
  * Akses lintas proyek tanpa keanggotaan: SUPER_ADMIN (Direktur) dan MANAGER = kelola penuh; VIEWER = hanya lihat.
- * Keputusan pemilik sistem: Direktur boleh mengubah data proyek, dan jumlah pemegang level Manajer Program TIDAK dibatasi (Direktur yang memberi akses).
+ * Keputusan pemilik sistem: Direktur boleh mengubah data proyek, dan jumlah pemegang level Koordinator Program TIDAK dibatasi (Direktur yang memberi akses).
  * Menyembunyikan menu hanya kosmetik; penegakan sebenarnya ada di service (lihat services/training/access.ts).
  */
 import type { Role } from "@/lib/permissions";
@@ -21,11 +21,11 @@ export const PROJECT_ABILITIES = [
   "view",                // melihat proyek, tugas, jadwal, daftar peserta (tanpa kontak), dokumen non-sensitif
   "update",              // mengubah data proyek (nama, lokasi, tanggal, deskripsi, catatan)
   "change_status",       // Draf → Persiapan → Berjalan
-  "close",               // menutup proyek (Selesai) — Manajer Program
-  "cancel",              // membatalkan proyek — Manajer Program
-  "reopen",              // membuka kembali proyek Selesai — Manajer Program
+  "close",               // menutup proyek (Selesai) — Koordinator Program
+  "cancel",              // membatalkan proyek — Koordinator Program
+  "reopen",              // membuka kembali proyek Selesai — Koordinator Program
   "manage_team",         // menambah/mengakhiri anggota (selain PIC)
-  "manage_pic",          // menetapkan/mengganti Project Manager (PIC) — Manajer Program
+  "manage_pic",          // menetapkan/mengganti Project Manager (PIC) — Koordinator Program
   "manage_tasks",        // membuat/mengubah/menugaskan semua tugas, memeriksa hasil tugas
   "manage_checklist",    // menerapkan template, menambah/mengubah/menghapus item checklist, mengubah status item mana pun
   "manage_participants", // mengelola peserta; juga: melihat KONTAK peserta & dokumen peserta
@@ -45,7 +45,7 @@ export interface AccessSubject {
 }
 
 export interface GlobalCaps {
-  /** Kelola penuh lintas proyek: Super Admin (Direktur) atau Manajer Program. */
+  /** Kelola penuh lintas proyek: Super Admin (Direktur) atau Koordinator Program. */
   fullAccess: boolean;
   /** Melihat SEMUA proyek (bukan hanya yang diikuti). */
   viewAll: boolean;
@@ -65,7 +65,7 @@ export interface GlobalCaps {
 
 export function globalCaps(s: AccessSubject): GlobalCaps {
   const isSuper = s.role === "SUPER_ADMIN";
-  const full = isSuper || s.level === "MANAGER";
+  const full = isSuper || s.level === "COORDINATOR";
   return {
     fullAccess: full,
     viewAll: full || s.level === "VIEWER",
@@ -109,7 +109,7 @@ export function canSeeModule(s: AccessSubject, hasActiveMembership: boolean): bo
   return globalCaps(s).hasModule || hasActiveMembership;
 }
 
-/** Peran proyek mana yang boleh ditetapkan `abilities` (PIC khusus Manajer Program). */
+/** Peran proyek mana yang boleh ditetapkan `abilities` (PIC khusus Koordinator Program). */
 export function assignableRoles(abilities: ReadonlySet<ProjectAbility>): ProjectRole[] {
   const roles: ProjectRole[] = ["ADMIN_PROGRAM", "PARTICIPANT_OWNER", "MATERIAL_OWNER", "DOCUMENTATION_OWNER", "STAFF"];
   if (abilities.has("manage_pic")) roles.unshift("PROJECT_MANAGER");

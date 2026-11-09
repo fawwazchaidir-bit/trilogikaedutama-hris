@@ -63,7 +63,7 @@ export function TeamPanel({ projectId, members, directory, canManageTeam, canMan
             <option value="">— Pilih karyawan —</option>
             {directory?.filter((d) => !taken.has(d.id)).map((d) => <option key={d.id} value={d.id}>{d.fullName} · {d.position}{d.division ? ` (${d.division})` : ""}</option>)}
           </SelectField>
-          <SelectField label="Peran di proyek" value={add.role} onChange={(e) => setAdd({ ...add, role: e.target.value as ProjectRole })} hint={canManagePic ? undefined : "Project Manager (PIC) hanya dapat ditetapkan oleh Manajer Program."}>
+          <SelectField label="Peran di proyek" value={add.role} onChange={(e) => setAdd({ ...add, role: e.target.value as ProjectRole })} hint={canManagePic ? undefined : "Project Manager (PIC) hanya dapat ditetapkan oleh Koordinator Program."}>
             {roles.map((r) => <option key={r} value={r}>{PROJECT_ROLE_LABEL[r]}</option>)}
           </SelectField>
           <TextField label="Catatan" maxLength={200} value={add.note} onChange={(e) => setAdd({ ...add, note: e.target.value })} />

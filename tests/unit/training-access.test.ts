@@ -12,7 +12,7 @@ const A = (s: AccessSubject, m: ProjectRole | null = null) => [...projectAbiliti
 describe("model akses Training & Operations (murni)", () => {
   it("MANAGER memiliki SEMUA kemampuan pada semua proyek, apa pun role globalnya; Super Admin (Direktur) juga memiliki semuanya tanpa perlu level", () => {
     expect(A(subj("SUPER_ADMIN"))).toEqual([...PROJECT_ABILITIES].sort());
-    for (const r of ROLES) expect(A(subj(r, "MANAGER"))).toEqual([...PROJECT_ABILITIES].sort());
+    for (const r of ROLES) expect(A(subj(r, "COORDINATOR"))).toEqual([...PROJECT_ABILITIES].sort());
   });
 
   it("role global HRIS (selain Super Admin) TIDAK memberi kemampuan apa pun tanpa level modul/keanggotaan ('admin HRIS' ≠ 'Admin Program')", () => {
@@ -25,9 +25,9 @@ describe("model akses Training & Operations (murni)", () => {
     expect(globalCaps(subj("SUPER_ADMIN"))).toMatchObject({ fullAccess: true, viewAll: true, createProject: true, managePrograms: true, manageDirectory: true, manageAccess: true });
     expect(A(subj("EMPLOYEE", "VIEWER"))).toEqual(["view"]);
     expect(globalCaps(subj("EMPLOYEE", "VIEWER"))).toMatchObject({ fullAccess: false, viewAll: true, manageAccess: false, createProject: false, managePrograms: false });
-    // Role HRIS lain TIDAK mendapat akses penuh walau mengatur akun: hanya Super Admin atau pemegang level Manajer Program.
+    // Role HRIS lain TIDAK mendapat akses penuh walau mengatur akun: hanya Super Admin atau pemegang level Koordinator Program.
     expect(globalCaps(subj("HR_ADMIN")).fullAccess).toBe(false);
-    expect(globalCaps(subj("EMPLOYEE", "MANAGER")).fullAccess).toBe(true);
+    expect(globalCaps(subj("EMPLOYEE", "COORDINATOR")).fullAccess).toBe(true);
   });
 
   it("hanya Super Admin yang mengatur akses modul; level Manajer tidak cukup", () => {
@@ -73,7 +73,7 @@ describe("model akses Training & Operations (murni)", () => {
   });
 
   it("PIC hanya dapat ditetapkan oleh yang memiliki manage_pic", () => {
-    expect(assignableRoles(projectAbilities(subj("EMPLOYEE", "MANAGER"), null))).toContain("PROJECT_MANAGER");
+    expect(assignableRoles(projectAbilities(subj("EMPLOYEE", "COORDINATOR"), null))).toContain("PROJECT_MANAGER");
     expect(assignableRoles(projectAbilities(subj("EMPLOYEE"), "PROJECT_MANAGER"))).not.toContain("PROJECT_MANAGER");
   });
 
@@ -81,8 +81,8 @@ describe("model akses Training & Operations (murni)", () => {
     const labels = (s: AccessSubject, emp: boolean) => trainingNav(globalCaps(s), emp).map((i) => i.label);
     expect(labels(subj("SUPER_ADMIN"), false)).toContain("Akses Training");
     expect(labels(subj("SUPER_ADMIN"), false)).not.toContain("Tugas Saya");
-    expect(labels(subj("EMPLOYEE", "MANAGER"), true)).not.toContain("Akses Training");
-    expect(labels(subj("EMPLOYEE", "MANAGER"), true)).toContain("Tugas Saya");
+    expect(labels(subj("EMPLOYEE", "COORDINATOR"), true)).not.toContain("Akses Training");
+    expect(labels(subj("EMPLOYEE", "COORDINATOR"), true)).toContain("Tugas Saya");
     expect(trainingNav(globalCaps(subj("EMPLOYEE")), true).every((i) => i.href.startsWith("/training"))).toBe(true);
   });
 
@@ -96,8 +96,8 @@ describe("model akses Training & Operations (murni)", () => {
 describe("usulan level dari jabatan (bagan organisasi) — hanya petunjuk", () => {
   const level = (p: string | null) => suggestLevel(p).level;
   it("memetakan jabatan pada bagan organisasi", () => {
-    expect(level("Manajer Operasional & Keuangan")).toBe("MANAGER");
-    expect(level("Supervisor Administrasi & Kurikulum")).toBe("MANAGER");
+    expect(level("Manajer Operasional & Keuangan")).toBe("VIEWER");
+    expect(level("Supervisor Administrasi & Kurikulum")).toBe("COORDINATOR");
     expect(level("Staf Adm. & Kurikulum")).toBe("ADMIN_PROGRAM");
     expect(level("Staf Administrasi & Kurikulum")).toBe("ADMIN_PROGRAM");
     expect(level("Manajer Marketing & Relations")).toBe("VIEWER");

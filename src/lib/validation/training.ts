@@ -73,7 +73,7 @@ export const projectCreateSchema = z.object({
   ...projectFields,
   /** Template checklist yang diterapkan saat proyek dibuat (opsional). */
   checklistTemplateId: optUuid,
-  /** Karyawan yang menjadi Project Manager (PIC). Hanya Manajer Program yang boleh menetapkan. */
+  /** Karyawan yang menjadi Project Manager (PIC). Hanya Koordinator Program yang boleh menetapkan. */
   picEmployeeId: optUuid,
 }).superRefine(dateOrder);
 

@@ -11,7 +11,7 @@ import { useRunner } from "./use-runner";
 const DAYS = [[1, "Sen"], [2, "Sel"], [3, "Rab"], [4, "Kam"], [5, "Jum"], [6, "Sab"], [7, "Min"]] as const;
 const cell = "h-8 rounded-md border border-line bg-white px-2 text-sm";
 
-/** Pengecualian kapasitas per staf (mis. paruh waktu). Tanpa pengecualian, staf memakai bawaan konfigurasi. Hanya Manajer Program / Direktur. */
+/** Pengecualian kapasitas per staf (mis. paruh waktu). Tanpa pengecualian, staf memakai bawaan konfigurasi. Hanya Koordinator Program / Direktur. */
 export function CapacityPanel({ data }: { data: StaffCapacityList }) {
   const { busy, error, fieldErrors, run } = useRunner();
   const [emp, setEmp] = useState("");

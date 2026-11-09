@@ -77,8 +77,8 @@ test("Direktur mengisi pemegang jabatan (PIC) dan fasilitator; perubahan menjadi
   await ctx.close();
 });
 
-test("rumus bersifat terbuka untuk dilihat tetapi hanya Direktur yang mengubah; kapasitas per staf oleh Manajer Program", async ({ browser }) => {
-  const a = await as(browser, "ayu"); // Manajer Program
+test("rumus bersifat terbuka untuk dilihat tetapi hanya Direktur yang mengubah; kapasitas per staf oleh Koordinator Program", async ({ browser }) => {
+  const a = await as(browser, "ayu"); // Koordinator Program
   await a.page.goto("/training/indikator");
   await expect(a.page.getByText(/hanya Super Admin \(Direktur\) yang dapat mengubahnya/)).toBeVisible();
   await expect(a.page.getByRole("button", { name: "Simpan sebagai versi baru" })).toHaveCount(0);
@@ -185,7 +185,7 @@ test("halaman Pemantauan: kartu program, peta beban tim, kepadatan kelas; anggot
   await expect(c.page.getByText("Anda melihat beban Anda sendiri")).toBeVisible();
   await expect(c.page.getByRole("row").filter({ hasText: "Ayu Lestari" })).toHaveCount(0);
   await c.page.goto("/training/pemantauan?tab=kelas");
-  await expect(c.page.getByText(/hanya terlihat oleh Pemantau, Manajer Program, dan Direktur/)).toBeVisible();
+  await expect(c.page.getByText(/hanya terlihat oleh Pemantau, Koordinator Program, dan Direktur/)).toBeVisible();
   await c.ctx.close();
 });
 

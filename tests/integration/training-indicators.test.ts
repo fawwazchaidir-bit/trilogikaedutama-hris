@@ -73,7 +73,7 @@ describe("konfigurasi indikator (dapat diubah di aplikasi)", () => {
     expect(audit?.summary).toContain("versi 1");
   });
 
-  it("hanya Super Admin yang boleh mengubah; Manajer Program, Admin Program, Pemantau, dan HR Admin ditolak", async () => {
+  it("hanya Super Admin yang boleh mengubah; Koordinator Program, Admin Program, Pemantau, dan HR Admin ditolak", async () => {
     for (const a of [fx.mgr, fx.adm, fx.viewer, fx.hr]) {
       const e = await fail(saveIndicatorConfig(a, { config: defaultIndicatorConfig() }));
       expect(e?.status, a.email).toBeOneOf([403, 404]);
@@ -444,7 +444,7 @@ describe("Beban Tim", () => {
     expect((await rowOf(fx.mgr, e)).weeks[0]!.capacity).toBe(30);
   });
 
-  it("kapasitas per staf dapat dikecualikan (4 jam/hari → 20 jam) oleh Manajer Program; Admin Program/Pemantau ditolak; dapat dihapus", async () => {
+  it("kapasitas per staf dapat dikecualikan (4 jam/hari → 20 jam) oleh Koordinator Program; Admin Program/Pemantau ditolak; dapat dihapus", async () => {
     const e = fx.empIds[2];
     await loadWeek(e, 20);
     await upsertStaffCapacity(fx.mgr, e, { hoursPerDay: 4, workDays: [1, 2, 3, 4, 5], note: "Paruh waktu" });

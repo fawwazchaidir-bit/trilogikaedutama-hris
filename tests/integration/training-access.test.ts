@@ -51,9 +51,9 @@ describe("gerbang modul: siapa yang boleh masuk", () => {
     expect(await prisma.trainingAccess.count({ where: { userId: fx.superAdmin.userId } })).toBe(0); // tanpa baris level
   });
 
-  it("jumlah pemegang level Manajer Program TIDAK dibatasi; Direktur yang memberi", async () => {
-    for (const a of [fx.emp1, fx.emp2, fx.emp3, fx.loner]) await setAccessLevel(fx.superAdmin, { userId: a.userId, level: "MANAGER" });
-    expect(await prisma.trainingAccess.count({ where: { level: "MANAGER" } })).toBe(5); // 4 baru + 1 dari fixture
+  it("jumlah pemegang level Koordinator Program TIDAK dibatasi; Direktur yang memberi", async () => {
+    for (const a of [fx.emp1, fx.emp2, fx.emp3, fx.loner]) await setAccessLevel(fx.superAdmin, { userId: a.userId, level: "COORDINATOR" });
+    expect(await prisma.trainingAccess.count({ where: { level: "COORDINATOR" } })).toBe(5); // 4 baru + 1 dari fixture
     const id = await mkProject(fx.mgr);
     for (const a of [fx.emp1, fx.emp2, fx.emp3, fx.loner]) expect((await getProject(a, id)).abilities).toContain("close");
   });
@@ -79,8 +79,8 @@ describe("gerbang modul: siapa yang boleh masuk", () => {
   });
 
   it("level modul hanya dapat diatur Super Admin; tercatat di audit dan pemilik akun diberi tahu", async () => {
-    expect(await fail(setAccessLevel(fx.mgr, { userId: fx.loner.userId, level: "MANAGER" }))).toMatchObject(FORBIDDEN);
-    expect(await fail(setAccessLevel(fx.hr, { userId: fx.loner.userId, level: "MANAGER" }))).toMatchObject(FORBIDDEN);
+    expect(await fail(setAccessLevel(fx.mgr, { userId: fx.loner.userId, level: "COORDINATOR" }))).toMatchObject(FORBIDDEN);
+    expect(await fail(setAccessLevel(fx.hr, { userId: fx.loner.userId, level: "COORDINATOR" }))).toMatchObject(FORBIDDEN);
     await setAccessLevel(fx.superAdmin, { userId: fx.loner.userId, level: "VIEWER", note: "Pemantau marketing" });
     expect((await listProjects(fx.loner)).total).toBe(0); // kini punya akses modul
     const audit = await prisma.auditLog.findFirstOrThrow({ where: { action: "training.access.grant" } });
@@ -93,10 +93,10 @@ describe("gerbang modul: siapa yang boleh masuk", () => {
 
   it("jabatan HANYA petunjuk: mengubah teks jabatan tidak mengubah izin", async () => {
     const id = await mkProject(fx.mgr);
-    await prisma.employee.update({ where: { id: fx.lonerEmp }, data: { position: "Manajer Program" } });
+    await prisma.employee.update({ where: { id: fx.lonerEmp }, data: { position: "Koordinator Program" } });
     expect(await fail(getProject(fx.loner, id))).toMatchObject(NOT_FOUND);
     const rows = await listAccessRows(fx.superAdmin);
-    expect(rows.find((r) => r.userId === fx.loner.userId)).toMatchObject({ position: "Manajer Program", level: null });
+    expect(rows.find((r) => r.userId === fx.loner.userId)).toMatchObject({ position: "Koordinator Program", level: null });
   });
 
   it("Admin Program membuat proyek → otomatis anggota (Admin Program); tidak boleh menetapkan PIC", async () => {
@@ -192,7 +192,7 @@ describe("IDOR: mengganti ID tidak membuka proyek orang lain", () => {
 });
 
 describe("tim proyek", () => {
-  it("hanya Project Manager/Manajer yang mengatur tim; PIC hanya oleh Manajer Program", async () => {
+  it("hanya Project Manager/Manajer yang mengatur tim; PIC hanya oleh Koordinator Program", async () => {
     const id = await mkProject(fx.mgr);
     await addTeam(fx.mgr, id, [[fx.empIds[0], "PROJECT_MANAGER"], [fx.empIds[1], "STAFF"]]);
     expect(await fail(addMember(fx.emp2, id, { employeeId: fx.empIds[2], role: "STAFF" }))).toMatchObject(FORBIDDEN); // staf

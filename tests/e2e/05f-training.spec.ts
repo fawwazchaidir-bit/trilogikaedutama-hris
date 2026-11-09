@@ -23,12 +23,12 @@ const openProject = (page: Page, tab: string) => page.goto(`${projectUrl}?tab=${
 
 test.describe.configure({ mode: "serial" });
 
-test("Super Admin memberi level modul: Ayu = Manajer Program, Budi = Admin Program (tercatat di audit)", async ({ browser }) => {
+test("Super Admin memberi level modul: Ayu = Koordinator Program, Budi = Admin Program (tercatat di audit)", async ({ browser }) => {
   const { ctx, page } = await as(browser, "pimpinan");
   await expect(page.getByRole("navigation", { name: "Menu utama" }).getByText("Training & Operations")).toBeVisible();
   await page.goto("/training/akses");
   await expect(page.getByRole("heading", { name: "Akses Training & Operations" })).toBeVisible();
-  for (const [email, name, level, label] of [[USERS.ayu, "Ayu Lestari", "MANAGER", "Manajer Program"], [USERS.budi, "Budi Santoso", "ADMIN_PROGRAM", "Admin Program"]] as const) {
+  for (const [email, name, level, label] of [[USERS.ayu, "Ayu Lestari", "COORDINATOR", "Koordinator Program"], [USERS.budi, "Budi Santoso", "ADMIN_PROGRAM", "Admin Program"]] as const) {
     const row = page.getByRole("row").filter({ hasText: email });
     await row.getByLabel(`Level modul ${name}`).selectOption(level);
     await row.getByRole("button", { name: "Simpan" }).click();
@@ -124,7 +124,7 @@ test("Budi (level Admin Program + peran Staf): hanya mengerjakan tugasnya; tidak
   await openProject(page, "dokumen");
   await expect(page.getByRole("form", { name: "Unggah dokumen" })).toHaveCount(0);
   await openProject(page, "penutupan");
-  await expect(page.getByText(/Penutupan proyek dilakukan oleh Manajer Program/)).toBeVisible();
+  await expect(page.getByText(/Penutupan proyek dilakukan oleh Koordinator Program/)).toBeVisible();
   // …tetapi level Admin Program memang boleh membuat proyek baru
   await page.goto("/training/proyek");
   await expect(page.getByRole("link", { name: /Proyek baru/ })).toBeVisible();

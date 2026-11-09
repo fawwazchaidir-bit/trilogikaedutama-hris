@@ -26,7 +26,7 @@ export function normalizeRoom(room: string | null | undefined): string | null {
 export interface TemplateItemSeed { phase: ChecklistPhase; title: string; isRequired: boolean }
 
 /**
- * Daftar standar awal (usulan; dapat diubah Manajer Program). Item "wajib" = syarat penutupan proyek.
+ * Daftar standar awal (usulan; dapat diubah Koordinator Program). Item "wajib" = syarat penutupan proyek.
  * Dibuat hanya atas tindakan eksplisit (bukan otomatis saat migrasi).
  */
 export const DEFAULT_TEMPLATE_NAME = "Standar Pelatihan Trilogika";

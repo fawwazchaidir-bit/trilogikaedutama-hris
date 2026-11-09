@@ -8,10 +8,10 @@ import type { TrainingLevel } from "./types";
 export interface LevelSuggestion { level: TrainingLevel | null; reason: string }
 
 const RULES: { test: RegExp; level: TrainingLevel; reason: string }[] = [
-  { test: /manajer\s+operasional/i, level: "MANAGER", reason: "Mengendalikan operasional harian dan menjadi penyetuju pada SOP ADK." },
-  { test: /supervisor\s+adm\w*.*kurikulum|kurikulum.*supervisor/i, level: "MANAGER", reason: "Memegang jadwal induk, materi, dan instruktur: berperan sebagai Manajer Program sehari-hari (bagan tidak memuat jabatan itu)." },
+  { test: /manajer\s+operasional/i, level: "VIEWER", reason: "Pengendali operasional & keuangan: memeriksa bentrok jadwal (SOP ADK/004). Tingkat Manajer otomatis berhak sebagai Pemantau; bila perlu melihat kontak peserta, beri level manual." },
+  { test: /supervisor\s+adm\w*.*kurikulum|kurikulum.*supervisor/i, level: "COORDINATOR", reason: "PIC jadwal induk, materi, instruktur, dan publikasi (SOP ADK/001, 002, 004, 009): menjalankan fungsi Koordinator Program (bagan tidak memuat jabatan itu). Ditunjuk manual oleh Direktur." },
   { test: /staf\s+adm\w*.*kurikulum/i, level: "ADMIN_PROGRAM", reason: "Mengelola jadwal, materi, dan halaman program; dapat membuat proyek dan mengelola proyek yang ia ikuti." },
-  { test: /manajer\s+marketing/i, level: "VIEWER", reason: "Perlu memantau status pelaksanaan (mis. in-house dari B2B) tanpa hak ubah dan tanpa melihat kontak peserta." },
+  { test: /manajer\s+marketing/i, level: "VIEWER", reason: "Menerima Jadwal Induk dan memantau status pelaksanaan (mis. in-house dari B2B) tanpa hak ubah dan tanpa melihat kontak peserta. Tingkat Manajer otomatis berhak sebagai Pemantau." },
 ];
 
 export function suggestLevel(position: string | null | undefined): LevelSuggestion {

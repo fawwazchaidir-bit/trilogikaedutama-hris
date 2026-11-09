@@ -5,7 +5,7 @@
  *  - TRAINING_MODULE_ENABLED bukan "true" (modul harus sengaja dinyalakan);
  *  - sudah ada proyek pelatihan (tidak menimpa data).
  * Seluruh data dibuat lewat SERVICE yang sama dengan aplikasi, sehingga aturan validasi, audit, dan akses ikut berlaku.
- * Pemetaan akses demo: ayu = Manajer Program, budi = Admin Program, citra = anggota proyek biasa, hr = TANPA akses
+ * Pemetaan akses demo: ayu = Koordinator Program, budi = Admin Program, citra = anggota proyek biasa, hr = TANPA akses
  * (mendemonstrasikan bahwa "admin HRIS" bukan "Admin Program"). Tidak ada seed otomatis di production.
  */
 import "dotenv/config";
@@ -40,7 +40,7 @@ async function main() {
   const budi = await actorOf("budi@demo.hris.test");
   const citra = await actorOf("citra@demo.hris.test");
   await prisma.trainingAccess.createMany({ data: [
-    { userId: ayu.userId, level: "MANAGER", grantedById: boss.userId, note: "DEMO: Manajer Program" },
+    { userId: ayu.userId, level: "COORDINATOR", grantedById: boss.userId, note: "DEMO: Koordinator Program" },
     { userId: budi.userId, level: "ADMIN_PROGRAM", grantedById: boss.userId, note: "DEMO: Admin Program" },
   ] });
 
@@ -91,7 +91,7 @@ async function main() {
   await applyChecklistTemplate(ayu, (await prisma.trainingProject.findFirstOrThrow({ where: { name: { contains: "HACCP" } } })).id, { templateId: tpl.id });
 
   console.log("\n✔ Data demo Training & Operations dibuat (3 program, 3 proyek, tugas, checklist, jadwal, peserta, instruktur, konfigurasi indikator & milestone).");
-  console.log("  Akses demo: ayu = Manajer Program · budi = Admin Program · citra = PJ Peserta (anggota) · pimpinan = Super Admin (lihat) · hr = tanpa akses.");
+  console.log("  Akses demo: ayu = Koordinator Program · budi = Admin Program · citra = PJ Peserta (anggota) · pimpinan = Super Admin (lihat) · hr = tanpa akses.");
 }
 
 main().catch((e) => { console.error(`Gagal: ${e instanceof Error ? e.message : e}`); process.exitCode = 1; }).finally(() => prisma.$disconnect());

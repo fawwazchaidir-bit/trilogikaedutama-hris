@@ -388,12 +388,12 @@ export async function updateWorkloadTask(actor: Actor, id: string, raw: unknown)
   });
 }
 
-/** Kapasitas per staf (jam efektif & hari kerja). Hanya Manajer Program / Direktur (peran "Manajer Operasional dan Keuangan" di dokumen). */
+/** Kapasitas per staf (jam efektif & hari kerja). Hanya Koordinator Program / Direktur (peran "Manajer Operasional dan Keuangan" di dokumen). */
 export async function upsertStaffCapacity(actor: Actor, employeeId: string, raw: unknown): Promise<void> {
   assertModuleEnabled();
   const mod = await getModuleContext(actor);
   if (!mod.canSee) throw Errors.notFound("Halaman");
-  if (!mod.caps.fullAccess) throw Errors.forbidden("Hanya Manajer Program atau Direktur yang dapat mengatur kapasitas staf.");
+  if (!mod.caps.fullAccess) throw Errors.forbidden("Hanya Koordinator Program atau Direktur yang dapat mengatur kapasitas staf.");
   assertUuid(employeeId, "Karyawan");
   const input = parseInput(staffCapacitySchema, raw);
   await transaction(async (tx) => {
@@ -408,12 +408,12 @@ export async function upsertStaffCapacity(actor: Actor, employeeId: string, raw:
 export interface StaffCapacityDto { employeeId: string; name: string; hoursPerDay: number | null; workDays: number[]; note: string | null }
 export interface StaffCapacityList { rows: StaffCapacityDto[]; defaults: { hoursPerDay: number; workDays: number[] }; employees: { id: string; name: string }[] }
 
-/** Pengecualian kapasitas per staf (selain bawaan konfigurasi). Hanya Manajer Program / Direktur. */
+/** Pengecualian kapasitas per staf (selain bawaan konfigurasi). Hanya Koordinator Program / Direktur. */
 export async function listStaffCapacity(actor: Actor): Promise<StaffCapacityList> {
   assertModuleEnabled();
   const mod = await getModuleContext(actor);
   if (!mod.canSee) throw Errors.notFound("Halaman");
-  if (!mod.caps.fullAccess) throw Errors.forbidden("Hanya Manajer Program atau Direktur yang dapat melihat pengaturan kapasitas staf.");
+  if (!mod.caps.fullAccess) throw Errors.forbidden("Hanya Koordinator Program atau Direktur yang dapat melihat pengaturan kapasitas staf.");
   const [rows, emps, cfg] = await Promise.all([
     prisma.trainingStaffCapacity.findMany({ include: { employee: { select: { fullName: true, isActive: true } } }, orderBy: { employee: { fullName: "asc" } } }),
     prisma.employee.findMany({ where: { isActive: true }, orderBy: { fullName: "asc" }, select: { id: true, fullName: true } }),
@@ -431,7 +431,7 @@ export async function clearStaffCapacity(actor: Actor, employeeId: string): Prom
   assertModuleEnabled();
   const mod = await getModuleContext(actor);
   if (!mod.canSee) throw Errors.notFound("Halaman");
-  if (!mod.caps.fullAccess) throw Errors.forbidden("Hanya Manajer Program atau Direktur yang dapat mengatur kapasitas staf.");
+  if (!mod.caps.fullAccess) throw Errors.forbidden("Hanya Koordinator Program atau Direktur yang dapat mengatur kapasitas staf.");
   assertUuid(employeeId, "Karyawan");
   await transaction(async (tx) => {
     const row = await tx.trainingStaffCapacity.findUnique({ where: { employeeId }, include: { employee: { select: { fullName: true } } } });

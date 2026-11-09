@@ -62,7 +62,7 @@ export default async function MonitoringPage({ searchParams }: { searchParams: S
         const h = await guard(() => getTeamHeatmap(user));
         return (
           <div className="space-y-5">
-            {h.scope === "self" && <Notice tone="info">Anda melihat beban Anda sendiri. Peta seluruh tim hanya untuk Pemantau, Manajer Program, dan Direktur.</Notice>}
+            {h.scope === "self" && <Notice tone="info">Anda melihat beban Anda sendiri. Peta seluruh tim hanya untuk Pemantau, Koordinator Program, dan Direktur.</Notice>}
             <div className="flex flex-wrap gap-2 text-xs"><span className="text-muted">Pita:</span>
               <Badge tone="blue">Ada ruang ≤ {h.thresholds.roomyMax}%</Badge><Badge tone="green">Ideal ≤ {h.thresholds.greenMax}%</Badge><Badge tone="amber">Padat ≤ {h.thresholds.yellowMax}%</Badge><Badge tone="red">Overload &gt; {h.thresholds.yellowMax}%</Badge>
             </div>
@@ -97,7 +97,7 @@ export default async function MonitoringPage({ searchParams }: { searchParams: S
 
       {tab === "kelas" && (async () => {
         const d = await guard(() => getClassDensity(user));
-        if (d.restricted) return <Notice tone="info">Kepadatan kelas menggabungkan seluruh program, sehingga hanya terlihat oleh Pemantau, Manajer Program, dan Direktur.</Notice>;
+        if (d.restricted) return <Notice tone="info">Kepadatan kelas menggabungkan seluruh program, sehingga hanya terlihat oleh Pemantau, Koordinator Program, dan Direktur.</Notice>;
         return (
           <div className="space-y-4">
             <p className="text-xs text-muted">KP = (luring + daring + 2 × hybrid) ÷ fasilitator tersedia. Di atas {fmtNum(d.max, 1)} berarti ada kelas tanpa pendamping (pemicu Merah). Fasilitator dikonfigurasi: {d.facilitatorsConfigured}. 31 hari ke depan, hari kerja saja.</p>

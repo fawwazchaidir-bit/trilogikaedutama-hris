@@ -41,7 +41,7 @@ describe("flag modul mati", () => {
 
   it("data tidak dihapus & HRIS berjalan normal: level akses tetap tersimpan, fitur HRIS tetap dapat dipakai", async () => {
     expect(await prisma.trainingAccess.count()).toBe(3);
-    expect((await getModuleContext(fx.mgr)).subject.level).toBe("MANAGER"); // konteks murni (menu memeriksa flag sendiri)
+    expect((await getModuleContext(fx.mgr)).subject.level).toBe("COORDINATOR"); // konteks murni (menu memeriksa flag sendiri)
     expect((await listOvertime(fx.hr)).total).toBe(0); // fitur HRIS tidak terpengaruh
   });
 });

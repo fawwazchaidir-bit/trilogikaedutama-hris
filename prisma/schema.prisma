@@ -37,6 +37,13 @@ enum ReviewCapacity {
 }
 
 /// Checklist siklus karyawan: proses MASUK (onboarding) dan BERHENTI (offboarding). Cukup berupa daftar centang untuk tim kecil.
+/// Tingkat jabatan menurut bagan organisasi (SOP). Atribut EKSPLISIT (tidak diturunkan dari pohon atasan); Direktur dikenali dari role Super Admin.
+enum JobLevel {
+  STAFF
+  SUPERVISOR
+  MANAGER
+}
+
 enum ChecklistKind {
   ONBOARDING
   OFFBOARDING
@@ -520,7 +527,9 @@ model EmployeeOrgHistory {
   employmentStatus EmploymentStatus
   supervisorId     String?          @db.Uuid
   supervisorName   String?
-  /// Apa yang berubah pada baris ini: BASELINE, DIVISION, POSITION, STATUS, SUPERVISOR.
+  /// Tingkat jabatan pada baris ini.
+  jobLevel         JobLevel         @default(STAFF)
+  /// Apa yang berubah pada baris ini: BASELINE, DIVISION, POSITION, STATUS, SUPERVISOR, JOB_LEVEL.
   changes          String[]
   note             String?
   createdById      String           @db.Uuid
@@ -594,6 +603,8 @@ model Employee {
   supervisorId          String?   @db.Uuid
   /// Tanggal mulai berlaku divisi/jabatan/status saat ini. NULL = sejak tanggal mulai bekerja.
   positionEffectiveFrom DateTime? @db.Date
+  /// Tingkat jabatan (Staf / Supervisor / Manajer). Berlaku sejak positionEffectiveFrom bersama jabatan; riwayat di employee_org_history.
+  jobLevel              JobLevel  @default(STAFF)
 
   /// Kontak darurat (dilengkapi saat karyawan masuk; hanya terlihat HR dan karyawan itu sendiri).
   emergencyContactName     String?
@@ -1411,8 +1422,8 @@ enum TrainingLevel {
   VIEWER
   /// Admin Program: boleh membuat proyek; mengelola proyek yang ia ikuti sesuai peran proyeknya.
   ADMIN_PROGRAM
-  /// Manajer Program: mengelola seluruh proyek, tim, tugas, program, template, penutupan.
-  MANAGER
+  /// Koordinator Program: mengelola seluruh proyek, tim, tugas, program, template, penutupan. Ditunjuk manual oleh Direktur.
+  COORDINATOR
 }
 
 enum TrainingActivityKind {

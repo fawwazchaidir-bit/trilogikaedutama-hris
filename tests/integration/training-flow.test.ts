@@ -243,7 +243,7 @@ describe("penutupan proyek", () => {
     expect((await getProject(fx.mgr, id)).status).toBe("RUNNING");
   });
 
-  it("hanya Manajer Program yang menutup (PIC tidak); selesai → ditutup bersih; tugas terbuka tidak diubah", async () => {
+  it("hanya Koordinator Program yang menutup (PIC tidak); selesai → ditutup bersih; tugas terbuka tidak diubah", async () => {
     const { id, a } = await runningWithRequired();
     const t = await createTask(fx.mgr, id, { title: "Tugas masih terbuka", assigneeId: fx.empIds[BUDI] });
     await updateChecklistItem(fx.mgr, a.id, { isDone: true });
@@ -385,7 +385,7 @@ describe("peserta & instruktur: data kontak hanya bagi yang berwenang", () => {
     expect((await listAllParticipants(fx.mgr, { q: "peserta b" })).total).toBe(1);
   });
 
-  it("kontak instruktur pada direktori hanya untuk Manajer/Admin Program; karyawan internal dapat ditautkan tanpa akun baru", async () => {
+  it("kontak instruktur pada direktori hanya untuk Koordinator/Admin Program; karyawan internal dapat ditautkan tanpa akun baru", async () => {
     await team(); // Ayu (PIC) & Budi (staf) kini anggota proyek → punya akses modul, tetapi bukan level Admin Program/Manajer
     await createInstructor(fx.mgr, { name: "Chef Eksternal", kind: "INSTRUCTOR", phone: "0813000000", organization: "Hotel X" });
     await createInstructor(fx.adm, { name: "Budi Santoso", kind: "FACILITATOR", employeeId: fx.empIds[BUDI] });
@@ -514,7 +514,7 @@ describe("referensi: surat tugas HRIS & sistem lain", () => {
   it("menautkan surat tugas butuh izin HRIS (assignment:view_all) DAN hak kelola proyek; nominal uang harian tidak terlihat", async () => {
     const id = await team();
     const letter = await makeLetter(fx.superAdmin.userId);
-    // Manajer Program tanpa izin HRIS → ditolak; HR (punya izin HRIS) tetapi bukan pengelola proyek → 404 (tak punya akses proyek)
+    // Koordinator Program tanpa izin HRIS → ditolak; HR (punya izin HRIS) tetapi bukan pengelola proyek → 404 (tak punya akses proyek)
     expect(await fail(linkAssignment(fx.mgr, id, { letterId: letter.id }))).toMatchObject({ code: "FORBIDDEN" });
     expect(await fail(searchAssignmentLetters(fx.mgr, "Bandung"))).toMatchObject({ code: "FORBIDDEN" });
     expect(await fail(linkAssignment(fx.hr, id, { letterId: letter.id }))).toMatchObject({ code: "NOT_FOUND" });

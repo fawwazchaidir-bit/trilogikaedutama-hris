@@ -19,10 +19,10 @@ export async function listRecoveryNotes(actor: Actor, projectId: string): Promis
   return rows.map((r) => ({ id: r.id, kind: r.kind, kindLabel: RECOVERY_KIND_LABEL[r.kind], body: r.body, newDate: r.newDate ? dateToIso(r.newDate) : null, createdByName: name.get(r.createdById) ?? null, createdAt: r.createdAt.toISOString() }));
 }
 
-/** Menambah catatan (append-only: tidak dapat diubah/dihapus). Pengelola tugas proyek (PIC, Admin Program, Manajer Program, Direktur). */
+/** Menambah catatan (append-only: tidak dapat diubah/dihapus). Pengelola tugas proyek (PIC, Admin Program, Koordinator Program, Direktur). */
 export async function addRecoveryNote(actor: Actor, projectId: string, raw: unknown): Promise<{ id: string }> {
   const access = await loadProjectAccess(actor, projectId);
-  requireAbility(access, "manage_tasks", "Hanya pengelola tugas proyek (PIC, Admin Program, Manajer Program) yang dapat menulis catatan pemulihan.");
+  requireAbility(access, "manage_tasks", "Hanya pengelola tugas proyek (PIC, Admin Program, Koordinator Program) yang dapat menulis catatan pemulihan.");
   assertEditable(access.project);
   const input = parseInput(recoveryNoteSchema, raw);
   return transaction(async (tx) => {
