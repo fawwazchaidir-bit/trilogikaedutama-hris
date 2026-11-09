@@ -38,7 +38,7 @@ test("HR mengubah tingkat jabatan Citra menjadi Manajer lewat kartu Organisasi; 
   const page = await ctx.newPage();
   await login(page, USERS.hr);
   await page.goto(`/karyawan/${citraId}`);
-  await expect(page.getByText("Organisasi & atasan langsung")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Organisasi & atasan langsung" })).toBeVisible();
   await page.getByRole("button", { name: "Ubah jabatan / atasan" }).click();
   const dialog = page.getByRole("dialog");
   await dialog.getByLabel("Tingkat jabatan").selectOption("MANAGER");

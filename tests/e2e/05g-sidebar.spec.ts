@@ -50,8 +50,8 @@ test("seluruh sidebar dapat disembunyikan dan ditampilkan lagi; pilihan bertahan
   await page.goto("/dashboard");
   await page.getByRole("button", { name: "Sembunyikan menu samping" }).click();
   await expect(nav(page)).toBeHidden();
-  const widthHidden = await page.locator("main").evaluate((el) => el.getBoundingClientRect().width);
-  expect(widthHidden).toBeGreaterThan(1200); // konten memakai lebar penuh
+  // Konten memakai lebar penuh (diukur dengan polling: lebar bisa masih berubah sesaat setelah menu disembunyikan).
+  await expect.poll(() => page.locator("main").evaluate((el) => el.getBoundingClientRect().width)).toBeGreaterThan(1200);
 
   await page.reload();
   await expect(nav(page)).toBeHidden();
