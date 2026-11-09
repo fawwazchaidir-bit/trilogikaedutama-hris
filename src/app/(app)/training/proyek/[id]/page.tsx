@@ -1,3 +1,4 @@
+import { DiscussButton } from "@/components/chat/discuss-button";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { Card, CardHeader, EmptyState, Notice, PageHeader } from "@/components/ui/card";
@@ -61,6 +62,7 @@ export default async function ProjectDetailPage({ params, searchParams }: { para
         description={`${p.code} · ${ACTIVITY_KIND_LABEL[p.kind]}${p.programName ? ` · ${p.programName}` : ""}${p.clientName ? ` · ${p.clientName}` : ""}`}
         actions={<>
           <ProjectStatusBadge status={p.status} />
+          <DiscussButton type="TRAINING_PROJECT" id={id} />
           {can("update") && editable && <ProjectEditButton projectId={id} programs={programs} initial={{ name: p.name, programId: p.programId ?? "", kind: p.kind, clientName: p.clientName ?? "", deliveryMode: p.deliveryMode, location: p.location ?? "", startDate: p.startDate ?? "", endDate: p.endDate ?? "", description: p.description ?? "", notes: p.notes ?? "", track: p.track, bnsp: p.bnsp, participantsMin: p.participantsMin?.toString() ?? "", participantsMax: p.participantsMax?.toString() ?? "", requestDate: p.requestDate ?? "", registrationCloseDate: p.registrationCloseDate ?? "" }} />}
           <ProjectActions id={id} status={p.status} abilities={p.abilities} />
         </>}

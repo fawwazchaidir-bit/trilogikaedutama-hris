@@ -136,4 +136,5 @@ Seed demo **menolak** berjalan bila `NODE_ENV=production`, host database bukan l
 - [API](docs/API.md) — daftar endpoint (termasuk `/api/training/*`)
 - [TRAINING-OPS](docs/TRAINING-OPS.md) — modul Training & Operations: audit, arsitektur, model data, feature flag, staging/UAT, deployment, rollback, rancangan integrasi
 - [PERAN-DAN-WEWENANG](docs/PERAN-DAN-WEWENANG.md) — penyelarasan peran dengan Buku SOP Rev 0.5: tingkat jabatan, Koordinator Program, Pemantau otomatis, aturan Magang, konfigurasi awal
+- [OBROLAN](docs/OBROLAN.md) — obrolan internal (japri, kanal publik, utas penugasan): akses, realtime SSE, push, retensi, konfigurasi
 - [TRAINING-PERAN](docs/TRAINING-PERAN.md) — peran & hak akses modul, usulan pemetaan dari bagan organisasi, keputusan untuk pemilik sistem

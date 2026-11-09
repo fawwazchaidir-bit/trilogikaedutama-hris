@@ -25,6 +25,7 @@
 | `CRON_SECRET` | tidak | ≥ 16 karakter; mengaktifkan `POST /api/internal/deliveries` (Bearer) untuk cron/systemd timer. |
 | `PASSWORD_RESET_MINUTES` | tidak | Masa berlaku tautan lupa password; default 30. |
 | `TRAINING_MODULE_ENABLED` | tidak | **Bawaan `false`.** `true` menyalakan modul Training & Operations (menu, halaman, API). Di Docker diteruskan lewat `docker-compose.yml`. Aktifkan bertahap setelah migration; lihat [TRAINING-OPS.md](TRAINING-OPS.md) §7 & §10. |
+| `CHAT_MODULE_ENABLED` `CHAT_WORKER` `CHAT_RETENTION_MONTHS` | tidak | Obrolan internal. **Bawaan `CHAT_MODULE_ENABLED=false`**; `true` menyalakan menu, halaman, dan API. Pekerja (`CHAT_WORKER`, bawaan `true`) menjalankan retensi isi pesan (bawaan 6 bulan) dan pemulih keanggotaan kanal. **Proxy harus tidak menimbun aliran SSE** (Nginx: `proxy_buffering off`, `proxy_read_timeout` ≥ 600s). Lihat [OBROLAN.md](OBROLAN.md). |
 | `ADMIN_EMAIL` `ADMIN_NAME` `ADMIN_PASSWORD` | seed produksi | Super Admin pertama. Tanpa password default; seed gagal bila lemah. |
 
 Rahasia hanya dari environment — tidak ada kredensial di kode. `.env` tidak di-commit (`.gitignore`).

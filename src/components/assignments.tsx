@@ -15,6 +15,7 @@ import { formatDateLong, formatDateRange } from "@/lib/format";
 import { formatRupiah } from "@/lib/money";
 import { tripDays, needsMaterai } from "@/lib/assignment";
 import type { AssignmentDto, AssigneeDto, MyAssignmentDto, ReceiptDto } from "@/server/services/assignments";
+import { DiscussButton } from "@/components/chat/discuss-button";
 
 const METHOD = { CASH: "Tunai", TRANSFER: "Transfer bank" } as const;
 const btn = "inline-flex h-8 items-center gap-1.5 rounded-md border border-line bg-white px-3 text-sm font-medium hover:bg-canvas";
@@ -139,6 +140,7 @@ export function AssignmentList({ items, today, canManage, canRevoke, selfEmploye
                 {l.status === "CANCELLED" && <p className="mt-1 text-sm text-brand-700">Dibatalkan: {l.cancelReason}</p>}
               </div>
               <div className="flex flex-wrap gap-2">
+                <DiscussButton type="ASSIGNMENT_LETTER" id={l.id} />
                 <a href={`/api/assignments/${l.id}/pdf`} className={btn}><Download className="size-4" />Surat Tugas (PDF)</a>
                 {canManage && l.status === "ISSUED" && <Button size="sm" variant="danger" onClick={() => setDlg({ kind: "CANCEL", letter: l })}><Ban className="size-3.5" />Batalkan</Button>}
               </div>
@@ -212,7 +214,7 @@ export function MyAssignments({ items }: { items: MyAssignmentDto[] }) {
               <p className="text-sm text-muted">{a.destination} · {formatDateRange(a.startDate, a.endDate)} ({a.tripDays} hari){a.colleagues.length ? ` · bersama ${a.colleagues.join(", ")}` : ""}</p>
               {a.details && <p className="mt-1 text-sm text-muted">{a.details}</p>}
             </div>
-            <a href={`/api/assignments/${a.id}/pdf`} className={btn}><FilePlus2 className="size-4" />Surat Tugas (PDF)</a>
+            <div className="flex flex-wrap gap-2"><DiscussButton type="ASSIGNMENT_LETTER" id={a.id} /><a href={`/api/assignments/${a.id}/pdf`} className={btn}><FilePlus2 className="size-4" />Surat Tugas (PDF)</a></div>
           </div>
           {a.status === "ISSUED" && (
             <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line bg-canvas/50 px-5 py-3 text-sm">

@@ -19,7 +19,7 @@ async function main() {
   if (Number(orphan[0]!.n) > 0) problems.push("Ada slip aktif yang nilainya berbeda dari item penggajiannya.");
   const issuedNoSlip = await prisma.$queryRaw<{ n: bigint }[]>`SELECT count(*) AS n FROM payroll_items i JOIN payroll_runs r ON r.id = i."runId" LEFT JOIN payslips s ON s."itemId" = i.id WHERE r.status = 'ISSUED' AND s.id IS NULL`;
   if (Number(issuedNoSlip[0]!.n) > 0) problems.push("Ada item pada periode terbit yang tidak memiliki slip.");
-  const EXPECTED_TRIGGERS = ["audit_logs_append_only", "payslips_guard", "payroll_runs_guard", "payroll_items_guard", "payroll_item_lines_guard", "leave_balance_entries_append_only", "attendance_corrections_append_only", "leave_requests_guard", "overtime_requests_guard", "attendance_photos_guard", "employee_documents_guard", "assignment_letters_guard", "assignment_assignees_guard", "daily_allowance_receipts_guard", "training_projects_guard", "training_project_documents_guard", "training_task_comments_append_only", "training_indicator_config_versions_append_only", "employee_org_history_append_only", "supervisor_delegations_guard", "employees_supervisor_cycle", "employee_checklists_guard", "employee_checklist_items_guard", "assets_guard", "asset_assignments_guard", "final_settlements_guard", "final_settlement_lines_guard"];
+  const EXPECTED_TRIGGERS = ["audit_logs_append_only", "payslips_guard", "payroll_runs_guard", "payroll_items_guard", "payroll_item_lines_guard", "leave_balance_entries_append_only", "attendance_corrections_append_only", "leave_requests_guard", "overtime_requests_guard", "attendance_photos_guard", "employee_documents_guard", "assignment_letters_guard", "assignment_assignees_guard", "daily_allowance_receipts_guard", "training_projects_guard", "training_project_documents_guard", "training_task_comments_append_only", "training_indicator_config_versions_append_only", "employee_org_history_append_only", "supervisor_delegations_guard", "employees_supervisor_cycle", "employee_checklists_guard", "employee_checklist_items_guard", "assets_guard", "asset_assignments_guard", "final_settlements_guard", "final_settlement_lines_guard", "chat_messages_guard", "chat_message_revisions_append_only"];
   const present = new Set((await prisma.$queryRaw<{ tgname: string }[]>`SELECT tgname FROM pg_trigger WHERE NOT tgisinternal`).map((t) => t.tgname));
   const missing = EXPECTED_TRIGGERS.filter((t) => !present.has(t));
   if (missing.length) problems.push(`Trigger integritas tidak lengkap (hilang: ${missing.join(", ")}) — pemulihan harus menyertakan trigger.`);
@@ -48,6 +48,11 @@ async function main() {
     OR EXISTS (SELECT 1 FROM training_project_members m WHERE m."employeeId" = e.id AND m."endedAt" IS NULL AND m.role IN ('PROJECT_MANAGER', 'ADMIN_PROGRAM', 'PARTICIPANT_OWNER'))
     OR EXISTS (SELECT 1 FROM employees r WHERE r."supervisorId" = e.id AND r."isActive"))`;
   if (Number(internFunctions[0]!.n) > 0) problems.push("Ada karyawan Magang aktif yang memegang fungsi penyetuju/akses data peserta (role Admin/HR, level Training, peran proyek PIC/Admin Program/PJ Peserta, atau atasan langsung). Cabut fungsinya.");
+  // Obrolan: japri harus tepat dua anggota; nomor urut ruang tidak boleh kurang dari pesan terakhirnya.
+  const dmShape = await prisma.$queryRaw<{ n: bigint }[]>`SELECT count(*) AS n FROM chat_rooms r WHERE r.kind = 'DIRECT' AND (SELECT count(*) FROM chat_members m WHERE m."roomId" = r.id) <> 2`;
+  if (Number(dmShape[0]!.n) > 0) problems.push("Ada japri obrolan yang anggotanya bukan tepat dua orang.");
+  const seqGap = await prisma.$queryRaw<{ n: bigint }[]>`SELECT count(*) AS n FROM chat_rooms r WHERE r."lastSeq" < COALESCE((SELECT max(m.seq) FROM chat_messages m WHERE m."roomId" = r.id), 0)`;
+  if (Number(seqGap[0]!.n) > 0) problems.push("Ada ruang obrolan yang nomor urut terakhirnya lebih kecil dari pesan terakhirnya.");
   if (problems.length) { console.error("\nMASALAH:\n- " + problems.join("\n- ")); process.exitCode = 1; } else console.log("\n✔ Pemeriksaan integritas lulus.");
 }
 main().catch((e) => { console.error(e); process.exitCode = 1; }).finally(() => prisma.$disconnect());

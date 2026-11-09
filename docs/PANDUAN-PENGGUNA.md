@@ -43,6 +43,10 @@
 - **Penugasan di jadwal:** bila ada surat tugas untuk Anda, jadwal di *Profil & Jadwal* menampilkan "Dinas luar — tujuan". Itu hanya penanda: kehadiran tetap Anda catat di *Absensi Saya* dan dinilai sesuai kebijakan absensi. Lihat [PENUGASAN-JADWAL.md](PENUGASAN-JADWAL.md).
 - **Atasan & Persetujuan Tim:** atasan langsung Anda tampil di *Profil & Jadwal*. Bila Anda atasan seseorang, menu **Persetujuan Tim** muncul: tinjau cuti, izin, sakit, dan lembur bawahan Anda di sana, dan tunjuk **pengganti** saat Anda cuti atau dinas luar. Anda tidak dapat memproses pengajuan sendiri. Lihat [ORGANISASI-ATASAN.md](ORGANISASI-ATASAN.md).
 
+### Obrolan (bila diaktifkan)
+
+Menu **Obrolan** (Layanan Saya) untuk berkoordinasi: **Japri** (tombol "Japri" → pilih rekan), **kanal publik** (semua karyawan dapat membaca dan menulis; mulai dengan kanal "Umum"), dan **utas penugasan** — buka tombol **Diskusi** pada Surat Tugas Saya atau pada tugas/proyek Training; hanya yang terlibat dalam penugasan itu yang dapat membaca. Tulis `@` lalu nama untuk menyebut seseorang; tombol **Penugasan** menyisipkan kartu penugasan Anda (orang yang tidak berhak melihatnya hanya melihat "tidak memiliki akses"). Pesan dapat disunting 15 menit pertama dan dihapus; lencana di menu menyala saat ada pesan baru, dan push desktop (bila Anda mengaktifkannya di *Keamanan & Notifikasi*) hanya untuk japri, utas, dan sebutan. **Privasi:** japri tidak dapat dibaca HR; Direktur dapat memeriksanya bila perlu dan setiap pembukaan tercatat. Pesan disimpan 6 bulan. Jangan menempel data pribadi peserta atau data gaji di kanal publik. Lihat [OBROLAN.md](OBROLAN.md).
+
 ## C. Admin / HR
 
 - **Absensi**: pilih tanggal → lihat siapa hadir/terlambat/belum absen. **Koreksi** (alasan wajib) untuk lupa absen/salah jam, atau hapus catatan keliru. Riwayat koreksi tampil di bawah dan di detail karyawan.

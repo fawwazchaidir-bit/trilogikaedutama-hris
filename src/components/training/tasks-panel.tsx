@@ -1,4 +1,5 @@
 "use client";
+import { DiscussButton } from "@/components/chat/discuss-button";
 import { useState } from "react";
 import { MessageSquare, Pencil, Plus } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -55,6 +56,7 @@ export function TasksPanel({ tasks, projectId, members = [], canCreate = false, 
                 </p>
               </div>
               <div className="flex flex-wrap items-center gap-2">
+                <DiscussButton type="TRAINING_TASK" id={t.id} />
                 <Button size="sm" onClick={() => void openComments(t)} aria-label={`Komentar tugas ${t.title}`}><MessageSquare className="size-3.5" />{t.commentCount}</Button>
                 {editable && t.canEdit && <Button size="sm" onClick={() => showForm(t)} aria-label={`Ubah tugas ${t.title}`}><Pencil className="size-3.5" />Ubah</Button>}
                 {editable && t.allowedNext.length > 0 && <Button size="sm" variant="primary" onClick={() => { reset(); setStatus({ task: t, to: t.allowedNext[0]!, note: "" }); }}>Ubah status</Button>}

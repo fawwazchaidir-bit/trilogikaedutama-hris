@@ -13,6 +13,9 @@ import { cookies } from "next/headers";
 import { NAV_PREF_COOKIE, parseNavPref } from "@/lib/nav-pref";
 import { teamPendingCount } from "@/server/services/org";
 import { openChecklistCount } from "@/server/services/employee-checklists";
+import { chatEnabled } from "@/server/env";
+import { chatUnreadTotal } from "@/server/services/chat/rooms";
+import { ChatProvider } from "@/components/chat/chat-provider";
 import { countMyOverdueTasks } from "@/server/services/training/work";
 import pkg from "../../../package.json";
 
@@ -33,7 +36,10 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   ]);
   const teamPending = teamIds.length ? await teamPendingCount(user, teamIds) : 0;
   const openLifecycle = can(user.role, "employee:view") ? await openChecklistCount() : 0;
+  const chatOn = chatEnabled();
+  const chatUnread = chatOn ? await chatUnreadTotal(user) : 0;
   return (
+    <ChatProvider enabled={chatOn} initialUnread={chatUnread}>
     <AppShell
       initialNav={navPref} hasEmployee={!!user.employeeId} canSearchProjects={trainingVisible} version={pkg.version}
       user={{ name: user.name, email: user.email, role: user.role, isDemo: user.isDemo }}
@@ -41,5 +47,6 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     >
       {children}
     </AppShell>
+    </ChatProvider>
   );
 }

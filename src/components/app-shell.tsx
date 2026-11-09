@@ -6,8 +6,10 @@ import { useEffect, useState } from "react";
 import {
   Bell, CalendarDays, CircleUserRound, ClipboardCheck, ClipboardList, FileText, LayoutDashboard, Menu, Search,
   ScrollText, Settings, ShieldCheck, TableProperties, Users, UserCog, Wallet, X, Clock, FilePlus2, Timer, BarChart3, ShieldEllipsis, MapPinned, FolderOpen, Plane, GraduationCap, FolderKanban, ListChecks, CalendarRange, UsersRound, Presentation, FileStack, FileBarChart2, ChevronDown, PanelLeftClose, PanelLeftOpen, Gauge, SlidersHorizontal, UserRound, Briefcase,
+  MessagesSquare,
 } from "lucide-react";
 import { cn } from "@/lib/cn";
+import { useChat } from "@/components/chat/chat-provider";
 import { NAV_GROUP_LABEL, type NavItem, type Role } from "@/lib/permissions";
 import { CommandPalette } from "@/components/command-palette";
 import { UserMenu } from "@/components/user-menu";
@@ -27,6 +29,7 @@ const ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
   "/surat-tugas": Plane,
   "/surat-tugas-saya": Plane,
   "/lokasi": MapPinned,
+  "/obrolan": MessagesSquare,
   "/laporan": BarChart3,
   "/akun": ShieldEllipsis,
   "/profil": CircleUserRound,
@@ -75,6 +78,7 @@ export interface ShellProps {
 
 export function AppShell({ user, nav, company, unread, pendingBadges, initialNav = DEFAULT_NAV_PREF, hasEmployee = false, canSearchProjects = false, version = "", children }: ShellProps) {
   const pathname = usePathname();
+  const chat = useChat();
   const [open, setOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   // Sidebar desktop disembunyikan? & grup menu mana yang dilipat? (bawaan: semuanya terbuka). Disimpan di cookie.
@@ -145,7 +149,7 @@ export function AppShell({ user, nav, company, unread, pendingBadges, initialNav
                 const Icon = ICONS[item.href] ?? FileText;
                 // "/training" (Dashboard Training) hanya aktif pada halamannya sendiri, bukan pada seluruh anak rutenya.
                 const active = isActive(item.href);
-                const badge = pendingBadges.find((b) => b.href === item.href && b.count > 0)?.count ?? 0;
+                const badge = item.href === "/obrolan" ? chat.totalUnread : pendingBadges.find((b) => b.href === item.href && b.count > 0)?.count ?? 0;
                 return (
                   <Link
                     key={item.href} href={item.href} onClick={() => setOpen(false)} aria-current={active ? "page" : undefined}

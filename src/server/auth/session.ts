@@ -93,6 +93,17 @@ export async function validateSession(token: string | undefined | null): Promise
   };
 }
 
+/**
+ * Apakah sesi ini MASIH berlaku? Hanya-baca: TIDAK menggeser jendela idle (`lastSeenAt`). Dipakai aliran SSE Obrolan agar koneksi yang terbuka
+ * tidak memperpanjang sesi tanpa batas; sesi dicabut/kedaluwarsa/idle atau pengguna dinonaktifkan → aliran ditutup.
+ */
+export async function isSessionAlive(sessionId: string): Promise<boolean> {
+  const s = await prisma.session.findUnique({ where: { id: sessionId }, select: { revokedAt: true, expiresAt: true, lastSeenAt: true, user: { select: { isActive: true } } } });
+  if (!s || s.revokedAt || !s.user.isActive) return false;
+  const now = Date.now();
+  return s.expiresAt.getTime() > now && now - s.lastSeenAt.getTime() <= env().SESSION_IDLE_HOURS * 3_600_000;
+}
+
 export async function revokeSessionByToken(token: string): Promise<void> {
   await prisma.session.updateMany({
     where: { tokenHash: hashToken(token), revokedAt: null },
