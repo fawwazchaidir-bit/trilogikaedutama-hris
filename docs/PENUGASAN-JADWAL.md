@@ -26,7 +26,7 @@ Surat tugas yang **dibatalkan** tidak tampil. Penanda mencakup tanggal mulai–s
 ## Siapa melihat apa
 
 - **HR & Super Admin** (`assignment:view_all`): penugasan dengan nomor surat (tooltip).
-- **Pemegang level modul Training** (Manajer Program, Admin Program, Pemantau): tujuan dinas saja — **tanpa nomor dan maksud surat**. Anggota proyek biasa tanpa level tidak punya menu, halaman, maupun API (403/404).
+- **Pemegang level modul Training** (Koordinator Program, Admin Program, Pemantau): tujuan dinas saja — **tanpa nomor dan maksud surat**. Anggota proyek biasa tanpa level tidak punya menu, halaman, maupun API (403/404).
 - Izin dan sakit **digabung** ("Izin/sakit") agar alasan kesehatan tidak terbuka; cuti ditampilkan sebagai "Cuti".
 - Karyawan melihat penugasannya sendiri pada jadwal pribadinya.
 

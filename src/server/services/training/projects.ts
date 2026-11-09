@@ -11,7 +11,8 @@ import {
   PROJECT_ROLE_LABEL, PROJECT_STATUS_LABEL,
   type ActivityKind, type DeliveryMode, type ProjectRole, type ProjectStatus,
 } from "@/lib/training/types";
-import type { ProjectAbility } from "@/lib/training/access";
+import { INTERN_FORBIDDEN_PROJECT_ROLES, type ProjectAbility } from "@/lib/training/access";
+import { assertNotIntern } from "../function-guard";
 import { PROJECT_FORWARD, checkReadyForPreparation } from "@/lib/training/status";
 import { attentionReasons, checklistProgress, closureReadiness, type AttentionCode, type ChecklistProgress } from "@/lib/training/indicators";
 import { formatProjectCode } from "@/lib/training/misc";
@@ -221,6 +222,7 @@ async function assertActiveEmployee(tx: Tx | typeof prisma, employeeId: string):
 
 async function addMemberRow(tx: Tx, actor: Actor, project: { id: string; code: string; name: string }, employeeId: string, role: ProjectRole, note: string | null): Promise<void> {
   const emp = await assertActiveEmployee(tx, employeeId);
+  if ((INTERN_FORBIDDEN_PROJECT_ROLES as readonly string[]).includes(role)) await assertNotIntern(tx, employeeId, `menjadi ${PROJECT_ROLE_LABEL[role]}`, "employeeId");
   const dup = await tx.trainingProjectMember.findFirst({ where: { projectId: project.id, employeeId, endedAt: null }, select: { role: true } });
   if (dup) throw Errors.conflict(`${emp.fullName} sudah menjadi anggota proyek ini (${PROJECT_ROLE_LABEL[dup.role]}). Ubah perannya bila perlu.`);
   if (role === "PROJECT_MANAGER") {
@@ -495,6 +497,7 @@ export async function updateMember(actor: Actor, projectId: string, memberId: st
     const m = await tx.trainingProjectMember.findFirst({ where: { id: memberId, projectId, endedAt: null }, include: { employee: { select: { fullName: true } } } });
     if (!m) throw Errors.notFound("Anggota");
     requireTeamRights(access, [m.role, ...(input.role ? [input.role] : [])]);
+    if (input.role && (INTERN_FORBIDDEN_PROJECT_ROLES as readonly string[]).includes(input.role)) await assertNotIntern(tx, m.employeeId, `menjadi ${PROJECT_ROLE_LABEL[input.role]}`, "role");
     if (input.role === "PROJECT_MANAGER" && m.role !== "PROJECT_MANAGER") {
       const pic = await tx.trainingProjectMember.count({ where: { projectId, role: "PROJECT_MANAGER", endedAt: null } });
       if (pic > 0) throw Errors.conflict("Proyek ini sudah memiliki Project Manager (PIC). Akhiri penugasan PIC lama terlebih dulu.");

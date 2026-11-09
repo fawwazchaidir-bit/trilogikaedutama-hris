@@ -72,7 +72,7 @@ test("menu pengguna di pojok kanan atas: nama, peran, tautan akun, dan keluar", 
   const { ctx, page } = await as(browser, "pimpinan");
   await page.getByRole("button", { name: "Menu pengguna" }).click();
   const menu = page.getByRole("menu", { name: "Menu pengguna" });
-  await expect(menu).toContainText("Super Admin / Pimpinan");
+  await expect(menu).toContainText("Direktur (Super Admin)");
   await expect(menu.getByRole("menuitem", { name: "Keamanan & Notifikasi" })).toBeVisible();
   await expect(menu.getByRole("menuitem", { name: "Ganti password" })).toBeVisible();
   await page.keyboard.press("Escape");

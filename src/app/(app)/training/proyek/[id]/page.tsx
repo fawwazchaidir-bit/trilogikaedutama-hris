@@ -45,9 +45,10 @@ export default async function ProjectDetailPage({ params, searchParams }: { para
   const { user, ctx } = await trainingPage();
   const { id } = await params;
   const sp = await flattenSearchParams(searchParams);
-  const tab: Tab = (TABS as readonly string[]).includes(sp.tab ?? "") ? (sp.tab as Tab) : "ringkasan";
   const p = await guard(() => getProject(user, id));
   const can = (a: (typeof p.abilities)[number]) => p.abilities.includes(a);
+  // Akun Magang tidak melihat tab Peserta (daftar peserta tertutup bagi mereka).
+  const tab: Tab = (TABS as readonly string[]).includes(sp.tab ?? "") && !(sp.tab === "peserta" && !can("view_participants")) ? (sp.tab as Tab) : "ringkasan";
   const editable = !isFinalProject(p.status);
   const programs = can("update") && editable ? await guard(() => listPrograms(user)) : [];
   const base = `/training/proyek/${id}`;
@@ -69,7 +70,7 @@ export default async function ProjectDetailPage({ params, searchParams }: { para
       <TabNav base={base} active={tab} tabs={[
         { key: "ringkasan", label: "Ringkasan" }, { key: "pemantauan", label: "Pemantauan" }, { key: "tim", label: "Tim" }, { key: "tugas", label: "Tugas & Checklist", count: p.openTasks }, { key: "jadwal", label: "Jadwal" },
         { key: "peserta", label: "Peserta" }, { key: "instruktur", label: "Instruktur / Asesor" }, { key: "dokumen", label: "Dokumen" }, { key: "riwayat", label: "Riwayat" }, { key: "penutupan", label: "Penutupan" },
-      ]} />
+      ].filter((t) => t.key !== "peserta" || can("view_participants"))} />
 
       {tab === "ringkasan" && (async () => {
         const [links, refs] = await Promise.all([guard(() => listAssignmentLinks(user, id)), guard(() => listExternalRefs(user, id))]);

@@ -42,6 +42,12 @@ async function main() {
   if (Number(trainingDocNoFile[0]!.n) > 0) problems.push("Ada dokumen proyek Training & Operations tanpa berkas yang sah.");
   const docNoFile = await prisma.$queryRaw<{ n: bigint }[]>`SELECT count(*) AS n FROM employee_documents d LEFT JOIN stored_files f ON f.id = d."fileId" WHERE f.id IS NULL OR f.kind <> 'DOCUMENT'`;
   if (Number(docNoFile[0]!.n) > 0) problems.push("Ada dokumen kepegawaian tanpa berkas PDF yang valid.");
+  // Aturan Magang (SOP Rev 0.5): karyawan Magang tidak boleh memegang role Admin/HR, level modul Training, peran proyek penyetuju, atau menjadi atasan.
+  const internFunctions = await prisma.$queryRaw<{ n: bigint }[]>`SELECT count(*) AS n FROM employees e WHERE e."employmentStatus" = 'INTERN' AND e."isActive" AND (
+    EXISTS (SELECT 1 FROM users u WHERE u.id = e."userId" AND (u.role <> 'EMPLOYEE' OR EXISTS (SELECT 1 FROM training_access a WHERE a."userId" = u.id)))
+    OR EXISTS (SELECT 1 FROM training_project_members m WHERE m."employeeId" = e.id AND m."endedAt" IS NULL AND m.role IN ('PROJECT_MANAGER', 'ADMIN_PROGRAM', 'PARTICIPANT_OWNER'))
+    OR EXISTS (SELECT 1 FROM employees r WHERE r."supervisorId" = e.id AND r."isActive"))`;
+  if (Number(internFunctions[0]!.n) > 0) problems.push("Ada karyawan Magang aktif yang memegang fungsi penyetuju/akses data peserta (role Admin/HR, level Training, peran proyek PIC/Admin Program/PJ Peserta, atau atasan langsung). Cabut fungsinya.");
   if (problems.length) { console.error("\nMASALAH:\n- " + problems.join("\n- ")); process.exitCode = 1; } else console.log("\n✔ Pemeriksaan integritas lulus.");
 }
 main().catch((e) => { console.error(e); process.exitCode = 1; }).finally(() => prisma.$disconnect());

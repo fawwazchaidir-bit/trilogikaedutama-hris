@@ -9,8 +9,9 @@ Setiap karyawan kini punya **divisi, jabatan, status, atasan langsung, tanggal m
 | Istilah | Arti |
 |---|---|
 | **Atasan langsung** | Atasan kepegawaian seseorang (kolom `employees.supervisorId`). **Bukan** PIC proyek Training: menjadi anggota proyek yang dipimpin orang lain tidak mengubah atasan. |
+| **Tingkat jabatan** | Staf · Supervisor · Manajer (`employees.jobLevel`, bawaan Staf), disimpan **eksplisit** dan ikut tercatat di riwayat (`JOB_LEVEL`). Manajer otomatis menjadi Pemantau Training; Magang hanya boleh Staf. Tidak menentukan siapa yang meninjau (itu atasan langsung). Lihat [PERAN-DAN-WEWENANG.md](./PERAN-DAN-WEWENANG.md). |
 | **Berlaku sejak** | Tanggal mulai berlaku divisi/jabatan/status saat ini (`positionEffectiveFrom`; kosong = sejak mulai bekerja). Mengganti atasan saja **tidak** menggeser tanggal ini. |
-| **Riwayat** | Tabel `employee_org_history`, **tambah-saja** (trigger menolak ubah/hapus). Tiap baris menyimpan divisi, jabatan, status, atasan, apa yang berubah, catatan, pencatat. |
+| **Riwayat** | Tabel `employee_org_history`, **tambah-saja** (trigger menolak ubah/hapus). Tiap baris menyimpan divisi, jabatan, status, tingkat jabatan, atasan, apa yang berubah, catatan, pencatat. |
 | **Pengganti** | Penunjukan sementara (`supervisor_delegations`, maks. 90 hari): selama rentang itu, pengganti ikut berwenang meninjau pengajuan bawahan langsung atasan tersebut. Dibatalkan, tidak dihapus. |
 | **Eskalasi** | Bila atasan tidak ada hari ini (nonaktif, atau cuti/izin/sakit sehari penuh yang disetujui) **dan** tidak punya pengganti, wewenang naik ke atasannya, paling banyak tiga tingkat. |
 
@@ -43,13 +44,15 @@ Karyawan **tanpa atasan** diperlakukan persis seperti sebelumnya: HR dan Super A
 - Lewat satu jalur (`changeOrg`) atau formulir data karyawan yang lama — **keduanya mencatat riwayat**. Karyawan lama tanpa riwayat mendapat baris awal (*Data awal*) tepat sebelum perubahan pertamanya; tidak ada migrasi data massal.
 - Tanggal berlaku **tidak boleh di masa depan** dan tidak boleh lebih awal dari perubahan struktural sebelumnya (jabatan tidak berbalik arah dalam riwayat).
 - Atasan harus karyawan aktif; **rantai melingkar ditolak** (di service dan di trigger database). Karyawan nonaktif tidak diubah.
+- **Petunjuk hierarki (lunak, tidak memblokir):** atasan seorang Manajer sebaiknya Direktur; atasan Supervisor sebaiknya Manajer atau Direktur; atasan Staf sebaiknya Supervisor atau Manajer. Petunjuk tampil di kartu Organisasi.
+- **Aturan Magang:** Magang tidak boleh menjadi atasan langsung atau pengganti peninjau, hanya bertingkat Staf, dan status tidak dapat diubah menjadi Magang selama karyawan masih memegang fungsi (atasan bagi bawahan aktif, pengganti, level/peran Training, role Admin/HR).
 - Status karyawan memakai nilai yang sudah ada (Tetap, Kontrak, Magang); "Aktif/Nonaktif" tetap penanda terpisah. Menambah nilai baru (mis. masa percobaan) perlu perubahan kecil terpisah.
 
 ## Yang belum tercakup
 
 - **Surat Tugas** tidak punya langkah persetujuan (HR menerbitkan langsung), jadi tidak ada yang bisa dialihkan ke atasan. **Kinerja** belum ada modulnya.
 - **Eskalasi Training** (`reportsTo` pada Rumus Indikator) masih memakai konfigurasi per jabatan; belum membaca atasan langsung dari data karyawan.
-- Impor karyawan massal belum membawa kolom atasan; atur lewat kartu Organisasi.
+- Impor karyawan massal belum membawa kolom atasan maupun tingkat jabatan; atur lewat kartu Organisasi (tingkat bawaan Staf).
 
 ## Keamanan
 

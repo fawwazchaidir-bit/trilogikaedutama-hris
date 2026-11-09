@@ -142,7 +142,7 @@ status program Merah (milestone kritikal R06 terlambat 3 hari + item kritikal "J
 - Milestone selesai **dengan bukti** (tautan/rujukan dokumen, dapat dimatikan di konfigurasi) oleh PIC-nya atau pengelola tugas; dapat dibuka kembali dengan alasan. Semua tercatat di audit.
 - Peserta ditandai **terkonfirmasi** secara manual (reguler: pembayaran terverifikasi; kerjasama: nama diterima dari klien). Ini **bukan** status pembayaran dari sistem lain.
 - Jam kerja per staf dari Tabel Jam Standar (jam tetap + per peserta + per hari kelas), dibagi rata pada hari kerja jendela tugas; tugas manual tidak pernah ditimpa. Kapasitas bawaan 6 jam/hari Senin–Jumat;
-  pengecualian per staf oleh Manajer Program/Direktur; cuti **disetujui** dari HRIS mengurangi kapasitas (hanya tanggal & porsi hari yang dibaca).
+  pengecualian per staf oleh Koordinator Program/Direktur; cuti **disetujui** dari HRIS mengurangi kapasitas (hanya tanggal & porsi hari yang dibaca).
 
 **Tafsir & penyesuaian yang saya ambil (perlu Anda ketahui — semuanya dapat ditinjau)**
 
@@ -187,8 +187,8 @@ Aturan penting:
 
 Role HRIS **tidak diubah**. Dua lapis baru: level modul (`training_access`) dan peran proyek (`training_project_members`).
 Matriks lengkap, alasan rancangan, dan usulan pemetaan jabatan: **[TRAINING-PERAN.md](TRAINING-PERAN.md)**.
-**Keputusan pemilik sistem (4 Nov 2026):** Direktur/Super Admin **boleh mengubah data proyek** (kelola penuh lintas proyek, sama dengan Manajer Program; hanya Super Admin yang mengatur level akses dan mengubah rumus indikator);
-jumlah pemegang level **Manajer Program tidak dibatasi** — Direktur yang memberi akses.
+**Keputusan pemilik sistem (4 Nov 2026):** Direktur/Super Admin **boleh mengubah data proyek** (kelola penuh lintas proyek, sama dengan Koordinator Program; hanya Super Admin yang mengatur level akses dan mengubah rumus indikator);
+jumlah pemegang level **Koordinator Program tidak dibatasi** — Direktur yang memberi akses.
 Matriks ditegakkan oleh satu file murni (`src/lib/training/access.ts`) dan diuji di `tests/unit/training-access.test.ts`.
 
 ## 5. Perubahan database & migration
@@ -235,7 +235,7 @@ npm run db:seed:training-demo   # data DEMO modul ini (lihat batasan di bawah)
 npm run dev
 ```
 
-Akun demo (`@demo.hris.test`): `pimpinan` = Super Admin (melihat semua), `ayu` = Manajer Program, `budi` = Admin Program, `citra` = anggota (PJ Peserta),
+Akun demo (`@demo.hris.test`): `pimpinan` = Super Admin (melihat semua), `ayu` = Koordinator Program, `budi` = Admin Program, `citra` = anggota (PJ Peserta),
 `hr` = **tanpa akses** (menunjukkan bahwa admin HRIS bukan Admin Program).
 
 `db:seed:training-demo` **menolak** berjalan bila `NODE_ENV=production`, host database bukan lokal, `TRAINING_MODULE_ENABLED` bukan `true`, atau
@@ -328,7 +328,7 @@ Urutkan dari yang paling aman.
 
 ## 12. Fitur yang sudah selesai
 
-Dashboard per peran (Staf, Admin Program, Manajer Program, Direktur) · master program · proyek (daftar dengan cari/filter/urut/halaman/penanda perhatian, detail 9 tab, buat/ubah, alur status,
+Dashboard per peran (Staf, Admin Program, Koordinator Program, Direktur) · master program · proyek (daftar dengan cari/filter/urut/halaman/penanda perhatian, detail 9 tab, buat/ubah, alur status,
 penutupan, pembatalan, buka kembali) · tim & peran proyek · tugas (prioritas, tenggat, status, perlu-diperiksa, komentar, "Tugas Saya", lencana terlambat) · checklist & template (disalin ke proyek,
 wajib untuk penutupan, template standar atas tindakan eksplisit) · jadwal & kalender bulanan (WIB, peringatan bentrok ruangan/instruktur) · peserta (kontak dibatasi) · direktori instruktur/asesor
 (internal ditautkan ke karyawan, eksternal tanpa akun) · dokumen proyek privat · tautan surat tugas (referensi) & referensi manual sistem lain · riwayat aktivitas · laporan + unduhan CSV/Excel/PDF ·

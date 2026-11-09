@@ -15,6 +15,8 @@ import { formatDateLong } from "@/lib/format";
 import { reviewCapacity, reviewableTargets, reviewersOf, wouldCreateCycle, type OrgGraph, type OrgNode, type SupervisorCapacity } from "@/lib/org-review";
 import type { EmploymentStatus } from "@/lib/labels";
 import { notifyUsers, reviewerUserIds } from "./notifications";
+import { JOB_LEVELS, JOB_LEVEL_LABEL, hierarchyHints, type JobLevelValue } from "@/lib/org-level";
+import { assertMayBecomeIntern, assertNotIntern } from "./function-guard";
 
 /**
  * STRUKTUR ORGANISASI kepegawaian: divisi, jabatan, status, ATASAN LANGSUNG, tanggal mulai berlaku, riwayat, dan pengganti peninjau.
@@ -127,6 +129,10 @@ export interface OrgProfileDto {
   divisionName: string | null;
   position: string;
   employmentStatus: EmploymentStatus;
+  /** Tingkat jabatan (Staf / Supervisor / Manajer). Direktur dikenali dari role akun, bukan dari kolom ini. */
+  jobLevel: JobLevelValue;
+  /** Petunjuk lunak (tidak memblokir) atas hierarki tingkat–atasan. */
+  hints: string[];
   /** Tanggal mulai berlaku divisi/jabatan/status saat ini. */
   effectiveFrom: string;
   /** true = belum pernah diubah (mengikuti tanggal mulai bekerja). */
@@ -135,7 +141,7 @@ export interface OrgProfileDto {
   reports: PersonRef[];
 }
 export interface OrgHistoryDto {
-  id: string; effectiveFrom: string; divisionName: string | null; position: string; employmentStatus: EmploymentStatus;
+  id: string; effectiveFrom: string; divisionName: string | null; position: string; employmentStatus: EmploymentStatus; jobLevel: JobLevelValue;
   supervisorName: string | null; changes: string[]; note: string | null; createdAt: string; createdBy: string;
 }
 
@@ -146,11 +152,13 @@ function assertCanSee(actor: Actor, employeeId: string): void {
 
 export async function getOrgProfile(actor: Actor, employeeId: string): Promise<OrgProfileDto> {
   assertCanSee(actor, employeeId);
-  const e = await prisma.employee.findUnique({ where: { id: employeeId }, include: { division: { select: { name: true } }, supervisor: { select: { id: true, fullName: true, position: true, isActive: true } } } });
+  const e = await prisma.employee.findUnique({ where: { id: employeeId }, include: { division: { select: { name: true } }, supervisor: { select: { id: true, fullName: true, position: true, isActive: true, jobLevel: true, user: { select: { role: true } } } } } });
   if (!e) throw Errors.notFound("Karyawan");
   const reports = await prisma.employee.findMany({ where: { supervisorId: employeeId, isActive: true }, select: { id: true, fullName: true, position: true }, orderBy: { fullName: "asc" } });
   return {
     employeeId, divisionId: e.divisionId, divisionName: e.division?.name ?? null, position: e.position, employmentStatus: e.employmentStatus,
+    jobLevel: e.jobLevel,
+    hints: hierarchyHints({ level: e.jobLevel, supervisor: e.supervisor ? { level: e.supervisor.jobLevel, isDirector: e.supervisor.user?.role === "SUPER_ADMIN" } : null }),
     effectiveFrom: floorOf(e), sinceJoin: !e.positionEffectiveFrom,
     supervisor: e.supervisor ? { id: e.supervisor.id, name: e.supervisor.fullName, position: e.supervisor.position, active: e.supervisor.isActive } : null,
     reports: reports.map((r) => ({ id: r.id, name: r.fullName, position: r.position })),
@@ -163,7 +171,7 @@ export async function listOrgHistory(actor: Actor, employeeId: string): Promise<
   const users = await prisma.user.findMany({ where: { id: { in: [...new Set(rows.map((r) => r.createdById))] } }, select: { id: true, name: true } });
   const name = new Map(users.map((u) => [u.id, u.name]));
   return rows.map((r) => ({
-    id: r.id, effectiveFrom: dateToIso(r.effectiveFrom), divisionName: r.divisionName, position: r.position, employmentStatus: r.employmentStatus,
+    id: r.id, effectiveFrom: dateToIso(r.effectiveFrom), divisionName: r.divisionName, position: r.position, employmentStatus: r.employmentStatus, jobLevel: r.jobLevel,
     supervisorName: r.supervisorName, changes: r.changes, note: r.note, createdAt: r.createdAt.toISOString(), createdBy: name.get(r.createdById) ?? "—",
   }));
 }
@@ -173,7 +181,7 @@ export async function listOrgHistory(actor: Actor, employeeId: string): Promise<
 function snapshot(e: OrgRow, effectiveFrom: string, changes: string[], note: string | null, userId: string): Prisma.EmployeeOrgHistoryUncheckedCreateInput {
   return {
     employeeId: e.id, effectiveFrom: isoToDate(effectiveFrom), divisionId: e.divisionId, divisionName: e.division?.name ?? null, position: e.position,
-    employmentStatus: e.employmentStatus, supervisorId: e.supervisorId, supervisorName: e.supervisor?.fullName ?? null, changes, note, createdById: userId,
+    employmentStatus: e.employmentStatus, jobLevel: e.jobLevel, supervisorId: e.supervisorId, supervisorName: e.supervisor?.fullName ?? null, changes, note, createdById: userId,
   };
 }
 
@@ -207,13 +215,15 @@ export const orgChangeSchema = z.object({
   divisionId: uuid.nullable().optional(),
   position: requiredText(2, 100, "Jabatan").optional(),
   employmentStatus: z.enum(["PERMANENT", "CONTRACT", "INTERN"], { error: "Status karyawan tidak valid" }).optional(),
+  /** Tingkat jabatan; undefined = tidak diubah. */
+  jobLevel: z.enum(JOB_LEVELS as unknown as [JobLevelValue, ...JobLevelValue[]], { error: "Tingkat jabatan tidak valid" }).optional(),
   /** undefined = tidak diubah; null = tanpa atasan langsung. */
   supervisorId: uuid.nullable().optional(),
   effectiveFrom: isoDate,
   note: optionalText(300, "Catatan"),
 });
 
-const CHANGE_LABEL: Record<string, string> = { DIVISION: "divisi", POSITION: "jabatan", STATUS: "status", SUPERVISOR: "atasan langsung" };
+const CHANGE_LABEL: Record<string, string> = { DIVISION: "divisi", POSITION: "jabatan", STATUS: "status", SUPERVISOR: "atasan langsung", JOB_LEVEL: "tingkat jabatan" };
 
 /** Ubah divisi / jabatan / status / atasan langsung dengan tanggal mulai berlaku, dalam satu transaksi, dan catat riwayatnya. HR (employee:manage). */
 export async function changeOrg(actor: Actor, employeeId: string, raw: unknown): Promise<OrgProfileDto> {
@@ -234,6 +244,7 @@ export async function changeOrg(actor: Actor, employeeId: string, raw: unknown):
       divisionId: input.divisionId === undefined ? before.divisionId : input.divisionId,
       position: input.position ?? before.position,
       employmentStatus: input.employmentStatus ?? before.employmentStatus,
+      jobLevel: input.jobLevel ?? before.jobLevel,
       supervisorId: input.supervisorId === undefined ? before.supervisorId : input.supervisorId,
     };
     const changes: string[] = [];
@@ -241,6 +252,7 @@ export async function changeOrg(actor: Actor, employeeId: string, raw: unknown):
     if (next.position !== before.position) changes.push("POSITION");
     if (next.employmentStatus !== before.employmentStatus) changes.push("STATUS");
     if (next.supervisorId !== before.supervisorId) changes.push("SUPERVISOR");
+    if (next.jobLevel !== before.jobLevel) changes.push("JOB_LEVEL");
     if (!changes.length) throw Errors.validation("Tidak ada perubahan untuk disimpan.");
 
     if (next.divisionId) {
@@ -255,11 +267,15 @@ export async function changeOrg(actor: Actor, employeeId: string, raw: unknown):
       }
     }
 
+    // Aturan Magang: bukan atasan/pengganti, tingkat Staf, dan tidak boleh menjadi Magang selagi memegang fungsi.
+    if (next.employmentStatus === "INTERN" && before.employmentStatus !== "INTERN") await assertMayBecomeIntern(tx, employeeId);
+    if (next.employmentStatus === "INTERN" && next.jobLevel !== "STAFF") throw Errors.validation("Karyawan berstatus Magang hanya dapat bertingkat Staf (SOP: tanpa wewenang persetujuan).", { jobLevel: "Magang hanya Staf" });
+    if (changes.includes("SUPERVISOR") && next.supervisorId) await assertNotIntern(tx, next.supervisorId, "menjadi atasan langsung", "supervisorId");
     await ensureOrgBaseline(tx, actor, employeeId);
     const structural = changes.some((c) => c !== "SUPERVISOR");
     const updated = await tx.employee.update({
       where: { id: employeeId },
-      data: { divisionId: next.divisionId, position: next.position, employmentStatus: next.employmentStatus, supervisorId: next.supervisorId, ...(structural ? { positionEffectiveFrom: isoToDate(input.effectiveFrom) } : {}) },
+      data: { divisionId: next.divisionId, position: next.position, employmentStatus: next.employmentStatus, jobLevel: next.jobLevel, supervisorId: next.supervisorId, ...(structural ? { positionEffectiveFrom: isoToDate(input.effectiveFrom) } : {}) },
       include: orgInclude,
     });
     await tx.employeeOrgHistory.create({ data: snapshot(updated, input.effectiveFrom, changes, input.note, actor.userId) });
@@ -267,8 +283,8 @@ export async function changeOrg(actor: Actor, employeeId: string, raw: unknown):
     await writeAudit(tx, actor, {
       action: "employee.org_change", entityType: "Employee", entityId: employeeId,
       summary: `Struktur organisasi ${updated.fullName} diubah (${label}), berlaku ${input.effectiveFrom}`,
-      before: { divisionId: before.divisionId, position: before.position, employmentStatus: before.employmentStatus, supervisorId: before.supervisorId },
-      after: { divisionId: next.divisionId, position: next.position, employmentStatus: next.employmentStatus, supervisorId: next.supervisorId, effectiveFrom: input.effectiveFrom }, reason: input.note,
+      before: { divisionId: before.divisionId, position: before.position, employmentStatus: before.employmentStatus, jobLevel: before.jobLevel, supervisorId: before.supervisorId },
+      after: { divisionId: next.divisionId, position: next.position, employmentStatus: next.employmentStatus, jobLevel: next.jobLevel, supervisorId: next.supervisorId, effectiveFrom: input.effectiveFrom }, reason: input.note,
     });
     const own = updated.userId ? await tx.user.findFirst({ where: { id: updated.userId, isActive: true }, select: { id: true } }) : null;
     if (own) {
@@ -328,6 +344,7 @@ export async function createDelegation(actor: Actor, raw: unknown): Promise<Dele
     ]);
     if (!sup?.isActive) throw Errors.validation("Atasan tidak ditemukan atau nonaktif.", { supervisorId: "Tidak valid" });
     if (!del?.isActive || !del.user?.isActive) throw Errors.validation("Pengganti harus karyawan aktif yang punya akun aktif.", { delegateId: "Tidak valid" });
+    await assertNotIntern(tx, input.delegateId, "menjadi pengganti peninjau pengajuan", "delegateId");
     const row = await tx.supervisorDelegation.create({
       data: { supervisorId, delegateId: input.delegateId, startDate: isoToDate(input.startDate), endDate: isoToDate(input.endDate), reason: input.reason, createdById: actor.userId },
       include: delegationInclude,

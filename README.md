@@ -13,7 +13,7 @@ responsif (komputer & ponsel), tampilan mengikuti aplikasi invoice Trilogika aga
 
 | Peran | Ringkasan hak akses |
 |---|---|
-| **Super Admin / Pimpinan** | Semua: akun admin & karyawan (termasuk reset 2FA), kebijakan absensi/cuti/keamanan, aturan penggajian & BPJS/PPh 21, **persetujuan** & pembatalan penggajian, audit log, laporan. |
+| **Direktur (Super Admin)** | Semua: akun admin & karyawan (termasuk reset 2FA), kebijakan absensi/cuti/keamanan, aturan penggajian & BPJS/PPh 21, **persetujuan** & pembatalan penggajian, audit log, laporan. |
 | **Admin / HR** | Data karyawan, jadwal & hari libur, koreksi absensi (beralasan), proses izin/sakit/cuti & lembur, tinjauan lokasi, rekap & laporan, komponen gaji, menghitung & **menerbitkan** gaji, unduh slip. **Tidak** dapat menyetujui gaji, mengubah aturan penggajian/BPJS/PPh 21/kebijakan/keamanan, mengelola akun admin, atau melihat audit log. |
 | **Karyawan** | Profil & jadwal sendiri, check-in/out, riwayat & rekap sendiri, mengajukan izin/sakit/cuti (termasuk setengah hari) dan lembur, melihat & mengunduh **slip miliknya** yang sudah terbit, mengatur 2FA & notifikasi. Tidak dapat melihat data orang lain — dipaksa di sisi server, bukan hanya disembunyikan di menu. |
 
@@ -43,7 +43,7 @@ responsif (komputer & ponsel), tampilan mengikuti aplikasi invoice Trilogika aga
 | **Aset** | Daftar aset, serah-terima ke karyawan, pengembalian dengan kondisi (baik/rusak/hilang), satu pemegang aktif per aset, riwayat terkunci; menjadi sinyal pada checklist berhenti — [docs/ASET.md](docs/ASET.md). |
 | **Penyelesaian akhir** | Usulan gaji prorata, uang cuti (pembagi diisi HR), uang harian belum dibayar + baris manual pesangon/UPMK/UPH/THR/pajak (**tidak ada tarif yang ditanam**), alur Draf → disetujui pimpinan → dicatat dibayar, terkunci — [docs/PENYELESAIAN-AKHIR.md](docs/PENYELESAIAN-AKHIR.md). |
 | **Penugasan di jadwal & Ketersediaan Tim** | Surat tugas terbit tampil sebagai "Dinas luar — tujuan" pada jadwal dan grid Ketersediaan Tim (HR + pemegang level Training); hanya penanda — kehadiran tetap dari absensi — [docs/PENUGASAN-JADWAL.md](docs/PENUGASAN-JADWAL.md). |
-| **Atasan langsung & alur tinjauan** | Atasan langsung, tanggal berlaku jabatan, riwayat mutasi append-only; cuti & lembur ditinjau atasan (atau pengganti / eskalasi saat atasan cuti), HR memantau dan memproses bila perlu; tak seorang pun menyetujui pengajuannya sendiri — [docs/ORGANISASI-ATASAN.md](docs/ORGANISASI-ATASAN.md). |
+| **Atasan langsung & alur tinjauan** | Atasan langsung, tingkat jabatan (Staf/Supervisor/Manajer), tanggal berlaku jabatan, riwayat mutasi append-only; cuti & lembur ditinjau atasan (atau pengganti / eskalasi saat atasan cuti), HR memantau dan memproses bila perlu; tak seorang pun menyetujui pengajuannya sendiri — [docs/ORGANISASI-ATASAN.md](docs/ORGANISASI-ATASAN.md). |
 | **Lembur dengan persetujuan** | Pengajuan → setujui/kurangi/tolak → dibayar sesuai bukti absensi; tarif tetap atau gaji ÷ pembagi; pengali jam; bukti = irisan jam lembur disetujui dengan kehadiran nyata; periode gaji ditandai "Data berubah" bila persetujuan lembur atau komponen gaji berubah setelah dihitung. |
 | **BPJS & PPh 21 otomatis** | BPJS (Kesehatan, JHT, JP, JKK, JKM; porsi karyawan & perusahaan), PPh 21 TER + true-up masa pajak terakhir; semua tarif/tabel dapat diubah; komponen manual menggantikan otomatis; konfirmasi Super Admin wajib. **Nonaktif secara bawaan & wajib diverifikasi.** |
 | **Lupa password mandiri** | Email, tautan sekali pakai 30 menit, anti-enumerasi, dibatasi, akun ber-2FA wajib kode. |
@@ -72,16 +72,16 @@ Memakai akun, karyawan, audit, dan penyimpanan berkas HRIS yang sudah ada; hanya
 
 | Area | Isi |
 |---|---|
-| **Akses** | Role HRIS **tidak diubah**. Di atasnya: *level modul* (Pemantau · Admin Program · Manajer Program, diatur Super Admin) + *peran proyek* (PIC · Admin Program · PJ Peserta · PJ Materi · PJ Dokumentasi · Staf). Admin HRIS **tidak otomatis** punya akses. Direktur (Super Admin) kelola penuh seperti Manajer Program; jumlah pemegang level Manajer Program tidak dibatasi. Proyek di luar lingkup menjawab 404. |
+| **Akses** | Role HRIS **tidak diubah**. Di atasnya: *level modul* (Pemantau · Admin Program · Koordinator Program, diatur Super Admin) + *peran proyek* (PIC · Admin Program · PJ Peserta · PJ Materi · PJ Dokumentasi · Staf). Admin HRIS **tidak otomatis** punya akses. Direktur (Super Admin) kelola penuh seperti Koordinator Program; jumlah pemegang level Koordinator Program tidak dibatasi. Proyek di luar lingkup menjawab 404. |
 | **Antarmuka portal** | Sidebar maroon (dapat disembunyikan, grup dapat dilipat), bilah atas dengan **pencarian cepat Ctrl+K** (menu + proyek dalam lingkup akses), notifikasi, dan menu pengguna; beranda per peran (sapaan, **banner pesan Direktur yang dapat diubah** untuk broadcast ke seluruh karyawan, menu utama, kartu ringkasan, grafik aktivitas, proyek saya, kalender, aktivitas terbaru) — semua angka dari data nyata. |
-| **Dashboard** | Per peran (Staf, Admin Program, Manajer Program, Direktur), dihitung dari data nyata dengan definisi indikator tertulis. Persentase tidak dikarang: angka ringkasan dashboard dihitung dari data, sedangkan indikator terformula ada di baris **Pemantauan**. |
+| **Dashboard** | Per peran (Staf, Admin Program, Koordinator Program, Direktur), dihitung dari data nyata dengan definisi indikator tertulis. Persentase tidak dikarang: angka ringkasan dashboard dihitung dari data, sedangkan indikator terformula ada di baris **Pemantauan**. |
 | **Pemantauan** | Indikator **Ketepatan Waktu (SPI), Kesiapan (IKP vs target), Beban Tim, proyeksi peserta, kepadatan kelas paralel** menurut dokumen *Indikator Pemantauan Program Pelatihan v1.0*; status program = terburuk dari ketiganya + pemicu Merah. Parameter (bobot, ambang warna, template milestone, jam standar, kapasitas) **diubah Direktur di aplikasi** (*Rumus Indikator*, berversi, dapat dikembalikan) — rumus tetap di kode. **Eskalasi otomatis** (Kuning/Merah/terlambat/beban), aturan **Kuning berturut-turut**, dan **pengingat tenggat H-1/hari-H** dikirim oleh pekerja harian (idempoten); catatan pemulihan ditulis di portal. |
 | **Proyek** | Kode `TRN-2026-0001` (aman saat dibuat bersamaan), alur Draf → Persiapan → Berjalan → Selesai/Dibatalkan, cari/filter/urut, penanda "perlu perhatian", detail 9 tab, riwayat aktivitas. |
 | **Tugas & checklist** | Prioritas, tenggat, komentar, "Tugas Saya"; tugas "perlu diperiksa" tidak dapat disetujui penanggung jawabnya sendiri. Template checklist **disalin** ke proyek; item wajib menentukan penutupan. |
 | **Jadwal** | Daftar & kalender bulanan WIB; peringatan bentrok ruangan/instruktur lintas proyek. |
 | **Peserta & instruktur** | Data operasional lokal (input manual); kontak hanya untuk yang berwenang; instruktur internal ditautkan ke karyawan, eksternal tanpa akun. |
 | **Dokumen** | Privat (PDF/PNG/JPEG), izin diperiksa pada setiap unduhan. |
-| **Penutupan** | Checklist wajib harus selesai; pengecualian hanya Manajer Program dengan alasan tertulis; sesudahnya proyek baca-saja (dapat dibuka kembali). |
+| **Penutupan** | Checklist wajib harus selesai; pengecualian hanya Koordinator Program dengan alasan tertulis; sesudahnya proyek baca-saja (dapat dibuka kembali). |
 | **Referensi** | Surat tugas HRIS ditautkan sebagai referensi (tabel milik modul; surat tugas tetap beku). Referensi Website/HaloAI/Sistem Keuangan dicatat **manual — belum ada integrasi**. |
 
 Aktifkan di development: set `TRAINING_MODULE_ENABLED="true"` di `.env`, `npm run db:migrate`, `npm run db:seed:dev`, `npm run db:seed:training-demo`.
@@ -135,4 +135,5 @@ Seed demo **menolak** berjalan bila `NODE_ENV=production`, host database bukan l
 - [DEPLOYMENT](docs/DEPLOYMENT.md) — konfigurasi, Docker, cadangan/pemulihan
 - [API](docs/API.md) — daftar endpoint (termasuk `/api/training/*`)
 - [TRAINING-OPS](docs/TRAINING-OPS.md) — modul Training & Operations: audit, arsitektur, model data, feature flag, staging/UAT, deployment, rollback, rancangan integrasi
+- [PERAN-DAN-WEWENANG](docs/PERAN-DAN-WEWENANG.md) — penyelarasan peran dengan Buku SOP Rev 0.5: tingkat jabatan, Koordinator Program, Pemantau otomatis, aturan Magang, konfigurasi awal
 - [TRAINING-PERAN](docs/TRAINING-PERAN.md) — peran & hak akses modul, usulan pemetaan dari bagan organisasi, keputusan untuk pemilik sistem

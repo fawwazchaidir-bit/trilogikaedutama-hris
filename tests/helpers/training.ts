@@ -9,7 +9,7 @@ export const TODAY = () => todayIso("Asia/Jakarta");
 export const inDays = (n: number) => addDays(TODAY(), n);
 
 export interface TrainingFixtures extends Fixtures {
-  /** Koordinator Program: level MANAGER, EMPLOYEE secara global. */
+  /** Koordinator Program: level COORDINATOR, EMPLOYEE secara global. */
   mgr: Actor; mgrEmp: string;
   /** Admin Program: level ADMIN_PROGRAM. */
   adm: Actor; admEmp: string;

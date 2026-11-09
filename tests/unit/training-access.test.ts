@@ -23,7 +23,7 @@ describe("model akses Training & Operations (murni)", () => {
 
   it("Direktur (Super Admin): akses penuh lintas proyek + mengatur akses; Pemantau tetap hanya melihat", () => {
     expect(globalCaps(subj("SUPER_ADMIN"))).toMatchObject({ fullAccess: true, viewAll: true, createProject: true, managePrograms: true, manageDirectory: true, manageAccess: true });
-    expect(A(subj("EMPLOYEE", "VIEWER"))).toEqual(["view"]);
+    expect(A(subj("EMPLOYEE", "VIEWER"))).toEqual(["view", "view_participants"]); // melihat daftar peserta (tanpa kontak); tidak mengubah apa pun
     expect(globalCaps(subj("EMPLOYEE", "VIEWER"))).toMatchObject({ fullAccess: false, viewAll: true, manageAccess: false, createProject: false, managePrograms: false });
     // Role HRIS lain TIDAK mendapat akses penuh walau mengatur akun: hanya Super Admin atau pemegang level Koordinator Program.
     expect(globalCaps(subj("HR_ADMIN")).fullAccess).toBe(false);
@@ -50,15 +50,15 @@ describe("model akses Training & Operations (murni)", () => {
     expect(adm.has("manage_team")).toBe(false);
     expect(adm.has("change_status")).toBe(false);
     expect(adm.has("manage_participants")).toBe(true);
-    expect(A(subj("EMPLOYEE"), "STAFF")).toEqual(["view"]);
-    expect(A(subj("EMPLOYEE"), "PARTICIPANT_OWNER")).toEqual(["manage_participants", "upload_document", "view"]);
-    expect(A(subj("EMPLOYEE"), "MATERIAL_OWNER")).toEqual(["upload_document", "view"]);
-    expect(A(subj("EMPLOYEE"), "DOCUMENTATION_OWNER")).toEqual(["upload_document", "view"]);
+    expect(A(subj("EMPLOYEE"), "STAFF")).toEqual(["view", "view_participants"]);
+    expect(A(subj("EMPLOYEE"), "PARTICIPANT_OWNER")).toEqual(["manage_participants", "upload_document", "view", "view_participants"]);
+    expect(A(subj("EMPLOYEE"), "MATERIAL_OWNER")).toEqual(["upload_document", "view", "view_participants"]);
+    expect(A(subj("EMPLOYEE"), "DOCUMENTATION_OWNER")).toEqual(["upload_document", "view", "view_participants"]);
   });
 
   it("level + peran digabung (union) dan peran proyek tidak pernah melebihi proyeknya", () => {
     const viewerAsStaff = A(subj("EMPLOYEE", "VIEWER"), "PARTICIPANT_OWNER");
-    expect(viewerAsStaff).toEqual(["manage_participants", "upload_document", "view"]);
+    expect(viewerAsStaff).toEqual(["manage_participants", "upload_document", "view", "view_participants"]);
     // Peran proyek tidak memberi kemampuan tingkat-modul: tanpa level, akun tetap bukan pemegang modul (menu tampil karena keanggotaan).
     expect(globalCaps(subj("EMPLOYEE", null))).toMatchObject({ hasModule: false, viewAll: false, createProject: false, manageDirectory: false });
     for (const role of PROJECT_ROLES) expect(projectAbilities(subj("EMPLOYEE", null), role).has("manage_pic")).toBe(false);

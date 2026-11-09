@@ -1598,7 +1598,7 @@ model TrainingProject {
   closureSummary        String?
   /// Permasalahan & tindak lanjut.
   closureFollowUp       String?
-  /// Terisi bila proyek ditutup padahal ada checklist wajib belum selesai (pengecualian beralasan oleh Manajer Program).
+  /// Terisi bila proyek ditutup padahal ada checklist wajib belum selesai (pengecualian beralasan oleh Koordinator Program).
   closureOverrideReason String?
   cancelledAt           DateTime?
   cancelledById         String?   @db.Uuid

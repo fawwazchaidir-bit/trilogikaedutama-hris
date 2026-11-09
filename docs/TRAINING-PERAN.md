@@ -1,8 +1,8 @@
 # Training & Operations — Peran & Hak Akses (untuk pemilik sistem)
 
 Dokumen ini menjawab satu pertanyaan: **siapa boleh melakukan apa di modul Training & Operations**, dan bagaimana
-memetakannya ke **bagan organisasi LPK Trilogika Edutama (SOP Rev. 0.5)**. Bagian [Keputusan](#keputusan-yang-perlu-anda-ambil)
-di bawah adalah hal yang hanya Anda yang bisa memutuskan.
+memetakannya ke **bagan organisasi LPK Trilogika Edutama (SOP Rev. 0.5)**. Penyelarasan peran lintas portal (tingkat jabatan, aturan Magang, Pemantau otomatis) dirinci di
+[PERAN-DAN-WEWENANG.md](./PERAN-DAN-WEWENANG.md); dokumen ini fokus ke modul Training & Operations.
 
 ## 1. Mengapa bukan "satu role per jabatan"
 
@@ -15,17 +15,22 @@ Kalau izin dipasang pada jabatan, tiga hal ini terjadi:
 | Satu orang memegang dua topi (mis. Staf Adm. & Kurikulum yang juga Fasilitator Kelas) | Satu jabatan tidak cukup mewakili |
 | Satu proyek butuh orang dari divisi lain (mis. Staf Admisi membantu in-house training) | Orang itu harus diberi izin luas hanya demi satu proyek |
 
-**Rancangan yang dipakai: hak akses melekat pada *orang* dan *penugasan*, bukan pada teks jabatan.** Ada dua lapis, dan role HRIS
-tidak disentuh sama sekali:
+**Rancangan yang dipakai: hak akses melekat pada *orang* dan *penugasan*, bukan pada teks jabatan.** Role HRIS tidak disentuh;
+modul ini menambah dua lapis, dan *Tingkat jabatan* hanya memberi satu hak otomatis (Pemantau untuk Manajer):
 
 ```
-Role global HRIS (tidak diubah)     Super Admin · Admin/HR · Karyawan     → HRIS: presensi, cuti, slip gaji, dsb.
+Role global HRIS (tidak diubah)     Super Admin (Direktur) · Admin/HR · Karyawan     → HRIS: presensi, cuti, slip gaji, dsb.
         +
-Level modul (per akun, opsional)    Pemantau · Admin Program · Manajer Program   → apa yang boleh LINTAS proyek
+Tingkat jabatan (atribut karyawan)  Staf · Supervisor · Manajer                      → Manajer otomatis = Pemantau modul ini
+        +
+Level modul (per akun, opsional)    Pemantau · Admin Program · Koordinator Program   → apa yang boleh LINTAS proyek
         +
 Peran proyek (per penugasan)        Project Manager (PIC) · Admin Program · PJ Peserta ·
-                                    PJ Materi · PJ Dokumentasi · Staf Pelaksana   → apa yang boleh PADA proyek itu
+                                    PJ Materi · PJ Dokumentasi · Staf Pelaksana       → apa yang boleh PADA proyek itu
 ```
+
+Level modul yang diberikan manual **menimpa** hak otomatis dari tingkat Manajer. Akun karyawan berstatus **Magang** tidak dapat
+memegang level modul, peran PIC / Admin Program / PJ Peserta, atau melihat daftar peserta (lihat bagian 3c).
 
 Akibat yang Anda rasakan:
 
@@ -47,16 +52,16 @@ Akibat yang Anda rasakan:
 | Jabatan (bagan) | Role HRIS | Level modul (usulan) | Peran proyek yang lazim | Catatan |
 |---|---|---|---|---|
 | **Direktur Utama** | Super Admin | *(bawaan)* kelola penuh semua proyek + mengatur akses & rumus indikator | — | Keputusan 4 Nov 2026: Direktur boleh mengubah data proyek |
-| **Manajer Operasional & Keuangan** | sesuai kebutuhan HR | **Manajer Program** | Project Manager | Kendali operasional; menutup/membatalkan proyek |
-| **Supervisor Administrasi & Kurikulum** | Karyawan | **Manajer Program** | PIC / Admin Program | Memegang jadwal induk, materi, instruktur. *Bagan tidak punya jabatan "Manajer Program"; fungsinya dijalankan supervisor ini.* |
+| **Manajer Operasional & Keuangan** | sesuai kebutuhan HR | **Pemantau otomatis** (tingkat Manajer); level manual bila perlu mengelola | Project Manager | SOP: memeriksa bentrok jadwal sebelum Berita Acara. Kontak peserta tetap tersembunyi kecuali diberi level manual |
+| **Supervisor Administrasi & Kurikulum** | Karyawan | **Koordinator Program** *(ditunjuk manual oleh Direktur)* | PIC / Admin Program | Memegang jadwal induk, materi, instruktur (PIC ADK/001, 002, 004, 009). *Bagan tidak punya jabatan "Koordinator Program"; fungsinya dijalankan supervisor ini.* |
 | **Staf Adm. & Kurikulum** (Fasilitator Kelas) | Karyawan | **Admin Program** | Admin Program / PJ Materi | Boleh membuat proyek; mengelola hanya proyek yang ia ikuti |
 | **Staf Administrasi Umum** (Verifikator Pembayaran) | Karyawan | tanpa level | **PJ Peserta** | Registrasi, logistik, berkas peserta: satu-satunya peran biasa yang melihat kontak & berkas peserta |
 | **Supervisor IT & Web Development** | Karyawan | tanpa level | Staf Pelaksana | Platform daring/tracking |
 | **Staf Administrasi Keuangan** | Karyawan | tanpa level | — | Invoice, kwitansi, honor ada di **Sistem Keuangan**, bukan modul ini |
-| **Manajer Marketing & Relations** | Karyawan | **Pemantau** *(opsional)* | — | Memantau status in-house dari B2B; kontak peserta tetap tersembunyi |
+| **Manajer Marketing & Relations** | Karyawan | **Pemantau otomatis** (tingkat Manajer) | — | Menerima Jadwal Induk dan memantau status in-house dari B2B; kontak peserta tetap tersembunyi. Setara dengan Manajer Operasional — dibedakan domain (divisi) |
 | **Staf Admisi 1 / 2** | Karyawan | tanpa level | Staf Pelaksana *(bila terlibat)* | Prospek & lead tetap di HaloAI |
 | **Staf Social Media Specialist** | Karyawan | tanpa level | PJ Dokumentasi *(bila terlibat)* | Hanya mengunggah dokumentasi |
-| **Peserta Magang Sosial Media** | Karyawan | tanpa level | PJ Dokumentasi, *hanya* pada proyek tanpa data peserta | Sesuai bagan: *tanpa wewenang persetujuan & akses data* |
+| **Peserta Magang Sosial Media** | Karyawan (status **Magang**) | **tidak dapat diberi level** | Staf Pelaksana / PJ Materi / PJ Dokumentasi saja | Sesuai bagan: *tanpa wewenang persetujuan & akses data*. Ditegakkan sistem — lihat bagian 3c |
 | **Instruktur Tetap / Tidak Tetap** | tidak punya akun | — | dicatat di **Direktori Instruktur / Asesor** | Karyawan internal ditautkan ke data karyawan; eksternal cukup kontak operasional |
 | **LSP BNSP / Akuntan Eksternal** | tidak punya akun | — | — | Pihak eksternal, di luar portal |
 
@@ -67,11 +72,11 @@ Label SOP keuangan pada bagan (Pembuat, Pemeriksa, Penyetuju, Rekonsiliator, Ver
 
 ### 3a. Lintas proyek (level modul)
 
-Keputusan 4 Nov 2026: **Direktur/Super Admin boleh mengubah data proyek** (kelola penuh seperti Manajer Program); jumlah pemegang level Manajer Program **tidak dibatasi**.
+Keputusan 4 Nov 2026: **Direktur/Super Admin boleh mengubah data proyek** (kelola penuh seperti Koordinator Program); jumlah pemegang level Koordinator Program **tidak dibatasi**.
 
-| Kemampuan | Super Admin | Pemantau | Admin Program | Manajer Program |
+| Kemampuan | Super Admin | Pemantau | Admin Program | Koordinator Program |
 |---|:-:|:-:|:-:|:-:|
-| Melihat **semua** proyek, dashboard lintas proyek, laporan | ✓ | ✓ | — *(hanya proyek yang diikuti)* | ✓ |
+| Melihat **semua** proyek, dashboard lintas proyek, laporan | ✓ | ✓ *(termasuk otomatis untuk tingkat Manajer)* | — *(hanya proyek yang diikuti)* | ✓ |
 | Membuat proyek baru | ✓ | — | ✓ | ✓ |
 | Menetapkan Project Manager (PIC) | ✓ | — | — | ✓ |
 | Mengelola program & template checklist | ✓ | — | — | ✓ |
@@ -86,9 +91,9 @@ Keputusan 4 Nov 2026: **Direktur/Super Admin boleh mengubah data proyek** (kelol
 
 ### 3b. Pada satu proyek (peran proyek)
 
-| Kemampuan | Manajer Program / Super Admin | PIC | Admin Program | PJ Peserta | PJ Materi / PJ Dokumentasi | Staf | Pemantau |
+| Kemampuan | Koordinator Program / Super Admin | PIC | Admin Program | PJ Peserta | PJ Materi / PJ Dokumentasi | Staf | Pemantau |
 |---|:-:|:-:|:-:|:-:|:-:|:-:|:-:|
-| Melihat proyek, tugas, jadwal, peserta (tanpa kontak), dokumen | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Melihat proyek, tugas, jadwal, dokumen | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | Mengubah data proyek | ✓ | ✓ | ✓ | — | — | — | — |
 | Draf → Persiapan → Berjalan | ✓ | ✓ | — | — | — | — | — |
 | **Menutup / membatalkan / membuka kembali proyek** | ✓ | — | — | — | — | — | — |
@@ -98,6 +103,7 @@ Keputusan 4 Nov 2026: **Direktur/Super Admin boleh mengubah data proyek** (kelol
 | Mengubah status **tugas miliknya** + berkomentar | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | — |
 | Mengelola checklist (terapkan template, tambah/hapus item) | ✓ | ✓ | ✓ | — | — | — | — |
 | Menandai item checklist **miliknya** selesai | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | — |
+| Melihat **daftar** peserta (tanpa kontak) | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | Mengelola peserta **+ melihat kontak & dokumen peserta** | ✓ | ✓ | ✓ | ✓ | — | — | — |
 | Mengelola jadwal | ✓ | ✓ | ✓ | — | — | — | — |
 | Menugaskan instruktur/asesor **+ melihat kontaknya** | ✓ | ✓ | ✓ | — | — | — | — |
@@ -111,22 +117,37 @@ Keputusan 4 Nov 2026: **Direktur/Super Admin boleh mengubah data proyek** (kelol
 Aturan tambahan yang dijaga server:
 
 - Proyek yang **bukan lingkup Anda menjawab 404** (bukan 403): keberadaannya tidak bocor, dan mengganti ID di URL tidak memberi apa-apa.
-- Proyek **Selesai/Dibatalkan** bersifat baca-saja; hanya Manajer Program yang dapat membuka kembali yang Selesai (dengan alasan).
+- Proyek **Selesai/Dibatalkan** bersifat baca-saja; hanya Koordinator Program yang dapat membuka kembali yang Selesai (dengan alasan).
 - Penanggung jawab tugas **harus anggota aktif proyek**.
 - Menautkan **surat tugas** juga butuh izin HRIS `assignment:view_all`. Modul ini hanya menampilkan nomor, tujuan, tanggal, dan status — **tidak** nominal uang harian atau daftar penerima.
-- Penutupan: semua **checklist wajib** harus selesai. Pengecualian hanya oleh Manajer Program, dengan alasan tertulis; item yang dilewati tercatat di riwayat.
+- Penutupan: semua **checklist wajib** harus selesai. Pengecualian hanya oleh Koordinator Program, dengan alasan tertulis; item yang dilewati tercatat di riwayat.
+
+### 3c. Akun berstatus Magang (SOP Rev. 0.5: tanpa wewenang persetujuan & akses data)
+
+Aturan ini ditegakkan di **setiap pintu pemberian** (service) dan **saat berjalan** (lib akses), bukan sekadar anjuran:
+
+| Hal | Perlakuan untuk karyawan berstatus Magang |
+|---|---|
+| Role akun Admin/HR atau Super Admin | Ditolak (buat akun maupun ubah akun) |
+| Level modul Training (semua level) | Ditolak; baris level yang menyusup langsung ke tabel **diabaikan** saat berjalan |
+| Peran proyek PIC / Admin Program / PJ Peserta | Ditolak; peran yang menyusup langsung ke tabel dipangkas ke kemampuan **melihat + mengunggah dokumen** |
+| Atasan langsung, pengganti peninjau, tingkat Supervisor/Manajer | Ditolak (DB juga menolak lewat CHECK `employees_intern_staff_level`) |
+| **Daftar** peserta (menu Peserta, tab Peserta, API) | Tertutup (403); menu disembunyikan. Angka agregat di dashboard tetap tampil |
+| Mengubah status karyawan menjadi Magang | **Diblok** selama masih memegang salah satu hal di atas; pesan kesalahan menyebut daftar yang harus dicabut dulu (tidak dicabut otomatis) |
 
 ## Status keputusan
 
 | # | Keputusan | Status | Catatan |
 |---|---|---|---|
 | 1 | **Direktur/Super Admin boleh mengubah data proyek?** | ✅ **Diputuskan: YA** (4 Nov 2026) | Diterapkan di kode & tes. Pemisahan "memantau vs mengeksekusi" tidak lagi dipakai; setiap perubahan tetap tercatat di audit dengan nama pelaku. |
-| 2 | **Siapa yang memegang level Manajer Program?** | ✅ **Diputuskan: Direktur yang memberi akses, tanpa batas jumlah** | Tidak ada pembatasan 1–2 orang di kode; ada tes yang membuktikan banyak pemegang. Setiap pemberian/pencabutan tercatat. |
+| 2 | **Siapa yang memegang level Koordinator Program?** | ✅ **Diputuskan: Direktur yang memberi akses, tanpa batas jumlah** | Tidak ada pembatasan 1–2 orang di kode; ada tes yang membuktikan banyak pemegang. Setiap pemberian/pencabutan tercatat. |
 | 3 | **Izinkan dokumen Word/PowerPoint/Excel?** | ✅ **Diputuskan: TIDAK — PDF/PNG/JPEG saja** (4 Nov 2026) | Materi instruktur diekspor ke PDF. Penjelasan risikonya tetap di bawah sebagai dasar keputusan; bila kelak ingin dibuka, ikuti usulan pemeriksaan di bawah. |
 | 4 | **Retensi & penghapusan permanen dokumen** | ⏳ **Menunggu persetujuan Direktur** | Belum dibangun apa pun: tidak ada penghapusan otomatis maupun permanen. "Hapus" tetap = disembunyikan. Setelah masa retensi diputuskan, ditambah aksi penghapusan permanen khusus Direktur (beralasan, tercatat di audit). |
 | 5 | **Rumus indikator beban tim, kesiapan, ketepatan waktu** | ✅ **Diputuskan: memakai dokumen v1.0, dapat diedit di aplikasi** | Rumus tetap di kode; semua angka (bobot, ambang, template, jam standar, kapasitas) diubah Direktur di *Rumus Indikator* — berversi, dapat dikembalikan. Rincian & tafsir: TRAINING-OPS.md §3a. |
 | 6 | **Batas ukuran dokumen** | Bawaan | `MAX_DOCUMENT_UPLOAD_MB` = 10 MB, disimpan di PostgreSQL. Volume foto dokumentasi besar sebaiknya pindah ke penyimpanan objek (butuh persetujuan & konfigurasi). |
-| 7 | **Manajer Marketing & Relations sebagai Pemantau** | Bawaan: tidak diberi | Beri bila ingin memantau pelaksanaan in-house tanpa bertanya ke tim. |
+| 7 | **Manajer sebagai Pemantau** | ✅ **Diputuskan: otomatis** (9 Nov 2026) | Tingkat jabatan Manajer = Pemantau (hanya baca, kontak peserta tersembunyi), dihitung saat berjalan. Level manual menimpa; Magang tidak pernah berlaku. |
+| 8 | **Nama level "Manajer Program"** | ✅ **Diganti "Koordinator Program"** (9 Nov 2026) | Di database `TrainingLevel.COORDINATOR` (migrasi `20261109090000`), agar tidak rancu dengan tingkat jabatan "Manajer". |
+| 9 | **Aturan Magang** | ✅ **Diputuskan** (9 Nov 2026) | Lihat 3c. Mengubah status menjadi Magang diblok bila masih memegang fungsi. |
 
 ### Soal #3 — untuk apa "pemeriksaan keamanan tambahan" pada file Word/PowerPoint/Excel?
 

@@ -9,11 +9,13 @@ import type { Actor } from "../../actor";
 import { writeAudit } from "../../audit";
 import { notifyUsers } from "../notifications";
 import {
-  canSeeModule, globalCaps, projectAbilities, type AccessSubject, type GlobalCaps, type ProjectAbility,
+  canSeeModule, effectiveLevel, globalCaps, projectAbilities, type AccessSubject, type GlobalCaps, type LevelSource, type ProjectAbility,
 } from "@/lib/training/access";
 import { isFinalProject, type ProjectRole, type ProjectStatus, type TrainingLevel, TRAINING_LEVEL_LABEL } from "@/lib/training/types";
 import { accessGrantSchema } from "@/lib/validation/training";
+import type { JobLevelValue } from "@/lib/org-level";
 import { assertUuid } from "./shared";
+import { assertNotIntern } from "../function-guard";
 
 /**
  * GERBANG KEAMANAN modul Training & Operations. Setiap service (dan halaman) wajib lewat sini.
@@ -45,13 +47,25 @@ export interface ModuleContext {
   hasMembership: boolean;
   /** Boleh melihat modul (menu & halaman). */
   canSee: boolean;
+  /** Level yang BERLAKU (manual, atau Pemantau otomatis bagi tingkat Manajer; null untuk Magang/tanpa level). */
+  level: TrainingLevel | null;
+  levelSource: LevelSource;
+}
+
+/** Subjek akses: level manual + data karyawan tertaut (tingkat jabatan, status Magang). Satu sumber untuk semua pemeriksaan. */
+export async function loadSubject(db: Db, who: { userId: string; role: Role; employeeId: string | null }): Promise<AccessSubject> {
+  const [level, emp] = await Promise.all([
+    getLevel(db, who.userId),
+    who.employeeId ? db.employee.findUnique({ where: { id: who.employeeId }, select: { jobLevel: true, employmentStatus: true } }) : Promise.resolve(null),
+  ]);
+  return { role: who.role, level, jobLevel: emp?.jobLevel ?? null, intern: emp?.employmentStatus === "INTERN" };
 }
 
 /** Konteks akses modul untuk `actor`. Tidak melempar bila modul mati — pemanggil menu memeriksa `trainingEnabled()` sendiri. */
 export async function getModuleContext(actor: Actor, db: Db = prisma): Promise<ModuleContext> {
-  const [level, hasMembership] = await Promise.all([getLevel(db, actor.userId), hasActiveMembership(db, actor.employeeId)]);
-  const subject: AccessSubject = { role: actor.role, level };
-  return { subject, caps: globalCaps(subject), hasMembership, canSee: canSeeModule(subject, hasMembership) };
+  const [subject, hasMembership] = await Promise.all([loadSubject(db, actor), hasActiveMembership(db, actor.employeeId)]);
+  const eff = effectiveLevel(subject);
+  return { subject, caps: globalCaps(subject), hasMembership, canSee: canSeeModule(subject, hasMembership), level: eff.level, levelSource: eff.source };
 }
 
 /** Untuk halaman/API tingkat modul: modul hidup dan pengguna punya akses; selain itu 404 (tidak membocorkan keberadaan modul). */
@@ -129,13 +143,13 @@ export function assertEditable(project: Pick<ProjectCore, "status">): void {
  * (keanggotaan yang sudah diakhiri tidak dihitung).
  */
 export async function canUserViewProject(db: Db, subject: { userId: string; role: Role; employeeId: string | null }, projectId: string): Promise<boolean> {
-  const level = await getLevel(db, subject.userId);
+  const accessSubject = await loadSubject(db, subject);
   let memberRole: ProjectRole | null = null;
   if (subject.employeeId) {
     const m = await db.trainingProjectMember.findFirst({ where: { projectId, employeeId: subject.employeeId, endedAt: null }, select: { role: true } });
     memberRole = m?.role ?? null;
   }
-  return projectAbilities({ role: subject.role, level }, memberRole).has("view");
+  return projectAbilities(accessSubject, memberRole).has("view");
 }
 
 /** Klausa `where` Prisma: proyek yang boleh dilihat pelaku. Dipakai SEMUA daftar/dashboard/laporan. */
@@ -158,6 +172,10 @@ export interface AccessRowDto {
   level: TrainingLevel | null;
   note: string | null;
   isActive: boolean;
+  /** Tingkat jabatan karyawan tertaut (Manajer otomatis berhak sebagai Pemantau). */
+  jobLevel: JobLevelValue | null;
+  /** Karyawan berstatus Magang: tidak boleh diberi level modul. */
+  intern: boolean;
 }
 
 /** Daftar akun aktif beserta level modulnya. Jabatan ditampilkan HANYA sebagai petunjuk bagi Super Admin; tidak menentukan izin. */
@@ -170,13 +188,14 @@ export async function listAccessRows(actor: Actor): Promise<AccessRowDto[]> {
     orderBy: { name: "asc" },
     select: {
       id: true, name: true, email: true, role: true, trainingAccess: { select: { level: true, note: true } },
-      employee: { select: { id: true, position: true, division: { select: { name: true } } } },
+      employee: { select: { id: true, position: true, jobLevel: true, employmentStatus: true, division: { select: { name: true } } } },
     },
   });
   return users.map((u) => ({
     userId: u.id, name: u.name, email: u.email, globalRole: u.role, employeeId: u.employee?.id ?? null,
     position: u.employee?.position ?? null, division: u.employee?.division?.name ?? null,
     level: u.trainingAccess?.level ?? null, note: u.trainingAccess?.note ?? null, isActive: true,
+    jobLevel: u.employee?.jobLevel ?? null, intern: u.employee?.employmentStatus === "INTERN",
   }));
 }
 
@@ -190,6 +209,8 @@ export async function setAccessLevel(actor: Actor, raw: unknown): Promise<{ user
   return transaction(async (tx) => {
     const user = await tx.user.findUnique({ where: { id: input.userId }, select: { id: true, name: true, isActive: true } });
     if (!user || !user.isActive) throw Errors.notFound("Akun");
+    const target = await tx.employee.findFirst({ where: { userId: input.userId }, select: { id: true } });
+    await assertNotIntern(tx, target?.id, "diberi level modul Training & Operations", "level");
     const before = await tx.trainingAccess.findUnique({ where: { userId: input.userId }, select: { level: true } });
     await tx.trainingAccess.upsert({
       where: { userId: input.userId },

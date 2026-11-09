@@ -65,12 +65,14 @@
 - **Template & penanggung jawab checklist:** menu **Masuk & Berhenti → Atur template** mengubah butir, tenggat, dan penanggung jawab bawaan untuk checklist **baru**. Penanggung jawab diberi tahu, diingatkan menjelang/ setelah tenggat, dan mengerjakan butirnya di menu **Checklist Saya**.
 - **Aset:** menu **Aset** untuk mendaftarkan, menyerahkan, dan mencatat pengembalian (baik/rusak/hilang). Saat karyawan berhenti, aset yang masih dipegang muncul sebagai peringatan pada butir *Pengembalian aset*; aset juga dapat dikembalikan dari detail karyawan. Lihat [ASET.md](ASET.md).
 - **Penyelesaian akhir:** menu **Penyelesaian Akhir** (Admin/HR menyiapkan, pimpinan menyetujui). Periksa usulan sistem dan **isi sendiri** pesangon, UPMK, UPH, THR, dan pajak sebagai baris manual — sistem tidak menghitungnya. Lihat [PENYELESAIAN-AKHIR.md](PENYELESAIAN-AKHIR.md).
-- **Organisasi & atasan:** di *Detail karyawan → Organisasi & atasan langsung*, tetapkan atasan dan ubah divisi/jabatan/status dengan **tanggal berlaku**; riwayat tercatat otomatis. HR tetap melihat semua pengajuan dan dapat memprosesnya bila atasan tidak sempat (tercatat sebagai diproses HR).
+- **Organisasi & atasan:** di *Detail karyawan → Organisasi & atasan langsung*, tetapkan atasan dan ubah divisi/jabatan/status/**tingkat jabatan (Staf, Supervisor, Manajer)** dengan **tanggal berlaku**; riwayat tercatat otomatis. HR tetap melihat semua pengajuan dan dapat memprosesnya bila atasan tidak sempat (tercatat sebagai diproses HR).
 - **Penting:** koreksi absensi *setelah* gaji terbit **tidak** mengubah slip; periode ditandai "Data berubah" sebagai pengingat. Sebelum slip terbit, perubahan **komponen gaji** (nominal, rumus, masa berlaku, tambah/nonaktif) sesudah Hitung juga menandai karyawan itu "Data berubah" dan memblokir Ajukan/Setujui/Terbitkan sampai Anda menekan **Hitung ulang** (Kembalikan ke Draf dulu bila sudah diajukan).
 
-## D. Super Admin / Pimpinan
+## D. Direktur (Super Admin)
 
 Semua fitur HR ditambah: **keputusan lanjut/tidak kontrak** (*Dokumen* → *Putuskan lanjut/tidak*; Anda menerima notifikasi H-3 bulan, H-1 bulan, H-14 hari sebelum kontrak berakhir), **membatalkan Bukti Penerimaan Uang Harian**, **Setujui/Kembalikan** gaji, **Batalkan** periode disetujui/terbit, **Pengaturan** kebijakan & aturan, **Akun Pengguna** (semua peran), **Audit Log** (siapa mengubah apa dan kapan; tidak dapat diubah/dihapus).
+
+**Fungsi Admin/HR ada pada Direktur** sampai Direktur memberi role Admin/HR kepada seseorang; Direktur boleh menyiapkan sekaligus menyetujui gaji (jejaknya di Audit Log). Di menu *Akses Training*, Direktur menunjuk **Koordinator Program** (biasanya Supervisor Administrasi & Kurikulum); karyawan bertingkat **Manajer** otomatis menjadi **Pemantau** (hanya baca). Karyawan berstatus **Magang** tidak dapat diberi wewenang persetujuan maupun akses data peserta — sistem menolaknya. Rincian: [PERAN-DAN-WEWENANG.md](PERAN-DAN-WEWENANG.md).
 
 ## E. Tanya-jawab singkat
 

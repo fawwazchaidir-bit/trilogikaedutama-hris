@@ -60,7 +60,7 @@ describe("gerbang modul: siapa yang boleh masuk", () => {
 
   it("Pemantau (VIEWER): lihat semua, tidak bisa mengubah apa pun (berbeda dari Direktur)", async () => {
     const id = await mkProject(fx.mgr);
-    expect((await getProject(fx.viewer, id)).abilities).toEqual(["view"]);
+    expect((await getProject(fx.viewer, id)).abilities).toEqual(["view", "view_participants"]);
     expect(await fail(updateProject(fx.viewer, id, { name: "x1" }))).toMatchObject(FORBIDDEN);
     expect(await fail(addMember(fx.viewer, id, { employeeId: fx.empIds[0], role: "STAFF" }))).toMatchObject(FORBIDDEN);
     expect(await fail(createProject(fx.viewer, { name: "Baru" }))).toMatchObject(FORBIDDEN);
@@ -304,7 +304,7 @@ describe("canUserViewProject — aturan yang sama dengan gerbang proyek, untuk p
 
     expect(await can(fx.emp1)).toBe(true);
     expect(await can(fx.emp2)).toBe(false); // bukan anggota
-    expect(await can(fx.mgr)).toBe(true); // level MANAGER
+    expect(await can(fx.mgr)).toBe(true); // level COORDINATOR
     expect(await can(fx.viewer)).toBe(true); // level VIEWER
     expect(await can(fx.superAdmin, "SUPER_ADMIN")).toBe(true);
     expect(await can(fx.loner)).toBe(false);

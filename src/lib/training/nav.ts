@@ -6,7 +6,7 @@
 import type { NavItem } from "@/lib/permissions";
 import type { GlobalCaps } from "./access";
 
-type TrainingNavItem = Pick<NavItem, "href" | "label" | "group"> & { needsEmployee?: boolean; needsManageAccess?: boolean };
+type TrainingNavItem = Pick<NavItem, "href" | "label" | "group"> & { needsEmployee?: boolean; needsManageAccess?: boolean; needsParticipants?: boolean };
 
 export const TRAINING_NAV_ITEMS: readonly TrainingNavItem[] = [
   { href: "/training", label: "Dashboard Training", group: "training" },
@@ -16,7 +16,7 @@ export const TRAINING_NAV_ITEMS: readonly TrainingNavItem[] = [
   { href: "/training/tugas-saya", label: "Tugas Saya", group: "training", needsEmployee: true },
   { href: "/training/checklist", label: "Checklist", group: "training" },
   { href: "/training/kalender", label: "Kalender Kegiatan", group: "training" },
-  { href: "/training/peserta", label: "Peserta", group: "training" },
+  { href: "/training/peserta", label: "Peserta", group: "training", needsParticipants: true },
   { href: "/training/instruktur", label: "Instruktur / Asesor", group: "training" },
   { href: "/training/dokumen", label: "Dokumen Proyek", group: "training" },
   { href: "/training/laporan", label: "Laporan Proyek", group: "training" },
@@ -26,6 +26,6 @@ export const TRAINING_NAV_ITEMS: readonly TrainingNavItem[] = [
 
 export function trainingNav(caps: GlobalCaps, hasEmployee: boolean): Pick<NavItem, "href" | "label" | "group">[] {
   return TRAINING_NAV_ITEMS
-    .filter((i) => (!i.needsEmployee || hasEmployee) && (!i.needsManageAccess || caps.manageAccess))
+    .filter((i) => (!i.needsEmployee || hasEmployee) && (!i.needsManageAccess || caps.manageAccess) && (!i.needsParticipants || caps.viewParticipants))
     .map(({ href, label, group }) => ({ href, label, group }));
 }

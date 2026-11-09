@@ -8,8 +8,9 @@ import { actorCan, type Actor } from "../actor";
 import { writeAudit } from "../audit";
 import { hashPassword, validatePasswordStrength } from "../auth/password";
 import { revokeAllSessions } from "../auth/session";
-import { manageableRoles, type Role } from "@/lib/permissions";
+import { manageableRoles, ROLE_LABELS, type Role } from "@/lib/permissions";
 import { normalizeEmail } from "./auth";
+import { assertNotIntern } from "./function-guard";
 
 const ROLES = ["SUPER_ADMIN", "HR_ADMIN", "EMPLOYEE"] as const;
 
@@ -80,10 +81,11 @@ export async function createUser(actor: Actor, raw: unknown): Promise<UserDto> {
   return transaction(async (tx) => {
     if (await tx.user.findUnique({ where: { email } })) throw Errors.validation("Email sudah terdaftar.", { email: "Email sudah terdaftar" });
     if (input.employeeId) {
-      const emp = await tx.employee.findUnique({ where: { id: input.employeeId }, select: { id: true, userId: true, isActive: true, fullName: true } });
+      const emp = await tx.employee.findUnique({ where: { id: input.employeeId }, select: { id: true, userId: true, isActive: true, fullName: true, employmentStatus: true } });
       if (!emp) throw Errors.validation("Karyawan tidak ditemukan.", { employeeId: "Karyawan tidak ditemukan" });
       if (emp.userId) throw Errors.validation("Karyawan ini sudah memiliki akun.", { employeeId: "Sudah memiliki akun" });
       if (!emp.isActive) throw Errors.validation("Karyawan nonaktif tidak dapat diberi akun.", { employeeId: "Karyawan nonaktif" });
+      if (input.role !== "EMPLOYEE" && emp.employmentStatus === "INTERN") await assertNotIntern(tx, emp.id, `diberi peran ${ROLE_LABELS[input.role]}`, "role");
     }
     const u = await tx.user.create({
       data: { email, name: input.name, role: input.role, passwordHash, mustChangePassword: true },
@@ -111,6 +113,7 @@ export async function updateUser(actor: Actor, id: string, raw: unknown): Promis
     if (input.role !== undefined && input.role === "EMPLOYEE" && !user.employee) {
       throw Errors.validation("Akun yang tidak tertaut ke data karyawan tidak dapat dijadikan peran Karyawan.");
     }
+    if (input.role !== undefined && input.role !== "EMPLOYEE" && input.role !== user.role) await assertNotIntern(tx, user.employee?.id, `diberi peran ${ROLE_LABELS[input.role]}`, "role");
     const leavingSuper = user.role === "SUPER_ADMIN" && ((input.role && input.role !== "SUPER_ADMIN") || input.isActive === false);
     if (leavingSuper) {
       const others = await tx.user.count({ where: { role: "SUPER_ADMIN", isActive: true, id: { not: id } } });

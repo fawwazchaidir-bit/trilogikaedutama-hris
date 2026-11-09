@@ -197,6 +197,7 @@ function toParticipantDto(r: PartRow, contactVisible: boolean): ParticipantDto {
 
 export async function listProjectParticipants(actor: Actor, projectId: string): Promise<ParticipantDto[]> {
   const access = await loadProjectAccess(actor, projectId);
+  requireAbility(access, "view_participants", "Akun Anda tidak berhak melihat daftar peserta.");
   const rows = await prisma.trainingParticipant.findMany({ where: { projectId }, include: { project: { select: { code: true, name: true } } }, orderBy: [{ fullName: "asc" }] });
   const visible = access.abilities.has("manage_participants");
   return rows.map((r) => toParticipantDto(r, visible));
@@ -205,6 +206,7 @@ export async function listProjectParticipants(actor: Actor, projectId: string): 
 /** Daftar peserta lintas proyek (menu "Peserta"): hanya proyek yang boleh dilihat; kontak hanya bila berwenang pada proyek itu. */
 export async function listAllParticipants(actor: Actor, raw: unknown = {}): Promise<Paged<ParticipantDto>> {
   const mod = await requireModule(actor);
+  if (!mod.caps.viewParticipants) throw Errors.forbidden("Akun Anda tidak berhak melihat daftar peserta.");
   const f = parseInput(participantListSchema, raw);
   const pageSize = f.pageSize ?? 25;
   const page = f.page ?? 1;

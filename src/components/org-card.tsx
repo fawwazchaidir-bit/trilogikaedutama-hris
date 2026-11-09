@@ -10,9 +10,10 @@ import { useToast } from "@/components/ui/toast";
 import { api, ApiClientError, errorMessage } from "@/lib/api-client";
 import { formatDateLong } from "@/lib/format";
 import { EMPLOYMENT_LABEL, type EmploymentStatus } from "@/lib/labels";
+import { JOB_LEVELS, JOB_LEVEL_HELP, JOB_LEVEL_LABEL, type JobLevelValue } from "@/lib/org-level";
 import type { OrgHistoryDto, OrgProfileDto } from "@/server/services/org";
 
-const CHANGE_LABEL: Record<string, string> = { BASELINE: "Data awal", DIVISION: "Divisi", POSITION: "Jabatan", STATUS: "Status", SUPERVISOR: "Atasan" };
+const CHANGE_LABEL: Record<string, string> = { BASELINE: "Data awal", DIVISION: "Divisi", POSITION: "Jabatan", STATUS: "Status", SUPERVISOR: "Atasan", JOB_LEVEL: "Tingkat" };
 
 /**
  * Struktur organisasi satu karyawan: divisi, jabatan, status, ATASAN LANGSUNG, tanggal mulai berlaku, bawahan langsung, dan riwayat perubahan.
@@ -28,14 +29,14 @@ export function OrgCard({ profile, history, divisions, people, canManage, today 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [fe, setFe] = useState<Record<string, string>>({});
-  const initial = () => ({ divisionId: profile.divisionId ?? "", position: profile.position, employmentStatus: profile.employmentStatus as EmploymentStatus, supervisorId: profile.supervisor?.id ?? "", effectiveFrom: today, note: "" });
+  const initial = () => ({ divisionId: profile.divisionId ?? "", position: profile.position, employmentStatus: profile.employmentStatus as EmploymentStatus, jobLevel: profile.jobLevel as JobLevelValue, supervisorId: profile.supervisor?.id ?? "", effectiveFrom: today, note: "" });
   const [form, setForm] = useState(initial);
 
   async function save() {
     setBusy(true); setError(null); setFe({});
     try {
       await api(`/api/employees/${profile.employeeId}/org`, {
-        body: { divisionId: form.divisionId || null, position: form.position, employmentStatus: form.employmentStatus, supervisorId: form.supervisorId || null, effectiveFrom: form.effectiveFrom, note: form.note },
+        body: { divisionId: form.divisionId || null, position: form.position, employmentStatus: form.employmentStatus, jobLevel: form.jobLevel, supervisorId: form.supervisorId || null, effectiveFrom: form.effectiveFrom, note: form.note },
       });
       toast.success("Struktur organisasi diperbarui dan dicatat di riwayat."); setOpen(false); router.refresh();
     } catch (e) { setError(errorMessage(e)); if (e instanceof ApiClientError) setFe(e.fieldErrors); } finally { setBusy(false); }
@@ -52,6 +53,7 @@ export function OrgCard({ profile, history, divisions, people, canManage, today 
           {row("Divisi", profile.divisionName)}
           {row("Jabatan", profile.position)}
           {row("Status", <Badge>{EMPLOYMENT_LABEL[profile.employmentStatus]}</Badge>)}
+          {row("Tingkat jabatan", <Badge tone={profile.jobLevel === "MANAGER" ? "blue" : profile.jobLevel === "SUPERVISOR" ? "amber" : "gray"}>{JOB_LEVEL_LABEL[profile.jobLevel]}</Badge>)}
           {row("Berlaku sejak", <>{formatDateLong(profile.effectiveFrom)}{profile.sinceJoin && <span className="ml-2 text-xs font-normal text-muted">(sejak mulai bekerja)</span>}</>)}
         </dl>
         <dl className="divide-y divide-line">
@@ -59,6 +61,7 @@ export function OrgCard({ profile, history, divisions, people, canManage, today 
           {row("Bawahan langsung", profile.reports.length ? <ul className="font-normal">{profile.reports.map((r) => <li key={r.id}>{r.name} <span className="text-muted">· {r.position}</span></li>)}</ul> : null)}
         </dl>
       </div>
+      {profile.hints.length > 0 && <div className="px-5 pb-3"><Notice tone="warn">{profile.hints.join(" ")}</Notice></div>}
       <div className="border-t border-line px-5 py-4">
         <h3 className="mb-2 text-sm font-semibold">Riwayat perubahan</h3>
         {history.length === 0 ? <EmptyState title="Belum ada riwayat" description="Riwayat dimulai saat data organisasi pertama kali diubah." /> : (
@@ -67,7 +70,7 @@ export function OrgCard({ profile, history, divisions, people, canManage, today 
               <li key={h.id} className="relative">
                 <span className="absolute -left-[1.3rem] top-1.5 size-2 rounded-full bg-brand-600" aria-hidden />
                 <p className="font-medium">{formatDateLong(h.effectiveFrom)} <span className="ml-1 inline-flex flex-wrap gap-1 align-middle">{h.changes.map((c) => <Badge key={c} tone={c === "BASELINE" ? "gray" : "green"}>{CHANGE_LABEL[c] ?? c}</Badge>)}</span></p>
-                <p className="text-muted">{[h.divisionName, h.position, EMPLOYMENT_LABEL[h.employmentStatus], h.supervisorName ? `atasan: ${h.supervisorName}` : "tanpa atasan"].filter(Boolean).join(" · ")}</p>
+                <p className="text-muted">{[h.divisionName, h.position, EMPLOYMENT_LABEL[h.employmentStatus], JOB_LEVEL_LABEL[h.jobLevel], h.supervisorName ? `atasan: ${h.supervisorName}` : "tanpa atasan"].filter(Boolean).join(" · ")}</p>
                 {h.note && <p className="text-muted">Catatan: {h.note}</p>}
                 <p className="text-xs text-muted">Dicatat oleh {h.createdBy}</p>
               </li>
@@ -87,6 +90,9 @@ export function OrgCard({ profile, history, divisions, people, canManage, today 
             <TextField label="Jabatan" required value={form.position} onChange={(e) => setForm({ ...form, position: e.target.value })} error={fe.position} />
             <SelectField label="Status karyawan" value={form.employmentStatus} onChange={(e) => setForm({ ...form, employmentStatus: e.target.value as EmploymentStatus })} error={fe.employmentStatus}>
               {(Object.keys(EMPLOYMENT_LABEL) as EmploymentStatus[]).map((k) => <option key={k} value={k}>{EMPLOYMENT_LABEL[k]}</option>)}
+            </SelectField>
+            <SelectField label="Tingkat jabatan" value={form.jobLevel} onChange={(e) => setForm({ ...form, jobLevel: e.target.value as JobLevelValue })} error={fe.jobLevel} hint={JOB_LEVEL_HELP[form.jobLevel]}>
+              {JOB_LEVELS.map((k) => <option key={k} value={k}>{JOB_LEVEL_LABEL[k]}</option>)}
             </SelectField>
             <SelectField label="Atasan langsung" value={form.supervisorId} onChange={(e) => setForm({ ...form, supervisorId: e.target.value })} error={fe.supervisorId} hint="Peninjau cuti & lembur.">
               <option value="">— Belum ditetapkan —</option>

@@ -87,7 +87,7 @@ export function can(role: Role | null | undefined, permission: Permission): bool
 }
 
 export const ROLE_LABELS: Record<Role, string> = {
-  SUPER_ADMIN: "Super Admin / Pimpinan",
+  SUPER_ADMIN: "Direktur (Super Admin)",
   HR_ADMIN: "Admin / HR",
   EMPLOYEE: "Karyawan",
 };

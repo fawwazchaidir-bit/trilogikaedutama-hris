@@ -16,6 +16,8 @@ import { TAX_STATUSES, type TaxStatus } from "@/lib/statutory";
 import { EMPLOYMENT_LABEL, type EmploymentStatus } from "@/lib/labels";
 import { addDays, todayIso } from "@/lib/time";
 import { ensureOrgBaseline, recordOrgChangeFromUpdate } from "./org";
+import { assertMayBecomeIntern } from "./function-guard";
+import type { JobLevelValue } from "@/lib/org-level";
 import { autoTarget, startChecklistIfNone } from "./employee-checklists";
 import type { Paged } from "@/lib/types";
 
@@ -72,6 +74,8 @@ export interface EmployeeDto {
   divisionName: string | null;
   position: string;
   employmentStatus: EmploymentStatus;
+  /** Tingkat jabatan (Staf / Supervisor / Manajer). */
+  jobLevel: JobLevelValue;
   joinDate: string;
   endDate: string | null;
   phone: string | null;
@@ -99,7 +103,7 @@ type Row = Prisma.EmployeeGetPayload<{ include: typeof include }>;
 
 export const toEmployeeDto = (e: Row): EmployeeDto => ({
   id: e.id, employeeNo: e.employeeNo, fullName: e.fullName, divisionId: e.divisionId, divisionName: e.division?.name ?? null,
-  position: e.position, employmentStatus: e.employmentStatus, joinDate: dateToIso(e.joinDate), endDate: e.endDate ? dateToIso(e.endDate) : null,
+  position: e.position, employmentStatus: e.employmentStatus, jobLevel: e.jobLevel, joinDate: dateToIso(e.joinDate), endDate: e.endDate ? dateToIso(e.endDate) : null,
   phone: e.phone, email: e.email, address: e.address, bankName: e.bankName, bankAccountMasked: maskAccount(e.bankAccountLast4),
   bankAccountHolder: e.bankAccountHolder, photoUrl: e.photoFileId ? `/api/files/${e.photoFileId}` : null,
   isActive: e.isActive, notes: e.notes, emergencyContactName: e.emergencyContactName, emergencyContactRelation: e.emergencyContactRelation, emergencyContactPhone: e.emergencyContactPhone, userId: e.userId, userEmail: e.user?.email ?? null,
@@ -271,6 +275,7 @@ export async function updateEmployee(actor: Actor, id: string, raw: unknown): Pr
     await assertUnique(tx, input.employeeNo, id);
     await assertDivision(tx, input.divisionId);
     if (before.endDate && input.joinDate > dateToIso(before.endDate)) throw Errors.validation("Tanggal mulai tidak boleh setelah tanggal berhenti.", { joinDate: "Setelah tanggal berhenti" });
+    if (input.employmentStatus === "INTERN" && before.employmentStatus !== "INTERN") await assertMayBecomeIntern(tx, id);
     await ensureOrgBaseline(tx, actor, id); // jejak "sebelum" untuk karyawan lama yang belum punya riwayat
     const data = {
       employeeNo: input.employeeNo, fullName: input.fullName, divisionId: input.divisionId ?? null, position: input.position,
