@@ -251,7 +251,7 @@ export function ChatThread({ room, me, onBack }: { room: ChatRoomDto; me: Me; on
         {note && <p className="mb-3 rounded-md bg-canvas px-3 py-2 text-xs text-muted">{note}</p>}
         {hasMore && <div className="mb-2 text-center"><Button size="sm" onClick={() => void loadOlder()}>Muat pesan lebih lama</Button></div>}
         {!loaded ? <p className="py-8 text-center text-sm text-muted">Memuat percakapan…</p> : messages.length === 0 && outbox.length === 0 ? <p className="py-8 text-center text-sm text-muted">Belum ada pesan. Mulai percakapan di bawah.</p> : null}
-        {rows.map((r) => {
+        {rows.map((r, ri) => {
           if (r.node === "day") return <div key={r.key} className="my-3 flex items-center gap-3 text-xs text-muted"><hr className="flex-1 border-line" /><span>{r.label}</span><hr className="flex-1 border-line" /></div>;
           if (r.node === "divider") return <div key={r.key} className="my-2 flex items-center gap-3 text-xs font-medium text-brand-700"><hr className="flex-1 border-brand-200" /><span>Belum dibaca</span><hr className="flex-1 border-brand-200" /></div>;
           const m = r.m!;
@@ -271,7 +271,7 @@ export function ChatThread({ room, me, onBack }: { room: ChatRoomDto; me: Me; on
               </div>
               {!m.deleted && !m.purged && !room.auditView && (
                 <div className="opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100">
-                  <Menu label={`Aksi pesan dari ${m.senderName}`} items={[
+                  <Menu up={ri >= rows.length - 4} label={`Aksi pesan dari ${m.senderName}`} items={[
                     { label: "Balas", hidden: !room.canPost, onSelect: () => { setReplyTo(m); setEditing(null); textRef.current?.focus(); } },
                     { label: "Sunting", hidden: !canEdit || !room.canPost, onSelect: () => startEdit(m) },
                     { label: "Hapus", hidden: !m.mine, danger: true, onSelect: () => setDialog({ kind: "delete", msg: m }) },

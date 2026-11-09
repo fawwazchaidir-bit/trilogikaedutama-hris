@@ -9,6 +9,7 @@ import { writeAudit } from "../../audit";
 import { blockedSeconds, recordFailure } from "../../auth/rate-limit";
 import { can } from "@/lib/permissions";
 import { uuid } from "@/lib/validation/common";
+import { formatDateRange, formatDateShort } from "@/lib/format";
 import {
   CHAT_LIMITS, CHAT_SUBJECT_TYPES, type ChatMessageDto, type ChatRef, type ChatRefCardDto,
 } from "@/lib/chat/types";
@@ -68,13 +69,13 @@ export async function resolveRefCards(db: Db, who: Who, refs: ChatRef[]): Promis
     if (!a.canView) { out.push(hidden); continue; }
     if (r.type === "ASSIGNMENT_LETTER") {
       const l = await db.assignmentLetter.findUnique({ where: { id: r.id }, select: { number: true, destination: true, startDate: true, endDate: true, status: true } });
-      out.push(l ? { type: r.type, id: r.id, accessible: true, title: `Surat Tugas ${l.number}`, subtitle: `${l.destination} · ${dateId(l.startDate)} s/d ${dateId(l.endDate)}${l.status === "CANCELLED" ? " · dibatalkan" : ""}`, href: "/surat-tugas" } : hidden);
+      out.push(l ? { type: r.type, id: r.id, accessible: true, title: `Surat Tugas ${l.number}`, subtitle: `${l.destination} · ${formatDateRange(dateId(l.startDate), dateId(l.endDate))}${l.status === "CANCELLED" ? " · dibatalkan" : ""}`, href: "/surat-tugas" } : hidden);
     } else if (r.type === "TRAINING_PROJECT") {
       const p = await db.trainingProject.findUnique({ where: { id: r.id }, select: { id: true, code: true, name: true } });
       out.push(p ? { type: r.type, id: r.id, accessible: true, title: `${p.code} · ${p.name}`, subtitle: "Proyek Training", href: `/training/proyek/${p.id}` } : hidden);
     } else {
       const t = await db.trainingTask.findUnique({ where: { id: r.id }, select: { title: true, dueDate: true, project: { select: { id: true, code: true } } } });
-      out.push(t ? { type: r.type, id: r.id, accessible: true, title: t.title, subtitle: `Tugas · ${t.project.code}${t.dueDate ? ` · tenggat ${dateId(t.dueDate)}` : ""}`, href: `/training/proyek/${t.project.id}` } : hidden);
+      out.push(t ? { type: r.type, id: r.id, accessible: true, title: t.title, subtitle: `Tugas · ${t.project.code}${t.dueDate ? ` · tenggat ${formatDateShort(dateId(t.dueDate))}` : ""}`, href: `/training/proyek/${t.project.id}` } : hidden);
     }
   }
   return out;

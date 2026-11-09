@@ -4,8 +4,10 @@ import { MoreHorizontal } from "lucide-react";
 import { cn } from "@/lib/cn";
 
 /** Menu aksi sederhana (klik di luar / Esc menutup). Item `danger` bernada merah. */
-export function Menu({ items, label = "Aksi" }: {
+export function Menu({ items, label = "Aksi", up = false }: {
   label?: string;
+  /** Buka ke atas (untuk menu di dasar area yang dapat digulir, mis. pesan terakhir di obrolan). */
+  up?: boolean;
   items: ({ label: string; onSelect?: () => void; href?: string; danger?: boolean; download?: boolean; hidden?: boolean } | "sep")[];
 }) {
   const [open, setOpen] = useState(false);
@@ -27,7 +29,7 @@ export function Menu({ items, label = "Aksi" }: {
         <MoreHorizontal className="size-4" />
       </button>
       {open && (
-        <div role="menu" className="absolute right-0 z-30 mt-1 w-52 overflow-hidden rounded-md border border-line bg-white py-1 shadow-lg">
+        <div role="menu" className={cn("absolute right-0 z-30 w-52 overflow-hidden rounded-md border border-line bg-white py-1 shadow-lg", up ? "bottom-full mb-1" : "mt-1")}>
           {visible.map((it, i) =>
             it === "sep" ? <hr key={i} className="my-1 border-line" /> : it.href ? (
               <a key={i} role="menuitem" href={it.href} {...(it.download ? { download: true } : {})} className={cn(cls, it.danger && "text-brand-700")} onClick={() => setOpen(false)}>{it.label}</a>

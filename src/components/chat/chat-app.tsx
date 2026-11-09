@@ -43,7 +43,7 @@ export function ChatApp({ me, initialRoomId }: { me: Me; initialRoomId: string |
   const filtered = useMemo(() => rooms.filter((r) => !q.trim() || `${r.title} ${r.subtitle ?? ""}`.toLowerCase().includes(q.trim().toLowerCase())), [rooms, q]);
 
   return (
-    <div className="flex h-[calc(100dvh-9.5rem)] min-h-[28rem] overflow-hidden rounded-xl border border-line bg-white shadow-sm">
+    <div className="flex h-[calc(100dvh-12rem)] min-h-[28rem] overflow-hidden rounded-xl border border-line bg-white shadow-sm">
       <aside className={cn("w-full shrink-0 flex-col border-r border-line md:flex md:w-80", selected ? "hidden" : "flex")} aria-label="Daftar ruang obrolan">
         <div className="space-y-2 border-b border-line p-3">
           <div className="flex items-center gap-2">
@@ -53,7 +53,12 @@ export function ChatApp({ me, initialRoomId }: { me: Me; initialRoomId: string |
             </div>
             <Button size="sm" variant="primary" onClick={() => setNewDirect(true)} aria-label="Japri baru"><MessageSquarePlus className="size-4" />Japri</Button>
           </div>
-          {me.canModerate && <Button size="sm" onClick={() => setNewChannel(true)}><Plus className="size-4" />Kanal baru</Button>}
+          {(me.canModerate || me.canAudit) && (
+            <div className="flex flex-wrap gap-2">
+              {me.canModerate && <Button size="sm" onClick={() => setNewChannel(true)}><Plus className="size-4" />Kanal baru</Button>}
+              {me.canAudit && <a href="/obrolan/pemeriksaan" className="inline-flex h-8 items-center gap-1.5 rounded-md border border-brand-200 bg-white px-3 text-sm font-medium text-brand-700 hover:bg-brand-50">Pemeriksaan japri</a>}
+            </div>
+          )}
           <p className="text-xs text-muted" aria-live="polite">{connected ? "Terhubung langsung" : ready ? "Memuat ulang berkala (8 dtk)" : "Memuat…"}</p>
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto">
@@ -81,7 +86,6 @@ export function ChatApp({ me, initialRoomId }: { me: Me; initialRoomId: string |
             );
           })}
         </div>
-        {me.canAudit && <a href="/obrolan/pemeriksaan" className="border-t border-line px-4 py-2.5 text-xs font-medium text-brand-700 hover:bg-canvas">Pemeriksaan japri (Direktur)</a>}
       </aside>
       <div className={cn("min-w-0 flex-1", selected ? "block" : "hidden md:block")}>
         {selected ? <ChatThread key={selected.id} room={selected} me={me} onBack={() => open(null)} /> : (
