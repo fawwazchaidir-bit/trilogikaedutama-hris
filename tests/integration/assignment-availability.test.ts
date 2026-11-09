@@ -71,21 +71,23 @@ describe("jadwal kerja menampilkan penugasan, bukan kehadiran", () => {
 
 describe("ketersediaan tim", () => {
   const D = () => workday(4);
+  /** Hari kerja berikutnya setelah D (bila D hari Jumat, jatuh pada Senin — izin/sakit tidak tampil pada akhir pekan). */
+  const D2 = () => { let d = addDays(D(), 1); while (isoWeekday(d) > 5) d = addDays(d, 1); return d; };
   async function seedWeek() {
     await createAssignment(fx.hr, trip(D(), D(), [AYU, BUDI]));
     await approvedLeave(fx.empIds[CITRA], "CUTI", D());
-    await approvedLeave(fx.empIds[BUDI], "SAKIT", addDays(D(), 1));
+    await approvedLeave(fx.empIds[BUDI], "SAKIT", D2());
   }
   const cell = (r: Awaited<ReturnType<typeof getTeamAvailability>>, who: number, date = D()) => r.rows.find((x) => x.employeeId === fx.empIds[who])!.cells.find((c) => c.date === date)!;
 
   it("HR melihat penugasan lengkap dengan nomor surat; cuti ditandai; izin/sakit digabung; orang yang bertugas terlihat oleh admin program lain", async () => {
     await seedWeek();
-    const hr = await getTeamAvailability(fx.hr, { from: D(), days: 3 });
+    const hr = await getTeamAvailability(fx.hr, { from: D(), days: 5 });
     expect(hr.canSeeNumbers).toBe(true);
     expect(cell(hr, AYU).duty).toEqual({ destination: "Surakarta", number: "001/ST/XI/2026" });
     expect(cell(hr, BUDI).duty?.destination).toBe("Surakarta");
     expect(cell(hr, CITRA)).toMatchObject({ leave: "CUTI", half: false, duty: null });
-    expect(cell(hr, BUDI, addDays(D(), 1)).leave).toBe("IZIN_SAKIT"); // sakit tidak dibuka alasannya
+    expect(cell(hr, BUDI, D2()).leave).toBe("IZIN_SAKIT"); // sakit tidak dibuka alasannya
     expect(hr.summary).toBeNull(); // hari ini di luar rentang yang ditampilkan
 
     // Admin Program lain (level modul Training): melihat tujuan, tidak nomor/maksud surat
