@@ -468,3 +468,38 @@ test("galeri tampilan MANAJER (Citra bertingkat Manajer): antrean tanda tangan, 
     await hrApi.dispose(); await budi.dispose(); await citra.dispose();
   }
 });
+
+test("galeri tampilan DIREKTUR: semua surat, bagan hak tanda tangan, pemegang per orang, cap & nomor urut, register, dasbor", async ({ browser }) => {
+  test.skip(!SHOTS, "hanya untuk tangkapan layar (LETTER_SHOTS)");
+  const H = { origin: base };
+  const hrApi = await session(USERS.hr), citra = await session(USERS.citra);
+  const opts = (await (await hrApi.get("/api/employees/options")).json()).data as { id: string; fullName: string }[];
+  const citraEmp = opts.find((o) => o.fullName.startsWith("Citra"))!.id;
+  const org = (level: string) => hrApi.post(`/api/employees/${citraEmp}/org`, { data: { jobLevel: level, effectiveFrom: isoDatePlus(0), note: "Uji galeri Persuratan" }, headers: H });
+  try {
+    expect((await org("MANAGER")).status()).toBe(200);
+    const me = ((await (await citra.get("/api/me")).json()).data as { userId?: string; id?: string });
+    expect((await upload(citra, "/api/letters/signers/me/signature", await demoSignature())).status()).toBe(201);
+    expect(me.userId ?? me.id).toBeTruthy();
+    const ctx = await browser.newContext({ viewport: { width: 1640, height: 1000 } });
+    const page = await ctx.newPage();
+    await login(page, USERS.pimpinan);
+    await page.goto("/persuratan?scope=all");
+    await shot(page, "44-direktur-semua-surat");
+    await page.goto("/persuratan/pengaturan");
+    await expect(page.getByRole("heading", { name: "Bagan hak tanda tangan" })).toBeVisible();
+    await shot(page, "45-direktur-bagan-penandatangan");
+    await shot(page, "46-direktur-pengaturan-lengkap", true);
+    // ubah hak: beri HR hak menandatangani Surat Pemberitahuan (INT-003) dan lihat pemegang bertambah
+    const row = page.getByRole("row").filter({ hasText: "Surat pemberitahuan (internal)" });
+    await row.getByRole("checkbox", { name: /^HR —/ }).check();
+    await expect(row.getByText("Maya Anggraini")).toBeVisible({ timeout: 8000 });
+    await shot(page, "47-direktur-beri-hak-hr");
+    await row.getByRole("checkbox", { name: /^HR —/ }).uncheck();
+    await expect(row.getByText("Maya Anggraini")).toHaveCount(0, { timeout: 8000 });
+    await ctx.close();
+  } finally {
+    await org("STAFF");
+    await hrApi.dispose(); await citra.dispose();
+  }
+});

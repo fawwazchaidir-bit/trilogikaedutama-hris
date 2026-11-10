@@ -1,17 +1,19 @@
 "use client";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardHeader } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { TableWrap } from "@/components/ui/table";
 import { TextField } from "@/components/ui/field";
 import { useToast } from "@/components/ui/toast";
 import { api, errorMessage } from "@/lib/api-client";
 import type { LetterSettingsDto } from "@/server/services/letters/admin";
-import type { LetterTypeDto } from "@/server/services/letters/types";
+import type { LetterTypeDto, SignerMatrixRow, SignerPerson } from "@/server/services/letters/types";
 
 type Holder = { userId: string; name: string; title: string | null; hasSignature: boolean };
 
-export function LetterSettings({ settings, types, holders }: { settings: LetterSettingsDto; types: LetterTypeDto[]; holders: Holder[] }) {
+export function LetterSettings({ settings, types, holders, matrix }: { settings: LetterSettingsDto; types: LetterTypeDto[]; holders: Holder[]; matrix: { rows: SignerMatrixRow[]; people: SignerPerson[] } }) {
   const router = useRouter(); const toast = useToast();
   const [s, setS] = useState({ place: settings.place, idLine: settings.idLine ?? "", footerText: settings.footerText ?? "", escalationDays: String(settings.escalationDays), annualTarget: String(settings.annualTarget), products: settings.products.join("\n") });
   const [counter, setCounter] = useState({ series: "EKS", year: String(new Date().getFullYear()), lastSeq: "" });
@@ -23,16 +25,63 @@ export function LetterSettings({ settings, types, holders }: { settings: LetterS
   return (
     <div className="space-y-5">
       <Card>
-        <CardHeader title="Kebijakan jenis surat" description="Menentukan siapa yang boleh menandatangani tiap jenis. Direktur selalu berwenang." />
+        <CardHeader title="Bagan hak tanda tangan" description="Siapa yang berwenang menandatangani tiap jenis surat. Direktur selalu berwenang. Centang = diizinkan; kolom 'Pemegang saat ini' dihitung dari tingkat jabatan & role akun yang sekarang berlaku." />
+        <div className="flex flex-wrap gap-x-5 gap-y-1 border-b border-line px-4 py-2 text-xs text-muted" aria-label="Legenda">
+          <span><b className="text-ink">Direktur</b> = Super Admin (selalu)</span><span><b className="text-ink">Manajer / Supervisor</b> = menurut tingkat jabatan karyawan</span><span><b className="text-ink">HR</b> = role Admin/HR</span><span><b className="text-ink">Magang</b> = boleh membuat draf (tidak pernah menandatangani)</span>
+        </div>
+        <TableWrap>
+          <table className="w-full min-w-[60rem] text-sm">
+            <thead className="bg-canvas text-xs uppercase tracking-wide text-muted">
+              <tr>
+                <th scope="col" className="px-4 py-2 text-left">Jenis surat</th>
+                <th scope="col" className="px-2 py-2 text-center">Direktur</th><th scope="col" className="px-2 py-2 text-center">Manajer</th><th scope="col" className="px-2 py-2 text-center">Supervisor</th><th scope="col" className="px-2 py-2 text-center">HR</th>
+                <th scope="col" className="px-2 py-2 text-center">Magang buat</th><th scope="col" className="px-2 py-2 text-center">Aktif</th><th scope="col" className="px-4 py-2 text-left">Pemegang saat ini</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(["EKS", "INT"] as const).map((series) => (
+                <Fragment key={series}>
+                  <tr className="bg-brand-50"><th scope="colgroup" colSpan={8} className="px-4 py-1.5 text-left text-xs font-semibold text-brand-800">{series === "EKS" ? "Surat Eksternal (TE-EKS)" : "Surat Internal (TE-INT)"}</th></tr>
+                  {types.filter((t) => t.series === series).map((t) => {
+                    const holders = matrix.rows.find((r) => r.typeId === t.id)?.holders ?? [];
+                    const lock = t.directorOnly;
+                    const Cb = ({ on, disabled, label, change }: { on: boolean; disabled?: boolean; label: string; change: (v: boolean) => void }) => (
+                      <input type="checkbox" className="size-4 accent-[#8c1d2d]" aria-label={`${label} — ${t.name}`} checked={on} disabled={disabled || busy === `t${t.id}`} onChange={(e) => change(e.target.checked)} />
+                    );
+                    return (
+                      <tr key={t.id} className="border-t border-line align-top hover:bg-canvas">
+                        <th scope="row" className="px-4 py-2 text-left font-normal"><span className="font-medium text-ink">{t.name}</span> <span className="font-mono text-xs text-muted">{t.series}-{t.codeText}</span>
+                          <span className="mt-0.5 flex flex-wrap gap-1">{t.confidential && <Badge tone="amber">Rahasia</Badge>}{t.multiSigner && <Badge tone="blue">Multi-penandatangan</Badge>}{t.funnel && <Badge tone="green">Corong</Badge>}{t.adminCreateOnly && <Badge>Dibuat HR/Direktur</Badge>}{t.hrCanView && <Badge>HR boleh melihat</Badge>}</span></th>
+                        <td className="px-2 py-2 text-center"><input type="checkbox" className="size-4" checked disabled aria-label={`Direktur — ${t.name}`} /></td>
+                        <td className="px-2 py-2 text-center"><Cb label="Manajer" on={!lock && t.signerJobLevels.includes("MANAGER")} disabled={lock} change={(v) => void policy(t, { signerJobLevels: v ? [...new Set([...t.signerJobLevels, "MANAGER"])] : t.signerJobLevels.filter((x) => x !== "MANAGER") })} /></td>
+                        <td className="px-2 py-2 text-center"><Cb label="Supervisor" on={!lock && t.signerJobLevels.includes("SUPERVISOR")} disabled={lock} change={(v) => void policy(t, { signerJobLevels: v ? [...new Set([...t.signerJobLevels, "SUPERVISOR"])] : t.signerJobLevels.filter((x) => x !== "SUPERVISOR") })} /></td>
+                        <td className="px-2 py-2 text-center"><Cb label="HR" on={!lock && t.hrCanSign} disabled={lock} change={(v) => void policy(t, { hrCanSign: v })} /></td>
+                        <td className="px-2 py-2 text-center"><Cb label="Magang boleh membuat" on={t.internAllowed} change={(v) => void policy(t, { internAllowed: v })} /></td>
+                        <td className="px-2 py-2 text-center"><Cb label="Aktif" on={t.isActive} change={(v) => void policy(t, { isActive: v })} /></td>
+                        <td className="px-4 py-2">
+                          <label className="mb-1 flex items-center gap-1.5 text-xs text-muted"><input type="checkbox" className="size-3.5" checked={t.directorOnly} disabled={busy === `t${t.id}`} onChange={(e) => void policy(t, { directorOnly: e.target.checked })} aria-label={`Hanya Direktur — ${t.name}`} />Hanya Direktur</label>
+                          {!t.isActive ? <span className="text-xs text-muted">Nonaktif</span> : holders.length === 0 ? <span className="text-xs text-brand-700">Belum ada pemegang</span> : (
+                            <ul className="flex flex-wrap gap-1">{holders.map((h) => <li key={h.userId} className="rounded-full bg-canvas px-2 py-0.5 text-xs text-ink-soft ring-1 ring-line" title={`${h.title ?? ""} · via ${h.via}`}>{h.name}<span className="ml-1 text-[10px] uppercase text-muted">{h.via === "DIREKTUR" ? "Dir" : h.via === "MANAJER" ? "Mgr" : h.via === "SUPERVISOR" ? "Spv" : "HR"}</span></li>)}</ul>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </Fragment>
+              ))}
+            </tbody>
+          </table>
+        </TableWrap>
+      </Card>
+
+      <Card>
+        <CardHeader title="Pemegang wewenang per orang" description="Ringkasan siapa saja yang saat ini dapat menandatangani, berapa jenis, dan apakah gambar tanda tangannya sudah ada." />
         <ul className="divide-y divide-line">
-          {types.map((t) => (
-            <li key={t.id} className="flex flex-wrap items-center gap-x-6 gap-y-2 px-4 py-3 text-sm">
-              <div className="min-w-48 flex-1"><p className="font-medium text-ink">{t.name} <span className="font-mono text-xs text-muted">{t.series}-{t.codeText}</span></p><p className="text-xs text-muted">{t.description}</p></div>
-              <label className="flex items-center gap-2"><input type="checkbox" checked={t.directorOnly} onChange={(e) => void policy(t, { directorOnly: e.target.checked })} />Hanya Direktur</label>
-              <label className="flex items-center gap-2"><input type="checkbox" disabled={t.directorOnly} checked={t.signerJobLevels.includes("MANAGER")} onChange={(e) => void policy(t, { signerJobLevels: e.target.checked ? [...new Set([...t.signerJobLevels, "MANAGER"])] : t.signerJobLevels.filter((x) => x !== "MANAGER") })} />Manajer</label>
-              <label className="flex items-center gap-2"><input type="checkbox" disabled={t.directorOnly} checked={t.signerJobLevels.includes("SUPERVISOR")} onChange={(e) => void policy(t, { signerJobLevels: e.target.checked ? [...new Set([...t.signerJobLevels, "SUPERVISOR"])] : t.signerJobLevels.filter((x) => x !== "SUPERVISOR") })} />Supervisor</label>
-              <label className="flex items-center gap-2"><input type="checkbox" checked={t.internAllowed} onChange={(e) => void policy(t, { internAllowed: e.target.checked })} />Magang boleh membuat</label>
-              <label className="flex items-center gap-2"><input type="checkbox" checked={t.isActive} onChange={(e) => void policy(t, { isActive: e.target.checked })} />Aktif</label>
+          {matrix.people.map((p) => (
+            <li key={p.userId} className="flex flex-wrap items-center gap-x-4 gap-y-1 px-4 py-2.5 text-sm">
+              <span className="min-w-48 flex-1"><span className="font-medium text-ink">{p.name}</span><span className="block text-xs text-muted">{p.title ?? "—"} · {p.via === "DIREKTUR" ? "Direktur" : p.via === "MANAJER" ? "Manajer" : p.via === "SUPERVISOR" ? "Supervisor" : "HR"}</span></span>
+              <span className="text-xs text-ink-soft">{p.typeCount} jenis surat</span>
+              {p.hasSignature ? <Badge tone="green">Tanda tangan terpasang</Badge> : <Badge tone="amber">Belum ada gambar tanda tangan</Badge>}
             </li>
           ))}
         </ul>

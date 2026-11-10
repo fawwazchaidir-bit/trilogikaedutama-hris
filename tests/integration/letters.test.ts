@@ -10,7 +10,7 @@ import { isoToDate } from "@/server/json";
 import type { Actor } from "@/server/actor";
 import { resetDb, makeUser } from "../helpers/db";
 import { createLetter, updateLetter, submitLetter, approveLetter, returnLetter, rejectLetter, cancelLetter, withdrawLetter, getLetter, listLetters, letterPdf, cosignLetter, pendingReviewCount, uploadArchiveFile } from "@/server/services/letters/documents";
-import { listTypes, listSigners, updateTypePolicy } from "@/server/services/letters/types";
+import { listTypes, listSigners, updateTypePolicy, signerMatrix } from "@/server/services/letters/types";
 import { assertCanSetSignature, setCounterOffset } from "@/server/services/letters/admin";
 import { verifyByToken } from "@/server/services/letters/public";
 import { doc, p } from "@/lib/documents/builders";
@@ -67,6 +67,22 @@ describe("jenis & penandatangan", () => {
     expect(await fail(updateTypePolicy(manajer, t.id, { directorOnly: true }))).toMatchObject(FORBIDDEN);
     expect((await updateTypePolicy(direktur, t.id, { directorOnly: true })).directorOnly).toBe(true);
     expect((await listSigners(staf, t.id)).map((s) => s.userId)).toEqual([direktur.userId]);
+  });
+  it("bagan hak tanda tangan: pemegang per jenis dihitung dari kebijakan + jabatan; HR dapat diberi hak; kebijakan tidak ditimpa penyemaian ulang; hanya Direktur", async () => {
+    await listTypes(direktur);
+    const eks3 = await typeOf("EKS", 3), int7 = await typeOf("INT", 7), sk = await typeOf("INT", 1);
+    const m = await signerMatrix(direktur);
+    const holders = (id: string) => m.rows.find((r) => r.typeId === id)!.holders.map((h) => `${h.name}:${h.via}`).sort();
+    expect(holders(eks3.id)).toEqual(["Direktur Uji:DIREKTUR", "Manajer Uji:MANAJER"]);
+    expect(holders(int7.id)).toEqual(["Direktur Uji:DIREKTUR", "HR Uji:HR", "Manajer Uji:MANAJER"]);
+    expect(holders(sk.id)).toEqual(["Direktur Uji:DIREKTUR"]);
+    expect(m.people.find((x) => x.name === "Direktur Uji")?.typeCount).toBe(24);
+    expect(await fail(signerMatrix(manajer))).toMatchObject(FORBIDDEN);
+    expect((await updateTypePolicy(direktur, eks3.id, { hrCanSign: true })).hrCanSign).toBe(true);
+    await listTypes(direktur); // penyemaian ulang tidak boleh menimpa kebijakan HR
+    expect((await listSigners(staf, eks3.id)).map((x) => x.userId)).toContain(hr.userId);
+    expect((await signerMatrix(direktur)).rows.find((r) => r.typeId === eks3.id)!.holders.map((h) => h.via)).toContain("HR");
+    expect(await fail(updateTypePolicy(manajer, eks3.id, { hrCanSign: false }))).toMatchObject(FORBIDDEN);
   });
   it("Magang tidak dapat membuat jenis di luar yang diizinkan", async () => {
     const t = await typeOf("EKS", 3);

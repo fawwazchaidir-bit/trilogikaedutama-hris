@@ -94,7 +94,7 @@ export function LetterEditor({ initial, signers, people, employees = [], me }: {
     } catch (e) {
       setSave("error"); setErrors((e as { fieldErrors?: Record<string, string> }).fieldErrors ?? {}); toast.error(errorMessage(e)); return false;
     }
-  }, [initial.id, toast]);
+  }, [initial.id, initial.kind, toast]);
 
   useEffect(() => { persistRef.current = persist; }, [persist]);
   useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
