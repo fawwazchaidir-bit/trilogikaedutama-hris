@@ -65,3 +65,28 @@ export function demoPayrollMonths() {
 
 /** Tautan di sidebar. Beranda juga memuat tile menu bernama sama, jadi tautan menu dicari di dalam navigasi utama. */
 export const menuLink = (page: Page, name: string | RegExp) => page.getByRole("navigation", { name: "Menu utama" }).getByRole("link", { name });
+
+/**
+ * Terbitkan Surat Tugas lewat Persuratan (INT-002) untuk kebutuhan E2E: HR membuat + mengisi data penugasan + mengajukan, Direktur menyetujui.
+ * Mengembalikan id surat tugas (AssignmentLetter), nomor master, dan id dokumen Persuratan.
+ */
+export async function issueAssignmentViaLetters(
+  hr: import("@playwright/test").APIRequestContext, director: import("@playwright/test").APIRequestContext, base: string,
+  assignment: { purpose: string; destination: string; startDate: string; endDate: string; assignees: { employeeId: string; dailyRate: number }[]; details?: string | null },
+): Promise<{ id: string; number: string; letterId: string }> {
+  const h = { origin: base };
+  const types = (await (await hr.get("/api/letters/types")).json()).data as { id: string; kind: string }[];
+  const typeId = types.find((t) => t.kind === "TUGAS")!.id;
+  const created = await hr.post("/api/letters", { data: { typeId }, headers: h });
+  if (created.status() !== 201) throw new Error(`buat surat tugas: ${created.status()} ${await created.text()}`);
+  const letterId = (await created.json()).data.id as string;
+  const signers = (await (await hr.get(`/api/letters/signers?typeId=${typeId}`)).json()).data as { userId: string }[];
+  const patch = await hr.patch(`/api/letters/${letterId}`, { data: { assignment: { details: null, ...assignment }, signerId: signers[0]!.userId }, headers: h });
+  if (patch.status() !== 200) throw new Error(`isi penugasan: ${patch.status()} ${await patch.text()}`);
+  const sub = await hr.post(`/api/letters/${letterId}/submit`, { headers: h });
+  if (sub.status() !== 200) throw new Error(`ajukan: ${sub.status()} ${await sub.text()}`);
+  const ok = await director.post(`/api/letters/${letterId}/approve`, { headers: h });
+  if (ok.status() !== 200) throw new Error(`setujui: ${ok.status()} ${await ok.text()}`);
+  const d = (await ok.json()).data as { number: string; assignmentId: string };
+  return { id: d.assignmentId, number: d.number, letterId };
+}

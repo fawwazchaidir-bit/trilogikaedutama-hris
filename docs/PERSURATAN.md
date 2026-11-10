@@ -74,6 +74,21 @@ Seluruh 24 jenis katalog master disemai idempoten (penandatangan awal: Direktur 
   *Deal* dihitung dari status Deal, atau Selesai yang bernilai deal. Target revenue tahunan (bawaan Rp10 miliar) dan daftar produk diatur Direktur di Pengaturan.
 - **Pengingat follow-up**: pekerja dalam proses (tiap jam; `LETTERS_WORKER`) mengirim notifikasi ke PIC (atau pembuat) bila jadwal jatuh tempo/terlambat, sekali per hari per surat, hanya untuk status Terkirim/Follow-up/Negosiasi.
 
+## Tahap 4: Surat Tugas lewat Persuratan (INT-002)
+
+- **Pembuatan Surat Tugas pindah ke Persuratan**: menu admin "Surat Tugas" dihapus (alamat `/surat-tugas` dialihkan); **hanya HR dan Direktur** yang dapat membuat draf INT-002
+  (`adminCreateOnly`; jenis tersembunyi bagi yang lain). "Surat Tugas Saya" untuk karyawan **tetap** dan hanya menampilkan surat atas namanya.
+- **Data penugasan terstruktur** (maksud, lokasi, tanggal, uraian, penerima + uang harian per hari/jumlah hari) diisi di panel "Data penugasan". **Isi surat dibangkitkan otomatis**
+  dari data itu (tabel penerima + rincian); isi tidak diketik, uang harian tidak dicetak di surat. Aturan lama berlaku: karyawan nonaktif ditolak; HR tidak boleh menugaskan dirinya
+  (Direktur boleh).
+- **Persetujuan penandatangan** (Direktur/Manajer, kebijakan per jenis) = penerbitan: dalam satu transaksi terbit **nomor master** (`NNN/TE-INT/002/…`), dokumen terkunci, dan
+  `AssignmentLetter` dibuat dengan nomor yang sama (tanpa penomoran lama `/ST/`) sehingga jadwal, Ketersediaan Tim, "Surat Tugas Saya", tautan proyek Training, dan Diskusi Obrolan
+  tetap bekerja. PDF resmi = PDF dokumen (kop, QR, tanda tangan, cap). Bila penerbitan penugasan gagal, nomor tidak terpakai.
+- **Pembatalan** dilakukan dari dokumen surat dan berantai membatalkan surat tugasnya; **diblok selama masih ada Bukti Penerimaan Uang Harian aktif** (Direktur membatalkan buktinya dulu).
+- **Uang Harian & Bukti Penerimaan**: HR dan Direktur, di halaman **Persuratan → Surat Tugas & Uang Harian** (`/persuratan/surat-tugas`; juga memuat surat tugas lama). Penomoran bukti tidak berubah (`…/BPUH/…`).
+  Surat tugas lama tetap utuh dengan nomor lamanya (arsip); pembatalannya masih lewat tombol di halaman itu.
+- Data penugasan ikut dibekukan sejak terbit (trigger database).
+
 ## Dokumen & PDF terkunci
 
 - Isi disimpan sebagai **JSON** (ProseMirror, tervalidasi ketat `validateDoc`: hanya node/atribut/mark yang dikenal; tanpa HTML). Editor TipTap

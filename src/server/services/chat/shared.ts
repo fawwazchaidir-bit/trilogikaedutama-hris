@@ -119,7 +119,7 @@ export async function subjectTitles(db: Db, rooms: Pick<ChatRoom, "id" | "subjec
     ids("TRAINING_TASK").length ? db.trainingTask.findMany({ where: { id: { in: ids("TRAINING_TASK") } }, select: { id: true, title: true, project: { select: { id: true, code: true } } } }) : [],
   ]);
   const byKey = new Map<string, { title: string; subtitle: string | null; href: string | null }>();
-  for (const l of letters) byKey.set(`ASSIGNMENT_LETTER:${l.id}`, { title: `Surat Tugas ${l.number}`, subtitle: l.destination, href: "/surat-tugas" });
+  for (const l of letters) byKey.set(`ASSIGNMENT_LETTER:${l.id}`, { title: `Surat Tugas ${l.number}`, subtitle: l.destination, href: "/persuratan/surat-tugas" });
   for (const p of projects) byKey.set(`TRAINING_PROJECT:${p.id}`, { title: `${p.code} · ${p.name}`, subtitle: "Proyek Training", href: `/training/proyek/${p.id}` });
   for (const t of tasks) byKey.set(`TRAINING_TASK:${t.id}`, { title: t.title, subtitle: `Tugas · ${t.project.code}`, href: `/training/proyek/${t.project.id}?tab=tugas` });
   for (const r of rooms) {

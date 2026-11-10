@@ -3,7 +3,7 @@ import type { PmDoc } from "./content";
 
 /** Jenis surat bawaan (disemai idempoten saat modul pertama dipakai). Kode tipe mengikuti glosarium Excel Register. Kebijakan dapat diubah Direktur. */
 export interface DefaultLetterType {
-  series: "EKS" | "INT"; code: number; name: string; description: string; kind: "SURAT" | "SK";
+  series: "EKS" | "INT"; code: number; name: string; description: string; kind: "SURAT" | "SK" | "TUGAS"; adminCreateOnly: boolean;
   directorOnly: boolean; signerJobLevels: ("SUPERVISOR" | "MANAGER")[]; internAllowed: boolean;
   confidential: boolean; hrCanSign: boolean; hrCanView: boolean; multiSigner: boolean; funnel: boolean;
   salutation: string | null; closing: string | null; template: PmDoc;
@@ -44,7 +44,7 @@ const SK = doc(
 const UMUM: PmDoc = doc(body(placeholder("isi surat")), body("Demikian kami sampaikan. Atas perhatian Bapak/Ibu, kami ucapkan terima kasih."));
 const INTERNAL: PmDoc = doc(body(placeholder("isi surat")), body("Demikian untuk dilaksanakan sebagaimana mestinya."));
 
-type Row = [series: "EKS" | "INT", code: number, name: string, description: string, signer: "D" | "M", intern: boolean, template: PmDoc, kind?: "SK"];
+type Row = [series: "EKS" | "INT", code: number, name: string, description: string, signer: "D" | "M", intern: boolean, template: PmDoc, kind?: "SK" | "TUGAS"];
 const salam = (series: "EKS" | "INT") => (series === "EKS" ? "Dengan Hormat," : null);
 
 /**
@@ -66,7 +66,7 @@ const CATALOG: Row[] = [
   ["EKS", 12, "Perjanjian (MoU/PKS)", "Dokumen perjanjian kerja sama.", "D", false, UMUM],
   ["EKS", 13, "Berita acara pelaksanaan dan serah terima", "Berita acara pelaksanaan pelatihan dan serah terima.", "M", false, UMUM],
   ["INT", 1, "Surat keputusan/SK (internal)", "Keputusan pimpinan: pengangkatan, penunjukan, pembentukan tim, mutasi, pemberhentian.", "D", false, SK, "SK"],
-  ["INT", 2, "Surat tugas (internal)", "Penugasan karyawan sebagai panitia, pendamping, instruktur, dsb.", "M", false, INTERNAL],
+  ["INT", 2, "Surat tugas (internal)", "Penugasan karyawan (dasar Uang Harian). Hanya HR/Direktur yang membuat; isi dibangkitkan dari data penugasan.", "M", false, INTERNAL, "TUGAS"],
   ["INT", 3, "Surat pemberitahuan (internal)", "Informasi jam kerja, hari libur, perubahan jadwal, atau kebijakan.", "M", false, INTERNAL],
   ["INT", 4, "Surat undangan rapat (internal)", "Undangan rapat evaluasi, koordinasi divisi, atau rapat internal.", "M", false, INTERNAL],
   ["INT", 5, "Surat edaran (internal)", "Ketentuan atau arahan yang berlaku umum dan berulang.", "M", false, INTERNAL],
@@ -87,7 +87,7 @@ const MULTI = new Set(["EKS:13", "INT:8"]);
 const FUNNEL = new Set(["EKS:1", "EKS:2", "EKS:4"]);
 
 export const DEFAULT_LETTER_TYPES: DefaultLetterType[] = CATALOG.map(([series, code, name, description, signer, intern, template, kind]) => ({
-  series, code, name, description, kind: kind ?? "SURAT", directorOnly: signer === "D" && !HR_SIGN.has(`${series}:${code}`), signerJobLevels: signer === "M" ? ["MANAGER"] : [], internAllowed: intern,
+  series, code, name, description, kind: kind ?? "SURAT", adminCreateOnly: kind === "TUGAS", directorOnly: signer === "D" && !HR_SIGN.has(`${series}:${code}`), signerJobLevels: signer === "M" ? ["MANAGER"] : [], internAllowed: intern,
   confidential: CONFIDENTIAL.has(`${series}:${code}`), hrCanSign: HR_SIGN.has(`${series}:${code}`), hrCanView: HR_VIEW.has(`${series}:${code}`), multiSigner: MULTI.has(`${series}:${code}`), funnel: FUNNEL.has(`${series}:${code}`),
-  salutation: kind === "SK" ? null : salam(series), closing: null, template,
+  salutation: kind === "SK" || kind === "TUGAS" ? null : salam(series), closing: null, template,
 }));

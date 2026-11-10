@@ -39,3 +39,5 @@ Surat tugas yang **dibatalkan** tidak tampil. Penanda mencakup tanggal mulai–s
 - Jenis kerja lain pada tabel usulan (**WFH**, **WFO**, **kegiatan luar kota** berbasis tanggal proyek) belum dimodelkan; WFH memerlukan kebijakan dan persetujuan tersendiri.
 - Peringatan **bentrok** saat menerbitkan surat tugas (orang sudah cuti/sudah ditugaskan di tanggal itu) belum ada; Ketersediaan Tim dipakai untuk memeriksa sebelum menugaskan.
 - Tautan ke **proyek Training** pada sel ketersediaan belum ditampilkan (tautan surat tugas ↔ proyek sudah ada di modul Training).
+
+> **Pembaruan:** Surat Tugas baru kini dibuat lewat modul Persuratan (jenis INT-002, nomor master TE-INT) — lihat [PERSURATAN.md](PERSURATAN.md) §Tahap 4. Halaman/menu admin "Surat Tugas" lama dipindah ke Persuratan → "Surat Tugas & Uang Harian".

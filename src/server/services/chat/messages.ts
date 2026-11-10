@@ -69,7 +69,7 @@ export async function resolveRefCards(db: Db, who: Who, refs: ChatRef[]): Promis
     if (!a.canView) { out.push(hidden); continue; }
     if (r.type === "ASSIGNMENT_LETTER") {
       const l = await db.assignmentLetter.findUnique({ where: { id: r.id }, select: { number: true, destination: true, startDate: true, endDate: true, status: true } });
-      out.push(l ? { type: r.type, id: r.id, accessible: true, title: `Surat Tugas ${l.number}`, subtitle: `${l.destination} · ${formatDateRange(dateId(l.startDate), dateId(l.endDate))}${l.status === "CANCELLED" ? " · dibatalkan" : ""}`, href: "/surat-tugas" } : hidden);
+      out.push(l ? { type: r.type, id: r.id, accessible: true, title: `Surat Tugas ${l.number}`, subtitle: `${l.destination} · ${formatDateRange(dateId(l.startDate), dateId(l.endDate))}${l.status === "CANCELLED" ? " · dibatalkan" : ""}`, href: "/persuratan/surat-tugas" } : hidden);
     } else if (r.type === "TRAINING_PROJECT") {
       const p = await db.trainingProject.findUnique({ where: { id: r.id }, select: { id: true, code: true, name: true } });
       out.push(p ? { type: r.type, id: r.id, accessible: true, title: `${p.code} · ${p.name}`, subtitle: "Proyek Training", href: `/training/proyek/${p.id}` } : hidden);

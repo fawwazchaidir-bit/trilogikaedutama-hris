@@ -25,7 +25,7 @@ import { LEAVE_TYPE_LABEL } from "@/lib/labels";
 export const metadata: Metadata = { title: "Dashboard" };
 export const dynamic = "force-dynamic";
 
-const ADMIN_MENU = ["/karyawan", "/absensi", "/pengajuan", "/rekap", "/penggajian", "/surat-tugas"];
+const ADMIN_MENU = ["/karyawan", "/absensi", "/pengajuan", "/rekap", "/penggajian", "/persuratan"];
 const EMPLOYEE_MENU = ["/absensi-saya", "/pengajuan-saya", "/slip-saya", "/lembur-saya", "/surat-tugas-saya", "/dokumen-saya"];
 
 export default async function DashboardPage() {

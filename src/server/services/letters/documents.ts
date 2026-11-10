@@ -5,7 +5,8 @@ import type { Prisma } from "@prisma/client";
 import { prisma, transaction } from "../../db";
 import { env } from "../../env";
 import { Errors } from "../../errors";
-import type { Actor } from "../../actor";
+import { actorCan, type Actor } from "../../actor";
+import { can } from "@/lib/permissions";
 import { parseInput } from "../../validate";
 import { writeAudit } from "../../audit";
 import { notifyUsers } from "../notifications";
@@ -17,19 +18,23 @@ import { doc, p } from "@/lib/documents/builders";
 import type { Paged } from "@/lib/types";
 import { ensureDefaultTypes } from "./types";
 import { inspectPdf, toAttachmentDto, type AttachmentDto } from "./attachments";
+import { assignmentIdForLetterDoc, assignmentSchema, cancelAssignmentIn, createAssignmentIn } from "../assignments";
+import { buildAssignmentBody, type AssignmentPayload } from "@/lib/documents/assignment-body";
 import { storeFile } from "../files";
 import { isDirector, loadVisible, personFacts, requireLetters, LETTER_INCLUDE } from "./access";
 import { getLetterSettings, buildFrame, renderLetterPdf } from "./frame";
 
 export interface LetterEventDto { id: string; action: string; note: string | null; at: string; actorName: string }
 export interface LetterDto {
-  id: string; status: LetterStatus; statusLabel: string; typeId: string; typeName: string; series: "EKS" | "INT"; kind: "SURAT" | "SK";
+  id: string; status: LetterStatus; statusLabel: string; typeId: string; typeName: string; series: "EKS" | "INT"; kind: "SURAT" | "SK" | "TUGAS";
   number: string | null; subject: string; issueDate: string | null; createdAt: string; updatedAt: string; submittedAt: string | null;
   creatorId: string; creatorName: string; signerId: string | null; signerName: string | null; verifyToken: string; hasPdf: boolean; archiveOnly: boolean;
 }
 export interface SignatoryDto { id: string; position: number; kind: "INTERNAL" | "EXTERNAL"; userId: string | null; name: string; title: string | null; org: string | null; signedAt: string | null; isMe: boolean }
 export interface LetterDetailDto extends LetterDto {
   confidential: boolean; multiSigner: boolean; funnel: boolean; signatories: SignatoryDto[]; attachments: AttachmentDto[];
+  /** Jenis TUGAS: data penugasan terstruktur + rujukan surat tugas yang terbit (uang harian dikelola di halaman Surat Tugas & Uang Harian). */
+  assignment: AssignmentPayload | null; assignmentId: string | null; assignees: { employeeId: string; name: string; position: string }[];
   recipientLines: string[]; recipientPlace: string | null; attachmentCount: number | null; attachmentUnit: string | null; salutation: string | null; closing: string | null;
   cc: string[]; body: PmDoc; variables: Record<string, string>; returnNote: string | null; rejectNote: string | null; cancelNote: string | null;
   events: LetterEventDto[];
@@ -45,7 +50,7 @@ async function names(ids: (string | null)[]): Promise<Map<string, string>> {
   return new Map(rows.map((r) => [r.id, r.employee?.fullName ?? r.name]));
 }
 const toDto = (r: Row, n: Map<string, string>): LetterDto => ({
-  id: r.id, status: r.status, statusLabel: LETTER_STATUS_LABEL[r.status], typeId: r.typeId, typeName: r.type.name, series: r.type.series, kind: r.type.kind === "SK" ? "SK" : "SURAT",
+  id: r.id, status: r.status, statusLabel: LETTER_STATUS_LABEL[r.status], typeId: r.typeId, typeName: r.type.name, series: r.type.series, kind: r.type.kind === "SK" ? "SK" : r.type.kind === "TUGAS" ? "TUGAS" : "SURAT",
   number: r.number, subject: r.subject, issueDate: r.issueDate ? r.issueDate.toISOString().slice(0, 10) : null, createdAt: r.createdAt.toISOString(), updatedAt: r.updatedAt.toISOString(),
   submittedAt: r.submittedAt?.toISOString() ?? null, creatorId: r.creatorId, creatorName: n.get(r.creatorId) ?? "—", signerId: r.signerId, signerName: r.signerId ? n.get(r.signerId) ?? "—" : null,
   verifyToken: r.verifyToken, hasPdf: !!r.pdfFileId, archiveOnly: r.archiveOnly,
@@ -65,9 +70,12 @@ async function detail(actor: Actor, r: Row): Promise<LetterDetailDto> {
     org: sg.org, signedAt: sg.signedAt?.toISOString() ?? null, isMe: !!sg.userId && sg.userId === actor.userId,
   }));
   const attRows = await prisma.letterAttachment.findMany({ where: { documentId: r.id }, orderBy: { position: "asc" } });
+  const assignment = (r.assignment as AssignmentPayload | null) ?? null;
+  const linked = assignment ? await prisma.assignmentLetter.findUnique({ where: { letterDocumentId: r.id }, select: { id: true } }) : null;
+  const assigneeRows = assignment ? await prisma.employee.findMany({ where: { id: { in: assignment.assignees.map((x) => x.employeeId) } }, select: { id: true, fullName: true, position: true } }) : [];
   const takeOver = isDirector(actor) && !isSigner && r.status === "IN_REVIEW" && canTakeOver(r.submittedAt, new Date(), ls.escalationDays, env().APP_TIMEZONE);
   return {
-    ...toDto(r, n), confidential: r.type.confidential, multiSigner: r.type.multiSigner, funnel: r.type.funnel, signatories, attachments: attRows.map(toAttachmentDto), recipientLines: r.recipientLines, recipientPlace: r.recipientPlace, attachmentCount: r.attachmentCount, attachmentUnit: r.attachmentUnit,
+    ...toDto(r, n), confidential: r.type.confidential, multiSigner: r.type.multiSigner, funnel: r.type.funnel, signatories, attachments: attRows.map(toAttachmentDto), assignment, assignmentId: linked?.id ?? null, assignees: assigneeRows.map((e) => ({ employeeId: e.id, name: e.fullName, position: e.position })), recipientLines: r.recipientLines, recipientPlace: r.recipientPlace, attachmentCount: r.attachmentCount, attachmentUnit: r.attachmentUnit,
     salutation: r.salutation, closing: r.closing, cc: r.cc, body: r.body as unknown as PmDoc, variables: (r.variables as Record<string, string> | null) ?? {},
     returnNote: r.returnNote, rejectNote: r.rejectNote, cancelNote: r.cancelNote,
     events: ev.map((e) => ({ id: e.id, action: e.action, note: e.note, at: e.at.toISOString(), actorName: n.get(e.actorId) ?? "—" })),
@@ -95,6 +103,7 @@ export async function createLetter(actor: Actor, raw: unknown): Promise<LetterDe
   if (!facts || (!facts.employeeId && !isDirector(actor))) throw Errors.forbidden("Akun Anda belum tertaut ke data karyawan.");
   const t = await prisma.letterType.findUnique({ where: { id: typeId } });
   if (!t || !t.isActive) throw Errors.notFound("Jenis surat");
+  if (t.adminCreateOnly && !actorCan(actor, "assignment:manage")) throw Errors.forbidden("Surat Tugas hanya dapat dibuat oleh HR atau Direktur.");
   if (facts.isIntern && !(t.internAllowed && t.series === "EKS")) throw Errors.forbidden("Peserta magang tidak dapat membuat jenis surat ini.");
   const row = await transaction(async (tx) => {
     const d = await tx.letterDocument.create({
@@ -127,6 +136,7 @@ const editSchema = z.object({
   })).max(6).optional(),
   variables: z.record(z.string().regex(/^[a-z][a-zA-Z0-9_.]{0,59}$/), z.string().max(500)).optional(),
   body: z.unknown().optional(),
+  assignment: z.unknown().optional(),
 }).strict();
 
 async function assertSignerOk(actor: Actor, typeId: string, signerId: string, creatorId: string): Promise<void> {
@@ -135,12 +145,37 @@ async function assertSignerOk(actor: Actor, typeId: string, signerId: string, cr
   if (signerId === creatorId && !(cf && canSignOwn(cf))) throw Errors.validation("Anda tidak dapat menandatangani surat yang Anda buat sendiri.", { signerId: "Pilih penandatangan lain" });
 }
 
+/** Validasi data penugasan (aturan sama dengan surat tugas lama), lalu bangkitkan isi surat & perihal. */
+async function normalizeAssignment(creator: Actor, raw: unknown): Promise<{ payload: AssignmentPayload; body: PmDoc; subject: string }> {
+  if (!actorCan(creator, "assignment:manage")) throw Errors.forbidden();
+  const v = parseInput(assignmentSchema, raw);
+  if (creator.role !== "SUPER_ADMIN" && creator.employeeId && v.assignees.some((a) => a.employeeId === creator.employeeId)) {
+    throw Errors.validation("Anda tidak dapat menugaskan diri sendiri. Minta Direktur membuatnya.", { assignment: "Pilih penerima lain" });
+  }
+  const emps = await prisma.employee.findMany({ where: { id: { in: v.assignees.map((a) => a.employeeId) } }, select: { id: true, employeeNo: true, fullName: true, position: true, isActive: true, division: { select: { name: true } } } });
+  const byId = new Map(emps.map((e) => [e.id, e]));
+  v.assignees.forEach((a, i) => {
+    const e = byId.get(a.employeeId);
+    if (!e) throw Errors.validation("Karyawan tidak ditemukan.", { [`assignees.${i}.employeeId`]: "Karyawan tidak ditemukan" });
+    if (!e.isActive) throw Errors.validation(`${e.fullName} sudah nonaktif dan tidak dapat ditugaskan.`, { [`assignees.${i}.employeeId`]: "Karyawan nonaktif" });
+  });
+  const payload: AssignmentPayload = { purpose: v.purpose, destination: v.destination, startDate: v.startDate, endDate: v.endDate, details: v.details, assignees: v.assignees.map((a) => ({ employeeId: a.employeeId, dailyRate: a.dailyRate, days: a.days ?? null })) };
+  const body = buildAssignmentBody(payload, emps.map((e) => ({ employeeId: e.id, name: e.fullName, employeeNo: e.employeeNo, position: e.position, division: e.division?.name ?? null })));
+  return { payload, body, subject: `Surat Tugas: ${v.purpose}`.slice(0, 300) };
+}
+
 export async function updateLetter(actor: Actor, id: string, raw: unknown): Promise<LetterDetailDto> {
   const d = await loadVisible(actor, id);
   if (d.creatorId !== actor.userId) throw Errors.forbidden("Hanya pembuat surat yang dapat menyuntingnya.");
   if (!isEditable(d.status)) throw Errors.conflict("Surat hanya dapat disunting saat berstatus Draf atau Dikembalikan.");
   const input = parseInput(editSchema, raw);
   const data: Prisma.LetterDocumentUncheckedUpdateInput = {};
+  if (input.assignment !== undefined) {
+    if (d.type.kind !== "TUGAS") throw Errors.validation("Jenis surat ini tidak memiliki data penugasan.", { assignment: "Tidak didukung" });
+    const a = await normalizeAssignment(actor, input.assignment);
+    data.assignment = a.payload as unknown as object; data.body = a.body as object; data.subject = a.subject;
+  }
+  if (input.body !== undefined && d.type.kind === "TUGAS") throw Errors.validation("Isi Surat Tugas dibangkitkan otomatis dari data penugasan.", { body: "Ubah data penugasan, bukan isi surat" });
   if (input.body !== undefined) {
     const e = validateDoc(input.body);
     if (e) throw Errors.validation(e, { body: e });
@@ -235,13 +270,17 @@ export async function submitLetter(actor: Actor, id: string): Promise<LetterDeta
   if (d.creatorId !== actor.userId) throw Errors.forbidden();
   if (!isEditable(d.status)) throw Errors.conflict("Surat sudah diajukan.");
   const fe: Record<string, string> = {};
+  if (d.type.kind === "TUGAS" && !d.archiveOnly) {
+    if (!d.assignment) fe.assignment = "Isi data penugasan (maksud, lokasi, tanggal, penerima)";
+    else await normalizeAssignment(actor, d.assignment).catch((e) => { fe.assignment = e.message; });
+  }
   if ((d.type.kind !== "SK" || d.archiveOnly) && d.subject.trim().length < 3) fe.subject = "Perihal wajib diisi";
-  if (d.type.kind !== "SK" && !d.archiveOnly && d.recipientLines.filter((l) => l.trim()).length === 0) fe.recipientLines = "Penerima wajib diisi";
+  if (d.type.kind !== "SK" && d.type.kind !== "TUGAS" && !d.archiveOnly && d.recipientLines.filter((l) => l.trim()).length === 0) fe.recipientLines = "Penerima wajib diisi";
   if (!d.signerId) fe.signerId = "Pilih penandatangan";
   else await assertSignerOk(actor, d.typeId, d.signerId, d.creatorId).catch((e) => { fe.signerId = e.message; });
   const { missing } = d.archiveOnly ? { missing: [] as string[] } : await buildFrame(d, { number: null, date: new Date().toISOString().slice(0, 10), signerUserId: d.signerId ?? actor.userId, draft: true });
   if (missing.length) fe.body = `Data belum terisi: ${missing.join(", ")}`;
-  if (!d.archiveOnly && hasPlaceholder(d.body as unknown as PmDoc)) fe.body ??= "Masih ada teks panduan dalam [kurung siku] yang belum diganti";
+  if (!d.archiveOnly && d.type.kind !== "TUGAS" && hasPlaceholder(d.body as unknown as PmDoc)) fe.body ??= "Masih ada teks panduan dalam [kurung siku] yang belum diganti";
   if (Object.keys(fe).length) throw Errors.validation("Surat belum lengkap: " + Object.values(fe).join("; "), fe);
   const row = await transaction(async (tx) => {
     const u = await tx.letterDocument.update({ where: { id }, data: { status: "IN_REVIEW", submittedAt: new Date(), returnNote: null }, include });
@@ -310,6 +349,10 @@ export async function cancelLetter(actor: Actor, id: string, raw: unknown): Prom
   if (d.status !== "ISSUED") throw Errors.conflict("Hanya surat terbit yang dapat dibatalkan.");
   if (!(isDirector(actor) || d.signerId === actor.userId)) throw Errors.forbidden();
   const row = await transaction(async (tx) => {
+    if (d.type.kind === "TUGAS") {
+      const linked = await assignmentIdForLetterDoc(tx, id);
+      if (linked) await cancelAssignmentIn(tx, actor, linked.id, note); // gagal bila masih ada Bukti Penerimaan Uang Harian aktif → seluruh pembatalan dibatalkan
+    }
     const u = await tx.letterDocument.update({ where: { id }, data: { status: "CANCELLED", cancelNote: note }, include });
     await event(tx, id, actor, "CANCELLED", note);
     await writeAudit(tx, actor, { action: "letter.cancel", entityType: "LetterDocument", entityId: id, summary: `Surat ${d.number} dibatalkan`, reason: note });
@@ -361,6 +404,14 @@ export async function approveLetter(actor: Actor, id: string): Promise<LetterDet
     const counter = await tx.letterCounter.upsert({ where: { series_year: { series: pre.series, year } }, create: { series: pre.series, year, lastSeq: 1 }, update: { lastSeq: { increment: 1 } } });
     const seq = counter.lastSeq;
     const number = formatDocNumber({ seq, series: pre.series, typeCode: String(typeFacts.code).padStart(3, "0"), date: issueDate });
+    if (cur.type.kind === "TUGAS" && !cur.archiveOnly) {
+      // Surat Tugas: penerbitan dokumen = penerbitan penugasan (uang harian, jadwal, ketersediaan tim) dalam transaksi yang sama; nomor resmi dari mesin dokumen.
+      const cf = await personFacts(cur.creatorId);
+      if (!cf || !can(cf.role, "assignment:manage")) throw Errors.validation("Pembuat surat tidak lagi berwenang menerbitkan surat tugas.");
+      if (!cur.assignment) throw Errors.validation("Data penugasan belum diisi.");
+      const creatorActor: Actor = { userId: cur.creatorId, email: "", name: cf.name, role: cf.role, employeeId: cf.employeeId };
+      await createAssignmentIn(tx, actor, { ...(cur.assignment as object), issueDate }, { number, issueDate, letterDocumentId: id, issuedById: cur.creatorId }, creatorActor);
+    }
     const atts = await tx.letterAttachment.findMany({ where: { documentId: id }, orderBy: { position: "asc" } });
     const attMeta = atts.map((a) => ({ title: a.title, kind: a.kind, fileName: a.fileName, sha256: a.sha256, size: a.size, pages: a.pages }));
     let pdfData: { fileId: string; sha: string } | null = null;

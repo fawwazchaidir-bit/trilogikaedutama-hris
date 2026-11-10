@@ -6,6 +6,7 @@ import { pendingOvertimeCount } from "@/server/services/overtime";
 import { openLocationReviewCount } from "@/server/services/location";
 import { documentAttentionCount } from "@/server/services/documents";
 import { pendingAllowanceCount } from "@/server/services/assignments";
+import { pendingReviewCount } from "@/server/services/letters/documents";
 import { can } from "@/lib/permissions";
 import { loadNav } from "@/server/nav";
 import { AppShell } from "@/components/app-shell";
@@ -13,7 +14,7 @@ import { cookies } from "next/headers";
 import { NAV_PREF_COOKIE, parseNavPref } from "@/lib/nav-pref";
 import { teamPendingCount } from "@/server/services/org";
 import { openChecklistCount } from "@/server/services/employee-checklists";
-import { chatEnabled } from "@/server/env";
+import { chatEnabled, lettersEnabled } from "@/server/env";
 import { chatUnreadTotal } from "@/server/services/chat/rooms";
 import { ChatProvider } from "@/components/chat/chat-provider";
 import { countMyOverdueTasks } from "@/server/services/training/work";
@@ -34,6 +35,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     can(user.role, "document:view_all") ? documentAttentionCount(user) : Promise.resolve(0),
     can(user.role, "assignment:manage") ? pendingAllowanceCount() : Promise.resolve(0),
   ]);
+  const pendingLetters = lettersEnabled() ? await pendingReviewCount(user) : 0;
   const teamPending = teamIds.length ? await teamPendingCount(user, teamIds) : 0;
   const openLifecycle = can(user.role, "employee:view") ? await openChecklistCount() : 0;
   const chatOn = chatEnabled();
@@ -43,7 +45,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     <AppShell
       initialNav={navPref} hasEmployee={!!user.employeeId} canSearchProjects={trainingVisible} version={pkg.version}
       user={{ name: user.name, email: user.email, role: user.role, isDemo: user.isDemo }}
-      nav={nav} company={brand} unread={unread} pendingBadges={[{ href: "/pengajuan", count: pending }, { href: "/lembur", count: pendingOt }, { href: "/lokasi", count: openLoc }, { href: "/dokumen", count: docAttention }, { href: "/surat-tugas", count: pendingAllowance }, { href: "/training/tugas-saya", count: overdueTasks }, { href: "/persetujuan-tim", count: teamPending }, { href: "/masuk-berhenti", count: openLifecycle }, { href: "/checklist-saya", count: myChecklist }]}
+      nav={nav} company={brand} unread={unread} pendingBadges={[{ href: "/pengajuan", count: pending }, { href: "/lembur", count: pendingOt }, { href: "/lokasi", count: openLoc }, { href: "/dokumen", count: docAttention }, { href: "/persuratan", count: pendingAllowance + pendingLetters }, { href: "/training/tugas-saya", count: overdueTasks }, { href: "/persetujuan-tim", count: teamPending }, { href: "/masuk-berhenti", count: openLifecycle }, { href: "/checklist-saya", count: myChecklist }]}
     >
       {children}
     </AppShell>

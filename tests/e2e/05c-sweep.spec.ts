@@ -152,7 +152,7 @@ test("batas hak akses: Karyawan ditolak di rute admin; HR ditolak di rute khusus
     ["POST", "/api/payroll"], ["POST", "/api/employees"], ["PUT", "/api/settings/attendance"], ["PUT", "/api/settings/security"], ["PUT", "/api/settings/statutory"],
     ["POST", `/api/payroll/${UUID}/approve`], ["POST", `/api/users/${UUID}/reset-2fa`], ["POST", `/api/location/${UUID}/review`], ["POST", `/api/overtime/${UUID}/review`], ["POST", `/api/leaves/${UUID}/review`],
     ["POST", "/api/attendance/correct"],
-    ["GET", "/api/documents"], ["GET", "/api/assignments"], ["POST", "/api/assignments"], ["POST", "/api/allowance-receipts"], ["POST", `/api/documents/${UUID}/decision`],
+    ["GET", "/api/documents"], ["GET", "/api/assignments"], ["POST", "/api/allowance-receipts"], ["POST", `/api/documents/${UUID}/decision`],
     ["POST", `/api/documents/${UUID}/archive`], ["POST", "/api/documents"], ["PUT", `/api/employees/${UUID}/leave-policy`], ["GET", `/api/employees/${UUID}/leave-policy`],
   ];
   const HR_DENIED: [Method, string][] = [

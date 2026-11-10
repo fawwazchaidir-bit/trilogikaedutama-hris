@@ -3,12 +3,12 @@
  * pada Ketersediaan Tim; karyawan biasa tanpa level modul tidak melihat menu/halaman ketersediaan. Surat tugas dibatalkan di akhir.
  */
 import { expect, request as pwRequest, test, type APIRequestContext } from "@playwright/test";
-import { E2E_PASSWORD, USERS, login, menuLink, workdayPlus } from "./helpers";
+import { E2E_PASSWORD, USERS, issueAssignmentViaLetters, login, menuLink, workdayPlus } from "./helpers";
 
 test.describe.configure({ mode: "serial" });
 
 let base = "";
-let hr: APIRequestContext;
+let hr: APIRequestContext, dir: APIRequestContext;
 let letterId = "";
 let ayuId = "";
 const day = () => workdayPlus(3);
@@ -25,16 +25,13 @@ test.beforeAll(async ({ baseURL }) => {
   hr = await session(USERS.hr);
   const opts = (await (await hr.get("/api/employees/options")).json()).data as { id: string; fullName: string }[];
   ayuId = opts.find((o) => o.fullName.startsWith("Ayu"))!.id;
-  const res = await hr.post("/api/assignments", {
-    data: { purpose: "Pendampingan uji kompetensi (uji E2E)", destination: "Surakarta", startDate: day(), endDate: day(), assignees: [{ employeeId: ayuId, dailyRate: 300_000 }] },
-    headers: { origin: base }, failOnStatusCode: false,
-  });
-  expect(res.status(), await res.text()).toBe(201);
-  letterId = (await res.json()).data.id as string;
+  dir = await session(USERS.pimpinan);
+  const a = await issueAssignmentViaLetters(hr, dir, base, { purpose: "Pendampingan uji kompetensi (uji E2E)", destination: "Surakarta", startDate: day(), endDate: day(), assignees: [{ employeeId: ayuId, dailyRate: 300_000 }] });
+  letterId = a.letterId;
 });
 test.afterAll(async () => {
-  if (letterId) await hr.post(`/api/assignments/${letterId}/cancel`, { data: { reason: "Pemulihan setelah uji E2E" }, headers: { origin: base }, failOnStatusCode: false });
-  await hr.dispose();
+  if (letterId) await dir.post(`/api/letters/${letterId}/cancel`, { data: { note: "Pemulihan setelah uji E2E" }, headers: { origin: base }, failOnStatusCode: false });
+  await hr.dispose(); await dir.dispose();
 });
 
 test("HR melihat Ketersediaan Tim: penugasan tampil 'DL · Surakarta' dengan nomor surat pada tooltip; API menjawab data yang sama", async ({ browser }) => {
@@ -46,7 +43,7 @@ test("HR melihat Ketersediaan Tim: penugasan tampil 'DL · Surakarta' dengan nom
   await page.goto(`/ketersediaan?from=${day()}&days=3`);
   const chip = page.getByText("DL · Surakarta").first();
   await expect(chip).toBeVisible();
-  await expect(chip).toHaveAttribute("title", /Dinas luar — Surakarta \(\d{3}\/ST\//);
+  await expect(chip).toHaveAttribute("title", /Dinas luar — Surakarta \(\d{3}\/TE-INT\/002\//);
   await expect(page.getByText(/Penugasan bukan bukti hadir/)).toBeVisible();
   await ctx.close();
   const api = (await (await hr.get(`/api/availability?from=${day()}&days=1`)).json()).data;

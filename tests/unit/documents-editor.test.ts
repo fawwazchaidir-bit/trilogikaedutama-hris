@@ -2,6 +2,8 @@ import { getSchema } from "@tiptap/core";
 import { describe, expect, it } from "vitest";
 import { normalizeDoc, validateDoc } from "@/lib/documents/content";
 import { documentExtensions } from "@/lib/documents/editor-extensions";
+import { buildAssignmentBody } from "@/lib/documents/assignment-body";
+import { doc, p } from "@/lib/documents/builders";
 import { frameSk, frameSuratNarasumber, frameSuratPenawaran } from "../fixtures/documents/frames";
 
 const schema = getSchema(documentExtensions);
@@ -27,5 +29,14 @@ describe("skema editor TipTap ⇄ model isi dokumen", () => {
   it("tidak menyediakan node/mark di luar daftar (link, code, blockquote…)", () => {
     for (const n of ["blockquote", "codeBlock", "horizontalRule", "image"]) expect(schema.nodes[n]).toBeUndefined();
     for (const m of ["link", "code", "strike"]) expect(schema.marks[m]).toBeUndefined();
+  });
+  it("isi yang dibangkitkan (Surat Tugas) & paragraf kosong diterima skema editor (tanpa node teks kosong)", () => {
+    const body = buildAssignmentBody({ purpose: "Pendampingan", destination: "Bandung", startDate: "2026-11-10", endDate: "2026-11-12", details: "Uraian", assignees: [{ employeeId: "e1", dailyRate: 1, days: null }] },
+      [{ employeeId: "e1", name: "Ayu", employeeNo: "A-1", position: "Staf", division: null }]);
+    expect(validateDoc(body)).toBeNull();
+    schema.nodeFromJSON(body).check();
+    const empty = doc(p(""));
+    schema.nodeFromJSON(empty).check();
+    expect(JSON.stringify(empty)).not.toContain('"text":""');
   });
 });

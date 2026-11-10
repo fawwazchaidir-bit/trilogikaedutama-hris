@@ -355,6 +355,8 @@ model LetterType {
   multiSigner       Boolean          @default(false)
   /// Jenis yang masuk corong penjualan (penawaran/ajakan kerja sama): dihitung konversi & nilai deal di dasbor.
   funnel            Boolean          @default(false)
+  /// Hanya pengelola penugasan (HR/Direktur) yang boleh membuat draf jenis ini (mis. Surat Tugas).
+  adminCreateOnly   Boolean          @default(false)
   /// Isi awal (JSON ProseMirror tervalidasi `validateDoc`).
   templateBody      Json
   defaultSalutation String?
@@ -498,6 +500,8 @@ model LetterDocument {
   verifyToken        String            @unique
   /// Surat dibuat DI LUAR portal (mis. MoU/PKS tanda tangan basah): mesin hanya memberi nomor; PDF pindaian diunggah sesudah terbit.
   archiveOnly        Boolean           @default(false)
+  /// Jenis TUGAS (INT-002): data penugasan terstruktur (maksud, tujuan, tanggal, penerima + uang harian). Isi surat dibangkitkan dari data ini; dibekukan sejak terbit.
+  assignment         Json?
   // ── Data komersial (corong penjualan) ── dapat diubah setelah terbit (tidak termasuk isi yang dibekukan); perubahan status tercatat di letter_events.
   clientName         String?
   /// ID/tautan lead di CRM (HaloAI) — hanya rujukan teks; portal tidak menyimpan data CRM.
@@ -1550,26 +1554,28 @@ model EmployeeDocument {
 /// Surat Tugas dari HR / Pimpinan kepada karyawan yang ditunjuk — DASAR pemberian Uang Harian. Isi (lembaga, penanda tangan, penerima
 /// tugas) dibekukan di `snapshot` saat terbit. Berdiri sendiri: tidak ada hubungannya dengan penggajian / slip gaji.
 model AssignmentLetter {
-  id            String           @id @default(uuid()) @db.Uuid
-  /// Penomoran per tahun terbit: "001/ST/XI/2026". (seqYear, seqNo) unik.
-  seqYear       Int
-  seqNo         Int
-  number        String           @unique
-  status        AssignmentStatus @default(ISSUED)
-  purpose       String
-  destination   String
-  startDate     DateTime         @db.Date
-  endDate       DateTime         @db.Date
-  details       String?
-  issueDate     DateTime         @db.Date
-  snapshot      Json
-  issuedById    String           @db.Uuid
-  issuedAt      DateTime         @default(now())
-  cancelledAt   DateTime?
-  cancelledById String?          @db.Uuid
-  cancelReason  String?
-  createdAt     DateTime         @default(now())
-  updatedAt     DateTime         @updatedAt
+  id               String           @id @default(uuid()) @db.Uuid
+  /// Surat lama: penomoran per tahun terbit "001/ST/XI/2026", (seqYear, seqNo) unik. Surat yang diterbitkan lewat Persuratan (INT-002): null — nomor dari mesin dokumen.
+  seqYear          Int?
+  seqNo            Int?
+  /// Dokumen Persuratan (INT-002) yang menerbitkan surat tugas ini; PDF resmi = PDF dokumen itu.
+  letterDocumentId String?          @unique @db.Uuid
+  number           String           @unique
+  status           AssignmentStatus @default(ISSUED)
+  purpose          String
+  destination      String
+  startDate        DateTime         @db.Date
+  endDate          DateTime         @db.Date
+  details          String?
+  issueDate        DateTime         @db.Date
+  snapshot         Json
+  issuedById       String           @db.Uuid
+  issuedAt         DateTime         @default(now())
+  cancelledAt      DateTime?
+  cancelledById    String?          @db.Uuid
+  cancelReason     String?
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
 
   assignees     AssignmentAssignee[]
   receipts      DailyAllowanceReceipt[]

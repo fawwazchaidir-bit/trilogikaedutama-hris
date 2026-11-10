@@ -1,97 +1,24 @@
 "use client";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useMemo, useState } from "react";
-import { Ban, Download, FilePlus2, Plus, ReceiptText, Trash2 } from "lucide-react";
+import { useState } from "react";
+import { Ban, Download, FilePlus2, FileText, ReceiptText } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { Card, EmptyState, Notice } from "@/components/ui/card";
 import { SelectField, TextAreaField, TextField } from "@/components/ui/field";
-import { MoneyInput } from "@/components/ui/money-input";
 import { Table, TableWrap, Td, Th } from "@/components/ui/table";
 import { useToast } from "@/components/ui/toast";
 import { api, ApiClientError, errorMessage } from "@/lib/api-client";
 import { formatDateLong, formatDateRange } from "@/lib/format";
 import { formatRupiah } from "@/lib/money";
-import { tripDays, needsMaterai } from "@/lib/assignment";
+import { needsMaterai } from "@/lib/assignment";
 import type { AssignmentDto, AssigneeDto, MyAssignmentDto, ReceiptDto } from "@/server/services/assignments";
 import { DiscussButton } from "@/components/chat/discuss-button";
 
 const METHOD = { CASH: "Tunai", TRANSFER: "Transfer bank" } as const;
 const btn = "inline-flex h-8 items-center gap-1.5 rounded-md border border-line bg-white px-3 text-sm font-medium hover:bg-canvas";
-
-interface EmpOpt { id: string; employeeNo: string; fullName: string }
-interface Row { employeeId: string; dailyRate: number | null; days: string }
-
-/** Formulir Surat Tugas: tujuan, tanggal, dan karyawan yang ditunjuk beserta uang harian per orang. */
-export function AssignmentCreate({ employees, today, selfEmployeeId, isSuper }: { employees: EmpOpt[]; today: string; selfEmployeeId: string | null; isSuper: boolean }) {
-  const router = useRouter();
-  const toast = useToast();
-  const [open, setOpen] = useState(false);
-  const blank = { purpose: "", destination: "", startDate: today, endDate: today, details: "" };
-  const [form, setForm] = useState(blank);
-  const [rows, setRows] = useState<Row[]>([{ employeeId: "", dailyRate: null, days: "" }]);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [fe, setFe] = useState<Record<string, string>>({});
-  const span = form.startDate && form.endDate && form.endDate >= form.startDate ? tripDays(form.startDate, form.endDate) : 0;
-  const options = useMemo(() => employees.filter((e) => isSuper || e.id !== selfEmployeeId), [employees, isSuper, selfEmployeeId]);
-  const total = rows.reduce((a, r) => a + (r.dailyRate ?? 0) * (r.days ? Number(r.days) : span), 0);
-  const setRow = (i: number, patch: Partial<Row>) => setRows((rs) => rs.map((r, j) => (j === i ? { ...r, ...patch } : r)));
-  const close = () => { setOpen(false); setError(null); setFe({}); };
-
-  async function submit() {
-    setBusy(true); setError(null); setFe({});
-    try {
-      const r = await api<{ number: string }>("/api/assignments", {
-        body: {
-          ...form, details: form.details || null,
-          assignees: rows.filter((x) => x.employeeId || x.dailyRate !== null).map((x) => ({ employeeId: x.employeeId, dailyRate: x.dailyRate ?? 0, days: x.days ? Number(x.days) : null })),
-        },
-      });
-      toast.success(`Surat Tugas ${r.number} diterbitkan.`);
-      setForm(blank); setRows([{ employeeId: "", dailyRate: null, days: "" }]); close(); router.refresh();
-    } catch (e) { setError(errorMessage(e)); if (e instanceof ApiClientError) setFe(e.fieldErrors); } finally { setBusy(false); }
-  }
-
-  return (
-    <>
-      <Button variant="primary" onClick={() => { setForm({ ...blank }); setOpen(true); }}><Plus className="size-4" />Terbitkan Surat Tugas</Button>
-      <Dialog open={open} onClose={() => !busy && close()} size="lg" title="Terbitkan Surat Tugas"
-        description="Surat tugas dari HR / pimpinan kepada karyawan yang ditunjuk — menjadi dasar pemberian Uang Harian."
-        footer={<><Button onClick={close} disabled={busy}>Batal</Button><Button variant="primary" loading={busy} onClick={submit}>Terbitkan</Button></>}>
-        <div className="grid gap-4 sm:grid-cols-2">
-          {error && <div className="sm:col-span-2"><Notice tone="danger">{error}</Notice></div>}
-          <TextField className="sm:col-span-2" label="Maksud / tujuan penugasan" required value={form.purpose} onChange={(e) => setForm({ ...form, purpose: e.target.value })} error={fe.purpose} placeholder="mis. Pendampingan pelatihan di klien" />
-          <TextField className="sm:col-span-2" label="Lokasi tujuan" required value={form.destination} onChange={(e) => setForm({ ...form, destination: e.target.value })} error={fe.destination} placeholder="mis. Bandung, Jawa Barat" />
-          <TextField label="Tanggal mulai" type="date" required value={form.startDate} onChange={(e) => setForm({ ...form, startDate: e.target.value, endDate: form.endDate < e.target.value ? e.target.value : form.endDate })} error={fe.startDate} />
-          <TextField label="Tanggal selesai" type="date" required value={form.endDate} min={form.startDate} onChange={(e) => setForm({ ...form, endDate: e.target.value })} error={fe.endDate} hint={span ? `Lama penugasan ${span} hari` : undefined} />
-          <TextAreaField className="sm:col-span-2" label="Uraian tugas (opsional)" rows={2} value={form.details} onChange={(e) => setForm({ ...form, details: e.target.value })} error={fe.details} />
-
-          <fieldset className="space-y-3 sm:col-span-2">
-            <legend className="mb-1 text-sm font-semibold text-ink">Karyawan yang ditugaskan & uang harian</legend>
-            {fe.assignees && <p role="alert" className="text-xs font-medium text-brand-700">{fe.assignees}</p>}
-            {rows.map((r, i) => (
-              <div key={i} className="grid items-end gap-3 rounded-md border border-line p-3 sm:grid-cols-[1fr_9rem_6rem_auto]">
-                <SelectField label={`Karyawan ${i + 1}`} required value={r.employeeId} onChange={(e) => setRow(i, { employeeId: e.target.value })} error={fe[`assignees.${i}.employeeId`]}>
-                  <option value="">— pilih —</option>{options.map((e) => <option key={e.id} value={e.id}>{e.fullName} ({e.employeeNo})</option>)}
-                </SelectField>
-                <MoneyInput label="Uang harian / hari" required value={r.dailyRate} onChange={(v) => setRow(i, { dailyRate: v })} error={fe[`assignees.${i}.dailyRate`]} />
-                <TextField label="Hari" type="number" min={1} max={span || undefined} placeholder={span ? String(span) : ""} value={r.days} onChange={(e) => setRow(i, { days: e.target.value })} error={fe[`assignees.${i}.days`]} />
-                <Button variant="ghost" aria-label={`Hapus baris penerima ${i + 1}`} disabled={rows.length === 1} onClick={() => setRows((rs) => rs.filter((_, j) => j !== i))}><Trash2 className="size-4" /></Button>
-              </div>
-            ))}
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <Button size="sm" onClick={() => setRows((rs) => [...rs, { employeeId: "", dailyRate: null, days: "" }])}><Plus className="size-3.5" />Tambah karyawan</Button>
-              <p className="text-sm">Total uang harian: <strong>{formatRupiah(total)}</strong></p>
-            </div>
-            <p className="text-xs text-muted">“Hari” kosong = seluruh lama penugasan (hari kalender). Isi bila hanya sebagian hari yang dibayar.{!isSuper && " Anda tidak dapat menugaskan diri sendiri (hanya Super Admin)."}</p>
-          </fieldset>
-        </div>
-      </Dialog>
-    </>
-  );
-}
 
 type Dlg = { kind: "ISSUE"; letter: AssignmentDto; a: AssigneeDto } | { kind: "CANCEL"; letter: AssignmentDto } | { kind: "VOID"; letter: AssignmentDto; r: ReceiptDto };
 
@@ -142,7 +69,7 @@ export function AssignmentList({ items, today, canManage, canRevoke, selfEmploye
               <div className="flex flex-wrap gap-2">
                 <DiscussButton type="ASSIGNMENT_LETTER" id={l.id} />
                 <a href={`/api/assignments/${l.id}/pdf`} className={btn}><Download className="size-4" />Surat Tugas (PDF)</a>
-                {canManage && l.status === "ISSUED" && <Button size="sm" variant="danger" onClick={() => setDlg({ kind: "CANCEL", letter: l })}><Ban className="size-3.5" />Batalkan</Button>}
+                {l.letterDocumentId ? <Link href={`/persuratan/${l.letterDocumentId}`} className={btn}><FileText className="size-4" />Dokumen surat</Link> : canManage && l.status === "ISSUED" && <Button size="sm" variant="danger" onClick={() => setDlg({ kind: "CANCEL", letter: l })}><Ban className="size-3.5" />Batalkan</Button>}
               </div>
             </header>
             <TableWrap><Table>

@@ -120,6 +120,8 @@ export interface AssignmentDto {
   issuedAt: string;
   cancelledAt: string | null;
   cancelReason: string | null;
+  /** Dokumen Persuratan (INT-002) yang menerbitkan surat tugas ini; null = surat tugas lama (sebelum Persuratan). */
+  letterDocumentId: string | null;
   totalAllowance: number;
   assignees: AssigneeDto[];
 }
@@ -150,7 +152,7 @@ async function toDtos(rows: LetterRow[]): Promise<AssignmentDto[]> {
   return rows.map((r) => ({
     id: r.id, number: r.number, status: r.status, purpose: r.purpose, destination: r.destination, startDate: dateToIso(r.startDate), endDate: dateToIso(r.endDate),
     tripDays: tripDays(dateToIso(r.startDate), dateToIso(r.endDate)), details: r.details, issueDate: dateToIso(r.issueDate), issuedBy: names.get(r.issuedById) ?? "—",
-    issuedAt: r.issuedAt.toISOString(), cancelledAt: r.cancelledAt?.toISOString() ?? null, cancelReason: r.cancelReason,
+    issuedAt: r.issuedAt.toISOString(), cancelledAt: r.cancelledAt?.toISOString() ?? null, cancelReason: r.cancelReason, letterDocumentId: r.letterDocumentId,
     totalAllowance: r.assignees.reduce((a, x) => a + Number(x.total), 0),
     assignees: r.assignees.map((a) => {
       const active = r.receipts.find((x) => x.assigneeId === a.id && x.status === "ACTIVE");
@@ -210,58 +212,68 @@ export const assignmentSchema = z.object({
  */
 export async function createAssignment(actor: Actor, raw: unknown): Promise<AssignmentDto> {
   assertCan(actor, "assignment:manage");
+  return transaction((tx) => createAssignmentIn(tx, actor, raw));
+}
+
+/** Data penerbitan dari mesin dokumen (Persuratan INT-002): nomor resmi dari mesin, tanggal terbit, dan dokumen asal. */
+export interface AssignmentExternalIssue { number: string; issueDate: string; letterDocumentId: string; issuedById: string }
+
+/**
+ * Inti penerbitan surat tugas, dipakai (a) jalur lama `createAssignment` (hanya uji/internal; TIDAK ada rute/UI lagi) dan
+ * (b) mesin dokumen saat INT-002 disetujui: `ext` membawa nomor resmi mesin (tanpa penomoran lama "/ST/"). Pemeriksa izin & aturan
+ * "tidak menugaskan diri sendiri" dihitung terhadap `creator` (pembuat dokumen), bukan penyetuju.
+ */
+export async function createAssignmentIn(tx: Prisma.TransactionClient, actor: Actor, raw: unknown, ext?: AssignmentExternalIssue, creator: Actor = actor): Promise<AssignmentDto> {
   const input = parseInput(assignmentSchema, raw);
-  if (actor.role !== "SUPER_ADMIN" && actor.employeeId && input.assignees.some((a) => a.employeeId === actor.employeeId)) {
+  if (creator.role !== "SUPER_ADMIN" && creator.employeeId && input.assignees.some((a) => a.employeeId === creator.employeeId)) {
     throw Errors.forbidden("Anda tidak dapat menerbitkan surat tugas yang menugaskan diri Anda sendiri. Minta Super Admin menerbitkannya.");
   }
   const settings = await getSettings();
-  const issueDate = input.issueDate ?? todayIso(env().APP_TIMEZONE);
+  const issueDate = ext?.issueDate ?? input.issueDate ?? todayIso(env().APP_TIMEZONE);
   const days = tripDays(input.startDate, input.endDate);
-  return transaction(async (tx) => {
-    const emps = await tx.employee.findMany({
-      where: { id: { in: input.assignees.map((a) => a.employeeId) } },
-      select: { id: true, employeeNo: true, fullName: true, position: true, isActive: true, userId: true, division: { select: { name: true } } },
-    });
-    const byId = new Map(emps.map((e) => [e.id, e]));
-    input.assignees.forEach((a, i) => {
-      const e = byId.get(a.employeeId);
-      if (!e) throw Errors.validation("Karyawan tidak ditemukan.", { [`assignees.${i}.employeeId`]: "Karyawan tidak ditemukan" });
-      if (!e.isActive) throw Errors.validation(`${e.fullName} sudah nonaktif dan tidak dapat ditugaskan.`, { [`assignees.${i}.employeeId`]: "Karyawan nonaktif" });
-    });
-    const year = Number(issueDate.slice(0, 4));
-    const seqNo = await nextSeq(tx, "letter", year);
-    const number = formatLetterNumber(seqNo, LETTER_CODE.ASSIGNMENT, issueDate);
-    const rows = input.assignees.map((a) => {
-      const e = byId.get(a.employeeId)!;
-      const d = a.days ?? days;
-      return { e, days: d, dailyRate: a.dailyRate, total: d * a.dailyRate };
-    });
-    if (rows.some((r) => r.total > 100_000_000_000)) throw Errors.validation("Total uang harian terlalu besar.");
-    const snapshot: AssignmentSnapshot = {
-      version: 1, number, company: companyOf(settings), issueDate, purpose: input.purpose, destination: input.destination, startDate: input.startDate, endDate: input.endDate,
-      tripDays: days, details: input.details, signer: signerOf(settings), footerNote: settings.slipFooterNote,
-      assignees: rows.map((r) => ({ employeeId: r.e.id, employeeNo: r.e.employeeNo, name: r.e.fullName, position: r.e.position, division: r.e.division?.name ?? null, days: r.days, dailyRate: r.dailyRate, total: r.total })),
-    };
-    const letter = await tx.assignmentLetter.create({
-      data: {
-        seqYear: year, seqNo, number, purpose: input.purpose, destination: input.destination, startDate: isoToDate(input.startDate), endDate: isoToDate(input.endDate),
-        details: input.details, issueDate: isoToDate(issueDate), snapshot: snapshot as unknown as Prisma.InputJsonValue, issuedById: actor.userId,
-        assignees: { create: rows.map((r) => ({ employeeId: r.e.id, days: r.days, dailyRate: BigInt(r.dailyRate), total: BigInt(r.total) })) },
-      },
-      include,
-    });
-    const total = rows.reduce((a, r) => a + r.total, 0);
-    await writeAudit(tx, actor, {
-      action: "assignment.create", entityType: "AssignmentLetter", entityId: letter.id,
-      summary: `Surat Tugas ${number} diterbitkan: ${input.purpose} → ${input.destination}, ${formatDateRange(input.startDate, input.endDate)}; ${rows.length} karyawan, uang harian total ${formatRupiah(total)}`,
-      after: { number, startDate: input.startDate, endDate: input.endDate, assignees: rows.map((r) => ({ employeeId: r.e.id, days: r.days, dailyRate: r.dailyRate })) },
-    });
-    const userIds = rows.map((r) => r.e.userId).filter((x): x is string => !!x);
-    await notifyUsers(tx, userIds, {
-      type: "assignment.issued", title: `Surat Tugas baru: ${input.destination}`, body: `${input.purpose} · ${formatDateRange(input.startDate, input.endDate)} · No. ${number}`, href: "/surat-tugas-saya",
-    });
-    return (await toDtos([letter]))[0]!;
+  const emps = await tx.employee.findMany({
+    where: { id: { in: input.assignees.map((a) => a.employeeId) } },
+    select: { id: true, employeeNo: true, fullName: true, position: true, isActive: true, userId: true, division: { select: { name: true } } },
   });
+  const byId = new Map(emps.map((e) => [e.id, e]));
+  input.assignees.forEach((a, i) => {
+    const e = byId.get(a.employeeId);
+    if (!e) throw Errors.validation("Karyawan tidak ditemukan.", { [`assignees.${i}.employeeId`]: "Karyawan tidak ditemukan" });
+    if (!e.isActive) throw Errors.validation(`${e.fullName} sudah nonaktif dan tidak dapat ditugaskan.`, { [`assignees.${i}.employeeId`]: "Karyawan nonaktif" });
+  });
+  const year = Number(issueDate.slice(0, 4));
+  const seqNo = ext ? null : await nextSeq(tx, "letter", year);
+  const number = ext ? ext.number : formatLetterNumber(seqNo!, LETTER_CODE.ASSIGNMENT, issueDate);
+  const rows = input.assignees.map((a) => {
+    const e = byId.get(a.employeeId)!;
+    const d = a.days ?? days;
+    return { e, days: d, dailyRate: a.dailyRate, total: d * a.dailyRate };
+  });
+  if (rows.some((r) => r.total > 100_000_000_000)) throw Errors.validation("Total uang harian terlalu besar.");
+  const snapshot: AssignmentSnapshot = {
+    version: 1, number, company: companyOf(settings), issueDate, purpose: input.purpose, destination: input.destination, startDate: input.startDate, endDate: input.endDate,
+    tripDays: days, details: input.details, signer: signerOf(settings), footerNote: settings.slipFooterNote,
+    assignees: rows.map((r) => ({ employeeId: r.e.id, employeeNo: r.e.employeeNo, name: r.e.fullName, position: r.e.position, division: r.e.division?.name ?? null, days: r.days, dailyRate: r.dailyRate, total: r.total })),
+  };
+  const letter = await tx.assignmentLetter.create({
+    data: {
+      seqYear: ext ? null : year, seqNo, number, letterDocumentId: ext?.letterDocumentId ?? null, purpose: input.purpose, destination: input.destination, startDate: isoToDate(input.startDate), endDate: isoToDate(input.endDate),
+      details: input.details, issueDate: isoToDate(issueDate), snapshot: snapshot as unknown as Prisma.InputJsonValue, issuedById: ext?.issuedById ?? actor.userId,
+      assignees: { create: rows.map((r) => ({ employeeId: r.e.id, days: r.days, dailyRate: BigInt(r.dailyRate), total: BigInt(r.total) })) },
+    },
+    include,
+  });
+  const total = rows.reduce((a, r) => a + r.total, 0);
+  await writeAudit(tx, actor, {
+    action: "assignment.create", entityType: "AssignmentLetter", entityId: letter.id,
+    summary: `Surat Tugas ${number} diterbitkan: ${input.purpose} → ${input.destination}, ${formatDateRange(input.startDate, input.endDate)}; ${rows.length} karyawan, uang harian total ${formatRupiah(total)}`,
+    after: { number, startDate: input.startDate, endDate: input.endDate, assignees: rows.map((r) => ({ employeeId: r.e.id, days: r.days, dailyRate: r.dailyRate })) },
+  });
+  const userIds = rows.map((r) => r.e.userId).filter((x): x is string => !!x);
+  await notifyUsers(tx, userIds, {
+    type: "assignment.issued", title: `Surat Tugas baru: ${input.destination}`, body: `${input.purpose} · ${formatDateRange(input.startDate, input.endDate)} · No. ${number}`, href: "/surat-tugas-saya",
+  });
+  return (await toDtos([letter]))[0]!;
 }
 
 const cancelSchema = z.object({ reason: requiredText(5, 300, "Alasan pembatalan") });
@@ -271,21 +283,34 @@ export async function cancelAssignment(actor: Actor, id: string, raw: unknown): 
   assertCan(actor, "assignment:manage");
   const { reason } = parseInput(cancelSchema, raw);
   return transaction(async (tx) => {
-    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${"assign:" + id}))`;
-    const letter = await tx.assignmentLetter.findUnique({ where: { id }, include });
-    if (!letter) throw Errors.notFound("Surat tugas");
-    if (letter.status === "CANCELLED") throw Errors.conflict("Surat tugas sudah dibatalkan.");
-    if (letter.receipts.some((r) => r.status === "ACTIVE")) {
-      throw Errors.conflict("Masih ada Bukti Penerimaan Uang Harian yang aktif. Batalkan buktinya terlebih dahulu (hanya Super Admin), lalu batalkan surat tugas.");
-    }
-    await tx.assignmentLetter.update({ where: { id }, data: { status: "CANCELLED", cancelledAt: new Date(), cancelledById: actor.userId, cancelReason: reason } });
-    await writeAudit(tx, actor, { action: "assignment.cancel", entityType: "AssignmentLetter", entityId: id, summary: `Surat Tugas ${letter.number} dibatalkan`, before: { status: "ISSUED" }, after: { status: "CANCELLED" }, reason });
-    const owners = await tx.employee.findMany({ where: { id: { in: letter.assignees.map((a) => a.employeeId) } }, select: { userId: true } });
-    await notifyUsers(tx, owners.map((o) => o.userId).filter((x): x is string => !!x), {
-      type: "assignment.cancelled", title: `Surat Tugas ${letter.number} dibatalkan`, body: reason, href: "/surat-tugas-saya",
-    });
-    return (await toDtos([await tx.assignmentLetter.findUniqueOrThrow({ where: { id }, include })]))[0]!;
+    const linked = await tx.assignmentLetter.findUnique({ where: { id }, select: { letterDocumentId: true } });
+    if (linked?.letterDocumentId) throw Errors.conflict("Surat tugas ini diterbitkan lewat Persuratan. Batalkan dari dokumen suratnya di menu Persuratan.");
+    return cancelAssignmentIn(tx, actor, id, reason);
   });
+}
+
+/** Inti pembatalan (dipakai jalur lama dan mesin dokumen saat INT-002 dibatalkan). */
+export async function cancelAssignmentIn(tx: Prisma.TransactionClient, actor: Actor, id: string, reason: string): Promise<AssignmentDto> {
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${"assign:" + id}))`;
+  const letter = await tx.assignmentLetter.findUnique({ where: { id }, include });
+  if (!letter) throw Errors.notFound("Surat tugas");
+  if (letter.status === "CANCELLED") throw Errors.conflict("Surat tugas sudah dibatalkan.");
+  if (letter.receipts.some((r) => r.status === "ACTIVE")) {
+    throw Errors.conflict("Masih ada Bukti Penerimaan Uang Harian yang aktif. Batalkan buktinya terlebih dahulu (hanya Super Admin), lalu batalkan surat tugas.");
+  }
+  await tx.assignmentLetter.update({ where: { id }, data: { status: "CANCELLED", cancelledAt: new Date(), cancelledById: actor.userId, cancelReason: reason } });
+  await writeAudit(tx, actor, { action: "assignment.cancel", entityType: "AssignmentLetter", entityId: id, summary: `Surat Tugas ${letter.number} dibatalkan`, before: { status: "ISSUED" }, after: { status: "CANCELLED" }, reason });
+  const owners = await tx.employee.findMany({ where: { id: { in: letter.assignees.map((a) => a.employeeId) } }, select: { userId: true } });
+  await notifyUsers(tx, owners.map((o) => o.userId).filter((x): x is string => !!x), {
+    type: "assignment.cancelled", title: `Surat Tugas ${letter.number} dibatalkan`, body: reason, href: "/surat-tugas-saya",
+  });
+  return (await toDtos([await tx.assignmentLetter.findUniqueOrThrow({ where: { id }, include })]))[0]!;
+}
+
+/** Surat tugas yang diterbitkan dokumen Persuratan tertentu (null bila belum/tidak ada). */
+export async function assignmentIdForLetterDoc(tx: Prisma.TransactionClient, letterDocumentId: string): Promise<{ id: string; receiptsActive: number } | null> {
+  const a = await tx.assignmentLetter.findUnique({ where: { letterDocumentId }, select: { id: true, receipts: { where: { status: "ACTIVE" }, select: { id: true } } } });
+  return a ? { id: a.id, receiptsActive: a.receipts.length } : null;
 }
 
 export const assignmentListSchema = z.object({
@@ -355,12 +380,13 @@ export async function listMyAssignments(actor: Actor): Promise<MyAssignmentDto[]
  * Surat tugas + snapshot untuk PDF. Pengelola (assignment:view_all): semua. Karyawan: hanya surat yang menugaskan dirinya;
  * yang lain dijawab "tidak ditemukan".
  */
-export async function getAssignmentForPdf(actor: Actor, id: string): Promise<{ number: string; status: AssignmentStatus; snapshot: AssignmentSnapshot }> {
+export async function getAssignmentForPdf(actor: Actor, id: string): Promise<{ number: string; status: AssignmentStatus; snapshot: AssignmentSnapshot; engineFileId: string | null }> {
   const row = await prisma.assignmentLetter.findUnique({ where: { id }, include: { assignees: { select: { employeeId: true } } } });
   const admin = actorCan(actor, "assignment:view_all");
   if (!row || (!admin && !(actor.employeeId && row.assignees.some((a) => a.employeeId === actor.employeeId)))) throw Errors.notFound("Surat tugas");
   await writeAudit(prisma, actor, { action: "assignment.download", entityType: "AssignmentLetter", entityId: id, summary: `Surat Tugas ${row.number} diunduh` });
-  return { number: row.number, status: row.status, snapshot: row.snapshot as unknown as AssignmentSnapshot };
+  const engine = row.letterDocumentId ? await prisma.letterDocument.findUnique({ where: { id: row.letterDocumentId }, select: { pdfFileId: true } }) : null;
+  return { number: row.number, status: row.status, snapshot: row.snapshot as unknown as AssignmentSnapshot, engineFileId: engine?.pdfFileId ?? null };
 }
 
 // ─────────────────────────── Bukti Penerimaan Uang Harian ───────────────────────────

@@ -6,7 +6,7 @@ export const b = (text: string) => t(text, "bold");
 export const i = (text: string) => t(text, "italic");
 export const v = (key: string): PmNode => ({ type: "variable", attrs: { key } });
 export const p = (content: (PmNode | string)[] | string, attrs: Record<string, unknown> = {}): PmNode => ({
-  type: "paragraph", ...(Object.keys(attrs).length ? { attrs } : {}), content: (Array.isArray(content) ? content : [content]).map((c) => (typeof c === "string" ? t(c) : c)),
+  type: "paragraph", ...(Object.keys(attrs).length ? { attrs } : {}), content: (Array.isArray(content) ? content : [content]).filter((c) => typeof c !== "string" || c !== "").map((c) => (typeof c === "string" ? t(c) : c)),
 });
 /** Paragraf isi: rata kiri-kanan, baris pertama menjorok (bawaan surat). */
 export const body = (content: (PmNode | string)[] | string, extra: Record<string, unknown> = {}) => p(content, { textAlign: "justify", firstLine: true, ...extra });

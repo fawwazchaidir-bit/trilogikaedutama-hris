@@ -4,7 +4,7 @@
  * saat aliran SSE diblokir.
  */
 import { expect, request as pwRequest, test, type APIRequestContext, type Browser, type Page } from "@playwright/test";
-import { E2E_PASSWORD, USERS, isoDatePlus, login, menuLink } from "./helpers";
+import { E2E_PASSWORD, USERS, isoDatePlus, issueAssignmentViaLetters, login, menuLink } from "./helpers";
 
 test.describe.configure({ mode: "serial" });
 
@@ -104,9 +104,9 @@ test("kanal publik: pesan Citra terlihat oleh karyawan lain; HR tidak dapat memb
 
 test("tombol Diskusi pada Surat Tugas membuka utas khusus penerima; karyawan lain ditolak (404)", async ({ browser }) => {
   const day = isoDatePlus(5);
-  const r = await post(hr, "/api/assignments", { purpose: "Pendampingan uji (E2E obrolan)", destination: "Surakarta", startDate: day, endDate: day, assignees: [{ employeeId: budiEmpId, dailyRate: 300000 }] });
-  expect(r.status(), await r.text()).toBe(201);
-  const letter = (await r.json()).data as { id: string; number: string };
+  const dirApi = await session(USERS.pimpinan);
+  const letter = await issueAssignmentViaLetters(hr, dirApi, base, { purpose: "Pendampingan uji (E2E obrolan)", destination: "Surakarta", startDate: day, endDate: day, assignees: [{ employeeId: budiEmpId, dailyRate: 300000 }] });
+  await dirApi.dispose();
 
   const b = await as(browser, USERS.budi);
   await b.page.goto("/surat-tugas-saya");

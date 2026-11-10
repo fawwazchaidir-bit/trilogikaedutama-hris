@@ -41,7 +41,7 @@ export function ReferencesPanel({ projectId, links, refs, canLink, canSearchLett
           <ul className="mt-2 divide-y divide-line rounded-lg border border-line bg-surface">
             {links.map((l) => (
               <li key={l.id} className="flex flex-wrap items-center justify-between gap-2 px-4 py-2.5 text-sm">
-                <div><p className="font-medium text-ink">{canOpenLetters ? <Link href="/surat-tugas" className="hover:underline">{l.number}</Link> : l.number} {l.status === "CANCELLED" && <Badge tone="dark">Dibatalkan</Badge>}</p>
+                <div><p className="font-medium text-ink">{canOpenLetters ? <Link href="/persuratan/surat-tugas" className="hover:underline">{l.number}</Link> : l.number} {l.status === "CANCELLED" && <Badge tone="dark">Dibatalkan</Badge>}</p>
                   <p className="text-xs text-muted">{l.purpose} · {l.destination} · {formatDateRange(l.startDate, l.endDate)}</p></div>
                 {canLink && <Button size="sm" variant="danger" aria-label={`Lepas tautan ${l.number}`} onClick={() => void run(() => api(`/api/training/projects/${projectId}/assignments/${l.id}`, { method: "DELETE" }), "Tautan dilepas.")}><Unlink className="size-3.5" /></Button>}
               </li>

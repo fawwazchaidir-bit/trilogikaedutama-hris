@@ -1,5 +1,6 @@
 "use client";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { EditorContent, useEditor } from "@tiptap/react";
 import { CheckCircle2, Clock, Download, Eye, FileText, Loader2, Send, Undo2, XCircle, Ban, PencilLine, PenLine, Plus, Trash2, Lock, FileUp, Paperclip } from "lucide-react";
@@ -17,6 +18,7 @@ import type { LetterDetailDto, SignatoryDto } from "@/server/services/letters/do
 import { EditorToolbar } from "./editor-toolbar";
 import { AttachmentEditor } from "./attachment-editor";
 import { AttachmentsPanel } from "./attachments-panel";
+import { AssignmentDialog } from "./assignment-dialog";
 import type { AttachmentDto } from "@/server/services/letters/attachments";
 
 const TONE: Record<LetterStatus, "gray" | "amber" | "green" | "red" | "blue"> = { DRAFT: "gray", IN_REVIEW: "amber", RETURNED: "blue", ISSUED: "green", REJECTED: "red", CANCELLED: "red" };
@@ -37,7 +39,7 @@ const lines = (s: string) => s.split("\n").map((x) => x.trim()).filter(Boolean);
 type SigRow = { kind: "INTERNAL" | "EXTERNAL"; userId: string; name: string; title: string; org: string };
 const toSigRows = (list: SignatoryDto[]): SigRow[] => list.map((s) => ({ kind: s.kind, userId: s.userId ?? "", name: s.kind === "EXTERNAL" ? s.name : "", title: s.kind === "EXTERNAL" ? s.title ?? "" : "", org: s.org ?? "" }));
 
-export function LetterEditor({ initial, signers, people }: { initial: LetterDetailDto; signers: Signer[]; people: Signer[] }) {
+export function LetterEditor({ initial, signers, people, employees = [], me }: { initial: LetterDetailDto; signers: Signer[]; people: Signer[]; employees?: { id: string; employeeNo: string; fullName: string }[]; me?: { employeeId: string | null; isSuper: boolean; canManage?: boolean } }) {
   const router = useRouter();
   const toast = useToast();
   const [d, setD] = useState(initial);
@@ -68,7 +70,7 @@ export function LetterEditor({ initial, signers, people }: { initial: LetterDeta
   }, []);
 
   const editor = useEditor({
-    extensions: documentExtensions, content: initial.body, editable: initial.can.edit, immediatelyRender: false,
+    extensions: documentExtensions, content: initial.body, editable: initial.can.edit && initial.kind !== "TUGAS", immediatelyRender: false,
     editorProps: { attributes: { "aria-label": "Isi surat", role: "textbox", "aria-multiline": "true" } },
     onUpdate: ({ editor: e }) => { if (!e.isEditable) return; dirtyBody.current = true; schedule(); },
   });
@@ -81,7 +83,7 @@ export function LetterEditor({ initial, signers, people }: { initial: LetterDeta
     setSave("saving");
     try {
       const body: Record<string, unknown> = {
-        subject: m.subject, recipientLines: lines(m.recipientLines), recipientPlace: m.recipientPlace || null, attachmentCount: m.attachmentCount ? Number(m.attachmentCount) : null,
+        ...(initial.kind === "TUGAS" ? {} : { subject: m.subject }), recipientLines: lines(m.recipientLines), recipientPlace: m.recipientPlace || null, attachmentCount: m.attachmentCount ? Number(m.attachmentCount) : null,
         attachmentUnit: m.attachmentCount ? m.attachmentUnit : null, salutation: m.salutation || null, closing: m.closing || null, cc: lines(m.cc), signerId: m.signerId || null,
       };
       if (dirtyBody.current && ed) body.body = normalizeDoc(ed.getJSON() as PmDoc);
@@ -96,7 +98,7 @@ export function LetterEditor({ initial, signers, people }: { initial: LetterDeta
 
   useEffect(() => { persistRef.current = persist; }, [persist]);
   useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
-  useEffect(() => { editor?.setEditable(editable); }, [editor, editable]);
+  useEffect(() => { editor?.setEditable(editable && d.kind !== "TUGAS"); }, [editor, editable, d.kind]);
   const set = (k: keyof Meta) => (e: { target: { value: string } }) => { setMeta((m) => ({ ...m, [k]: e.target.value })); if (editable) schedule(); };
 
   async function act(kind: "submit" | "withdraw" | "approve" | "return" | "reject" | "cancel" | "cosign", withNote = false) {
@@ -163,6 +165,8 @@ export function LetterEditor({ initial, signers, people }: { initial: LetterDeta
                 {signers.map((s) => <option key={s.userId} value={s.userId}>{s.name}{s.title ? ` · ${s.title}` : ""}</option>)}
                 {meta.signerId && !signers.some((s) => s.userId === meta.signerId) && <option value={meta.signerId}>{d.signerName}</option>}
               </SelectField>
+              {d.kind === "TUGAS" && <AssignmentDialog letterId={d.id} current={d.assignment} employees={employees} editable={editable} selfEmployeeId={me?.employeeId ?? null} isSuper={!!me?.isSuper} onSaved={(n) => { setD(n); setMeta((m) => ({ ...m, subject: n.subject })); editor?.commands.setContent(n.body, { emitUpdate: false }); setPdfKey((k) => k + 1); setErrors({}); }} />}
+              {d.kind === "TUGAS" && d.assignmentId && me?.canManage && <Link href={`/persuratan/surat-tugas?q=${encodeURIComponent(d.number ?? "")}`} className="block rounded-md bg-emerald-50 p-2 text-xs font-medium text-emerald-900 hover:underline">Kelola Uang Harian & Bukti Penerimaan →</Link>}
               {d.kind === "SURAT" && <>
                 <TextField label="Perihal" value={meta.subject} onChange={set("subject")} disabled={!editable} error={errors.subject} maxLength={300} />
                 {!d.archiveOnly && <>
@@ -238,8 +242,9 @@ export function LetterEditor({ initial, signers, people }: { initial: LetterDeta
             {tab === "pdf" && !d.number && <span className="ml-2 text-xs text-muted">Pratinjau berwatermark DRAF; nomor & QR muncul setelah disetujui.</span>}
           </div>
           <div className={tab === "edit" && !d.archiveOnly ? "block" : "hidden"}>
-            {editor && editable && <EditorToolbar editor={editor} />}
-            {editable && <p className="border-b border-line bg-brand-50 px-4 py-1.5 text-xs text-brand-800">Kop surat, nomor, penerima, salam, blok tanda tangan + cap, dan QR verifikasi disusun otomatis — lihat tab <b>Pratinjau PDF</b>. Di sini Anda menyunting isi surat saja.</p>}
+            {editor && editable && d.kind !== "TUGAS" && <EditorToolbar editor={editor} />}
+            {editable && d.kind === "TUGAS" && <p className="border-b border-line bg-brand-50 px-4 py-1.5 text-xs text-brand-800">Isi Surat Tugas dibangkitkan otomatis dari <b>Data penugasan</b> (panel kiri). Ubah datanya, bukan isinya.</p>}
+            {editable && d.kind !== "TUGAS" && <p className="border-b border-line bg-brand-50 px-4 py-1.5 text-xs text-brand-800">Kop surat, nomor, penerima, salam, blok tanda tangan + cap, dan QR verifikasi disusun otomatis — lihat tab <b>Pratinjau PDF</b>. Di sini Anda menyunting isi surat saja.</p>}
             <div className="max-h-[calc(100vh-18rem)] overflow-auto p-4 sm:p-6">
               <article className="letter-paper mx-auto w-full max-w-[21cm] bg-white px-[1.6cm] py-[1.4cm] shadow-md ring-1 ring-black/5">
                 <EditorContent editor={editor} />

@@ -95,49 +95,75 @@ test.describe("nama aplikasi & tampil/sembunyikan password", () => {
 
 // ───────────────────────── 3: Surat Tugas + Bukti Penerimaan Uang Harian ─────────────────────────
 
-test.describe("Surat Tugas & Bukti Penerimaan Uang Harian", () => {
+test.describe("Surat Tugas (lewat Persuratan) & Bukti Penerimaan Uang Harian", () => {
   let letterNo = "";
   let receiptPdf = "";
+  let docId = "";
 
-  test("Karyawan tidak melihat menu/halaman admin; HR menerbitkan surat tugas untuk Ayu", async ({ page }) => {
+  test("Karyawan tidak melihat halaman admin; HR membuat Surat Tugas di Persuratan, Direktur menyetujui → nomor master TE-INT/002", async ({ page, browser }) => {
     await login(page, USERS.ayu);
     await expect(menuLink(page, "Surat Tugas Saya")).toBeVisible();
-    await expect(page.getByRole("link", { name: /^Surat Tugas( \d+ menunggu)?$/ })).toHaveCount(0); // menu admin; "Surat Tugas Saya" tetap ada
+    await expect(page.getByRole("link", { name: /^Surat Tugas( \d+ menunggu)?$/ })).toHaveCount(0); // menu admin sudah tidak ada; "Surat Tugas Saya" tetap ada
     expect((await page.goto("/surat-tugas"))?.status()).toBe(404);
+    expect((await page.goto("/persuratan/surat-tugas"))?.status()).toBe(404);
     await page.goto("/dashboard"); // halaman 404 tidak memuat rangka aplikasi (tombol Keluar)
     await logout(page);
 
     await login(page, USERS.hr);
-    await page.getByRole("link", { name: /^Surat Tugas( \d+ menunggu)?$/ }).click();
-    await page.getByRole("button", { name: /Terbitkan Surat Tugas/ }).click();
+    await expect(page.getByRole("link", { name: /^Surat Tugas( \d+ menunggu)?$/ })).toHaveCount(0); // menu admin dihapus; dibuat dari Persuratan
+    await page.goto("/surat-tugas"); // alamat lama dialihkan
+    await expect(page).toHaveURL(/\/persuratan\/surat-tugas/);
+    await page.getByRole("button", { name: "Buat Surat Tugas" }).click();
+    await page.waitForURL(/\/persuratan\/[0-9a-f-]{36}$/);
+    docId = page.url().split("/").pop()!;
+    await page.getByRole("button", { name: "Isi data penugasan" }).click();
     const dlg = page.getByRole("dialog");
     await dlg.getByLabel("Maksud / tujuan penugasan").fill("Pendampingan pelatihan Training of Trainers");
     await dlg.getByLabel("Lokasi tujuan").fill("Bandung, Jawa Barat");
+    await dlg.getByLabel("Tanggal mulai").fill(isoDatePlus(0));
     await dlg.getByLabel("Tanggal selesai").fill(isoDatePlus(2));
     await dlg.getByLabel("Karyawan 1").selectOption({ label: "Ayu Lestari (DEMO-001)" });
     await dlg.getByLabel("Uang harian / hari").fill("300000");
     await expect(dlg.getByText("Rp 900.000")).toBeVisible(); // 3 hari × Rp 300.000
-    await dlg.getByRole("button", { name: "Terbitkan", exact: true }).click();
-    await expect(page.getByText(/Surat Tugas \d{3}\/ST\/[IVX]+\/\d{4} diterbitkan/)).toBeVisible();
+    await dlg.getByRole("button", { name: "Simpan" }).click();
+    await expect(page.getByText("Pendampingan pelatihan Training of Trainers").first()).toBeVisible();
+    await expect(page.getByRole("textbox", { name: "Isi surat" })).toContainText("Ayu Lestari"); // isi dibangkitkan dari data penugasan
+    await page.getByLabel("Penandatangan").selectOption({ index: 1 });
+    await expect(page.getByText("Tersimpan otomatis")).toBeVisible({ timeout: 8000 });
+    await page.getByRole("button", { name: "Ajukan ke penandatangan" }).click();
+    await expect(page.getByText("Menunggu penandatangan").first()).toBeVisible();
+    await logout(page);
+
+    const ctx = await browser.newContext({ locale: "id-ID", timezoneId: "Asia/Jakarta" });
+    const dp = await ctx.newPage();
+    await login(dp, USERS.pimpinan);
+    await dp.goto(`/persuratan/${docId}`);
+    await dp.getByRole("button", { name: "Setujui & terbitkan" }).click();
+    await expect(dp.getByText(/^Surat terbit dengan nomor/)).toBeVisible();
+    await ctx.close();
+
+    await login(page, USERS.hr);
+    await page.goto("/persuratan/surat-tugas");
     const card = page.locator("section", { hasText: "Pendampingan pelatihan Training of Trainers" }).first();
     letterNo = (await card.locator("span.font-mono").first().innerText()).trim();
-    expect(letterNo).toMatch(/^\d{3}\/ST\/[IVX]+\/\d{4}$/);
+    expect(letterNo).toMatch(/^\d{3}\/TE-INT\/002\/[IVX]+\/\d{4}$/);
     await expect(card.getByText("Rp 900.000").first()).toBeVisible();
-    await expect(card.getByText("Belum diterbitkan").first()).toHaveCount(0);
+    await expect(card.getByRole("button", { name: "Batalkan", exact: true })).toHaveCount(0); // pembatalan lewat dokumen surat
+    await expect(card.getByRole("link", { name: "Dokumen surat" })).toBeVisible();
 
-    // PDF Surat Tugas
+    // PDF Surat Tugas = PDF dokumen Persuratan (nomor master, QR, tanda tangan)
     const res = await page.request.get(await pdfHref(card, /Surat Tugas \(PDF\)/));
     expect(res.status()).toBe(200);
     expect(res.headers()["content-type"]).toBe("application/pdf");
     const pdf = pdfText(await res.body());
     expect(pdf.pages).toBe(1);
-    for (const t of ["Ayu Lestari", "Bandung, Jawa Barat", "Rp 900.000", "bukan bagian dari slip gaji"]) expect(pdf.text, t).toContain(t);
-    expect(flat(pdf.text)).toContain("SURATTUGAS");
+    for (const t of ["Ayu Lestari", "Bandung, Jawa Barat", letterNo]) expect(pdf.text, t).toContain(t);
+    expect(pdf.text).not.toContain("900.000"); // uang harian tidak dicetak di surat
   });
 
   test("HR menerbitkan Bukti Penerimaan Uang Harian; PDF memuat blok tanda tangan yang sama dengan slip; HR tidak dapat membatalkannya", async ({ page }) => {
     await login(page, USERS.hr);
-    await page.goto("/surat-tugas");
+    await page.goto("/persuratan/surat-tugas");
     const card = page.locator("section", { hasText: letterNo });
     await card.getByRole("button", { name: /Terbitkan bukti penerimaan/ }).click();
     const dlg = page.getByRole("dialog");
@@ -187,17 +213,18 @@ test.describe("Surat Tugas & Bukti Penerimaan Uang Harian", () => {
     await other.close();
   });
 
-  test("Super Admin dapat membatalkan bukti (beralasan); surat tugas tidak bisa dibatalkan selama bukti aktif; bukti batal tidak terlihat karyawan", async ({ page }) => {
+  test("Direktur: pembatalan surat tugas diblok selama bukti aktif; bukti dapat dibatalkan beralasan; lalu pembatalan dokumen surat membatalkan surat tugas; bukti batal tidak terlihat karyawan", async ({ page }) => {
     await login(page, USERS.pimpinan);
-    await page.goto("/surat-tugas");
-    const card = page.locator("section", { hasText: letterNo });
-    await card.getByRole("button", { name: "Batalkan", exact: true }).first().click(); // batalkan surat tugas → ditolak karena bukti aktif
+    // 1) Batalkan dokumen surat → ditolak karena bukti aktif
+    await page.goto(`/persuratan/${docId}`);
+    await page.getByRole("button", { name: "Batalkan", exact: true }).click();
     let dlg = page.getByRole("dialog");
-    await dlg.getByLabel("Alasan pembatalan (wajib)").fill("Klien membatalkan jadwal");
-    await dlg.getByRole("button", { name: "Batalkan", exact: true }).click();
-    await expect(alertWith(dlg, /Bukti Penerimaan Uang Harian yang aktif/).first()).toBeVisible();
-    await dlg.getByRole("button", { name: "Batal", exact: true }).click();
-
+    await dlg.getByLabel("Catatan / alasan").fill("Klien membatalkan jadwal");
+    await dlg.getByRole("button", { name: "Kirim" }).click();
+    await expect(page.getByRole("alert").filter({ hasText: /Bukti Penerimaan Uang Harian yang aktif/ }).first()).toBeVisible();
+    // 2) Batalkan bukti (hanya Super Admin)
+    await page.goto("/persuratan/surat-tugas");
+    const card = page.locator("section", { hasText: letterNo });
     const row = card.locator("tbody tr", { hasText: "Ayu Lestari" });
     await row.getByRole("button", { name: "Batalkan" }).click();
     dlg = page.getByRole("dialog");
@@ -206,6 +233,15 @@ test.describe("Surat Tugas & Bukti Penerimaan Uang Harian", () => {
     await expect(page.getByText("Bukti penerimaan dibatalkan.")).toBeVisible();
     await expect(row.getByRole("button", { name: /Terbitkan bukti penerimaan/ })).toBeVisible(); // dapat diterbitkan ulang
     expect((await page.request.get(receiptPdf)).status()).toBe(200); // pengelola tetap dapat membuka (berwatermark)
+    // 3) Batalkan dokumen surat → surat tugas ikut dibatalkan
+    await page.goto(`/persuratan/${docId}`);
+    await page.getByRole("button", { name: "Batalkan", exact: true }).click();
+    dlg = page.getByRole("dialog");
+    await dlg.getByLabel("Catatan / alasan").fill("Klien membatalkan jadwal");
+    await dlg.getByRole("button", { name: "Kirim" }).click();
+    await expect(page.getByText("Surat dibatalkan.")).toBeVisible();
+    await page.goto("/persuratan/surat-tugas");
+    await expect(page.locator("section", { hasText: letterNo }).getByText("Dibatalkan").first()).toBeVisible();
     await logout(page);
 
     await login(page, USERS.ayu);
