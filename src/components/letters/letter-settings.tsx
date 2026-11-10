@@ -13,11 +13,12 @@ import type { LetterTypeDto, SignerMatrixRow, SignerPerson } from "@/server/serv
 
 type Holder = { userId: string; name: string; title: string | null; hasSignature: boolean };
 
-export function LetterSettings({ settings, types, holders, matrix }: { settings: LetterSettingsDto; types: LetterTypeDto[]; holders: Holder[]; matrix: { rows: SignerMatrixRow[]; people: SignerPerson[] } }) {
+export function LetterSettings({ settings, types, holders, matrix, divisions }: { settings: LetterSettingsDto; types: LetterTypeDto[]; holders: Holder[]; matrix: { rows: SignerMatrixRow[]; people: SignerPerson[] }; divisions: { id: string; name: string }[] }) {
   const router = useRouter(); const toast = useToast();
   const [s, setS] = useState({ place: settings.place, idLine: settings.idLine ?? "", footerText: settings.footerText ?? "", escalationDays: String(settings.escalationDays), annualTarget: String(settings.annualTarget), products: settings.products.join("\n") });
   const [counter, setCounter] = useState({ series: "EKS", year: String(new Date().getFullYear()), lastSeq: "" });
   const [busy, setBusy] = useState<string | null>(null);
+  const [suggestNote, setSuggestNote] = useState<string | null>(null);
   const run = async (key: string, fn: () => Promise<unknown>, ok: string) => { setBusy(key); try { await fn(); toast.success(ok); router.refresh(); } catch (e) { toast.error(errorMessage(e)); } finally { setBusy(null); } };
   const upload = (url: string, f: File | undefined, key: string) => { if (!f) return; const form = new FormData(); form.set("file", f); void run(key, () => api(url, { method: "POST", form }), "Gambar tersimpan."); };
   const policy = (t: LetterTypeDto, patch: Record<string, unknown>) => run(`t${t.id}`, () => api(`/api/letters/types/${t.id}`, { method: "PATCH", body: patch }), "Kebijakan jenis surat diperbarui.");
@@ -25,7 +26,9 @@ export function LetterSettings({ settings, types, holders, matrix }: { settings:
   return (
     <div className="space-y-5">
       <Card>
-        <CardHeader title="Bagan hak tanda tangan" description="Siapa yang berwenang menandatangani tiap jenis surat. Direktur selalu berwenang. Centang = diizinkan; kolom 'Pemegang saat ini' dihitung dari tingkat jabatan & role akun yang sekarang berlaku." />
+        <CardHeader title="Bagan hak tanda tangan" description="Siapa yang berwenang menandatangani tiap jenis surat. Direktur selalu berwenang. Centang = diizinkan; kolom Divisi membatasi Manajer/Supervisor ke divisi tertentu (kosong = semua divisi); 'Pemegang saat ini' dihitung dari tingkat jabatan, divisi, dan role akun yang sekarang berlaku."
+          actions={<Button size="sm" loading={busy === "suggest"} onClick={() => void run("suggest", async () => { const r = await api<{ applied: { type: string; divisions: string[] }[]; skipped: { type: string; reason: string }[] }>("/api/letters/types/division-suggestions", { method: "POST" }); setSuggestNote(`${r.applied.length} jenis dibatasi divisi menurut usulan Register${r.skipped.length ? `; ${r.skipped.length} dilewati (${[...new Set(r.skipped.map((x) => x.reason))].join("; ")})` : ""}.`); }, "Usulan divisi Register diterapkan.")}>Terapkan usulan Register</Button>} />
+        {suggestNote && <p role="status" className="border-b border-line bg-emerald-50 px-4 py-2 text-xs text-emerald-900">{suggestNote}</p>}
         <div className="flex flex-wrap gap-x-5 gap-y-1 border-b border-line px-4 py-2 text-xs text-muted" aria-label="Legenda">
           <span><b className="text-ink">Direktur</b> = Super Admin (selalu)</span><span><b className="text-ink">Manajer / Supervisor</b> = menurut tingkat jabatan karyawan</span><span><b className="text-ink">HR</b> = role Admin/HR</span><span><b className="text-ink">Magang</b> = boleh membuat draf (tidak pernah menandatangani)</span>
         </div>
@@ -34,14 +37,14 @@ export function LetterSettings({ settings, types, holders, matrix }: { settings:
             <thead className="bg-canvas text-xs uppercase tracking-wide text-muted">
               <tr>
                 <th scope="col" className="px-4 py-2 text-left">Jenis surat</th>
-                <th scope="col" className="px-2 py-2 text-center">Direktur</th><th scope="col" className="px-2 py-2 text-center">Manajer</th><th scope="col" className="px-2 py-2 text-center">Supervisor</th><th scope="col" className="px-2 py-2 text-center">HR</th>
+                <th scope="col" className="px-2 py-2 text-center">Direktur</th><th scope="col" className="px-2 py-2 text-center">Manajer</th><th scope="col" className="px-2 py-2 text-center">Supervisor</th><th scope="col" className="px-2 py-2 text-center">HR</th><th scope="col" className="px-2 py-2 text-left">Divisi Manajer/Spv</th>
                 <th scope="col" className="px-2 py-2 text-center">Magang buat</th><th scope="col" className="px-2 py-2 text-center">Aktif</th><th scope="col" className="px-4 py-2 text-left">Pemegang saat ini</th>
               </tr>
             </thead>
             <tbody>
               {(["EKS", "INT"] as const).map((series) => (
                 <Fragment key={series}>
-                  <tr className="bg-brand-50"><th scope="colgroup" colSpan={8} className="px-4 py-1.5 text-left text-xs font-semibold text-brand-800">{series === "EKS" ? "Surat Eksternal (TE-EKS)" : "Surat Internal (TE-INT)"}</th></tr>
+                  <tr className="bg-brand-50"><th scope="colgroup" colSpan={9} className="px-4 py-1.5 text-left text-xs font-semibold text-brand-800">{series === "EKS" ? "Surat Eksternal (TE-EKS)" : "Surat Internal (TE-INT)"}</th></tr>
                   {types.filter((t) => t.series === series).map((t) => {
                     const holders = matrix.rows.find((r) => r.typeId === t.id)?.holders ?? [];
                     const lock = t.directorOnly;
@@ -56,6 +59,19 @@ export function LetterSettings({ settings, types, holders, matrix }: { settings:
                         <td className="px-2 py-2 text-center"><Cb label="Manajer" on={!lock && t.signerJobLevels.includes("MANAGER")} disabled={lock} change={(v) => void policy(t, { signerJobLevels: v ? [...new Set([...t.signerJobLevels, "MANAGER"])] : t.signerJobLevels.filter((x) => x !== "MANAGER") })} /></td>
                         <td className="px-2 py-2 text-center"><Cb label="Supervisor" on={!lock && t.signerJobLevels.includes("SUPERVISOR")} disabled={lock} change={(v) => void policy(t, { signerJobLevels: v ? [...new Set([...t.signerJobLevels, "SUPERVISOR"])] : t.signerJobLevels.filter((x) => x !== "SUPERVISOR") })} /></td>
                         <td className="px-2 py-2 text-center"><Cb label="HR" on={!lock && t.hrCanSign} disabled={lock} change={(v) => void policy(t, { hrCanSign: v })} /></td>
+                        <td className="px-2 py-2">
+                          {lock || !t.signerJobLevels.length ? <span className="text-xs text-muted">—</span> : (
+                            <div className="flex max-w-56 flex-wrap gap-1" role="group" aria-label={`Divisi penandatangan — ${t.name}`}>
+                              {t.signerDivisionIds.length === 0 && <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] text-emerald-800 ring-1 ring-emerald-200">Semua divisi</span>}
+                              {divisions.map((d) => {
+                                const on = t.signerDivisionIds.includes(d.id);
+                                return <button key={d.id} type="button" aria-pressed={on} disabled={busy === `t${t.id}`} onClick={() => void policy(t, { signerDivisionIds: on ? t.signerDivisionIds.filter((x) => x !== d.id) : [...t.signerDivisionIds, d.id] })}
+                                  className={`rounded-full px-2 py-0.5 text-[11px] ring-1 ${on ? "bg-brand-600 text-white ring-brand-600" : "bg-white text-ink-soft ring-line hover:bg-canvas"}`}>{d.name}</button>;
+                              })}
+                              {t.divisionHint && t.signerDivisionIds.length === 0 && <span className="w-full text-[10px] text-muted">Usulan Register: Manajer {t.divisionHint === "PEMASARAN" ? "Pemasaran & Kerjasama" : "Operasional, Adm & Keuangan"}</span>}
+                            </div>
+                          )}
+                        </td>
                         <td className="px-2 py-2 text-center"><Cb label="Magang boleh membuat" on={t.internAllowed} change={(v) => void policy(t, { internAllowed: v })} /></td>
                         <td className="px-2 py-2 text-center"><Cb label="Aktif" on={t.isActive} change={(v) => void policy(t, { isActive: v })} /></td>
                         <td className="px-4 py-2">
@@ -79,8 +95,9 @@ export function LetterSettings({ settings, types, holders, matrix }: { settings:
         <ul className="divide-y divide-line">
           {matrix.people.map((p) => (
             <li key={p.userId} className="flex flex-wrap items-center gap-x-4 gap-y-1 px-4 py-2.5 text-sm">
-              <span className="min-w-48 flex-1"><span className="font-medium text-ink">{p.name}</span><span className="block text-xs text-muted">{p.title ?? "—"} · {p.via === "DIREKTUR" ? "Direktur" : p.via === "MANAJER" ? "Manajer" : p.via === "SUPERVISOR" ? "Supervisor" : "HR"}</span></span>
+              <span className="min-w-48 flex-1"><span className="font-medium text-ink">{p.name}</span><span className="block text-xs text-muted">{p.title ?? "—"} · {p.division ?? "tanpa divisi"} · {p.via === "DIREKTUR" ? "Direktur" : p.via === "MANAJER" ? "Manajer" : p.via === "SUPERVISOR" ? "Supervisor" : "HR"}</span></span>
               <span className="text-xs text-ink-soft">{p.typeCount} jenis surat</span>
+              {p.via === "MANAJER" && !p.division && <Badge tone="red">Belum punya divisi</Badge>}
               {p.hasSignature ? <Badge tone="green">Tanda tangan terpasang</Badge> : <Badge tone="amber">Belum ada gambar tanda tangan</Badge>}
             </li>
           ))}
@@ -91,7 +108,7 @@ export function LetterSettings({ settings, types, holders, matrix }: { settings:
         <CardHeader title="Kop & eskalasi" description="Alamat, telepon, dan logo kop diambil dari Pengaturan lembaga." />
         <form className="grid gap-3 p-4 sm:grid-cols-2" onSubmit={(e) => { e.preventDefault(); void run("settings", () => api("/api/letters/settings", { method: "PATCH", body: { place: s.place, idLine: s.idLine || null, footerText: s.footerText || null, escalationDays: Number(s.escalationDays), annualTarget: Number(s.annualTarget), products: s.products.split("\n").map((x) => x.trim()).filter(Boolean) } }), "Pengaturan disimpan."); }}>
           <TextField label="Kota penerbitan" value={s.place} onChange={(e) => setS({ ...s, place: e.target.value })} />
-          <TextField label="Batas eskalasi (hari kerja)" type="number" min={1} max={30} value={s.escalationDays} onChange={(e) => setS({ ...s, escalationDays: e.target.value })} hint="Setelah ini Direktur boleh mengambil alih surat yang belum ditandatangani." />
+          <TextField label="Batas eskalasi (hari kerja)" type="number" min={0} max={30} value={s.escalationDays} onChange={(e) => setS({ ...s, escalationDays: e.target.value })} hint="Setelah ini Direktur boleh mengambil alih surat yang belum ditandatangani. 0 = kapan saja. Penandatangan di PDF menjadi Direktur; riwayat mencatat penandatangan semula." />
           <TextField label="Baris identitas kop" value={s.idLine} onChange={(e) => setS({ ...s, idLine: e.target.value })} className="sm:col-span-2" placeholder="Vocational Identity Number: …" />
           <TextField label="Teks kaki halaman" value={s.footerText} onChange={(e) => setS({ ...s, footerText: e.target.value })} className="sm:col-span-2" />
           <TextField label="Target revenue tahunan (Rp)" type="number" min={0} value={s.annualTarget} onChange={(e) => setS({ ...s, annualTarget: e.target.value })} hint="Dipakai untuk capaian di dasbor penjualan." />

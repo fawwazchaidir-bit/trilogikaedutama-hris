@@ -343,6 +343,8 @@ model LetterType {
   /// true = hanya Direktur (Super Admin) yang boleh menandatangani; false = Direktur atau tingkat jabatan di signerJobLevels.
   directorOnly      Boolean          @default(false)
   signerJobLevels   JobLevel[]
+  /// Pembatasan DIVISI penandatangan tingkat jabatan (Manajer/Supervisor): kosong = semua divisi. Direktur & HR tidak terikat divisi.
+  signerDivisionIds String[]         @db.Uuid
   internAllowed     Boolean          @default(false)
   isActive          Boolean          @default(true)
   /// Surat Rahasia: hanya pembuat, penandatangan, Direktur (dan HR bila hrCanView); perihal tidak tampil di halaman verifikasi/notifikasi; pembukaan oleh pihak lain dicatat di audit.

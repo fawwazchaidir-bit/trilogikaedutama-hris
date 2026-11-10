@@ -89,6 +89,18 @@ Seluruh 24 jenis katalog master disemai idempoten (penandatangan awal: Direktur 
   Surat tugas lama tetap utuh dengan nomor lamanya (arsip); pembatalannya masih lewat tombol di halaman itu.
 - Data penugasan ikut dibekukan sejak terbit (trigger database).
 
+## Divisi penandatangan & ambil alih
+
+- **Kolom Divisi** pada bagan hak tanda tangan (`LetterType.signerDivisionIds`): membatasi Manajer/Supervisor ke divisi tertentu (kosong = semua divisi). Direktur dan HR (`hrCanSign`) tidak terikat divisi;
+  karyawan tanpa divisi tidak lolos jenis yang dibatasi divisi. Dibaca dari kolom "Penanda tangan (usulan)" Register: "Direktur / Manajer Pemasaran & Kerjasama" = **salah satu** dari keduanya
+  (Manajer Operasional **tidak** dapat menyetujui, dan sebaliknya); "Direktur/Manajer Pemasaran/Manajer Operasional" = tanpa pembatasan divisi, **staf memilih ke siapa mengajukan**.
+- Tombol **"Terapkan usulan Register"** mengisi divisi (EKS-001…005 → divisi Pemasaran; EKS-013 & INT-002 → divisi Operasional/Administrasi/Keuangan/Kurikulum) dengan mencocokkan **nama divisi**; jenis yang
+  sudah dibatasi atau tanpa divisi bernama mirip dilewati (ringkasan ditampilkan). Direktur dapat menyesuaikan per jenis.
+- Dropdown "Penandatangan" menampilkan nama · jabatan · divisi; penegakan di server (memilih, mengajukan, dan menyetujui) memakai aturan yang sama sehingga tidak dapat dilewati.
+- **Ambil alih Direktur**: surat yang diajukan ke Manajer dapat disetujui/dikembalikan/ditolak Direktur setelah batas eskalasi (Pengaturan, hari kerja; **0 = kapan saja**). Yang menandatangani dan tercetak di PDF
+  adalah **Direktur** (nama, jabatan, tanda tangan, cap); halaman verifikasi dan Register menampilkan Direktur sebagai penandatangan. Jejaknya: riwayat `TAKEOVER_*` "(semula diajukan ke <nama>)",
+  snapshot `takeoverFromUserId`, Audit Log, dan notifikasi ke penandatangan semula.
+
 ## Dokumen & PDF terkunci
 
 - Isi disimpan sebagai **JSON** (ProseMirror, tervalidasi ketat `validateDoc`: hanya node/atribut/mark yang dikenal; tanpa HTML). Editor TipTap

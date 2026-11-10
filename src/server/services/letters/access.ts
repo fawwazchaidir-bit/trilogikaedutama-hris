@@ -13,16 +13,16 @@ export function requireLetters(): void {
 export const isDirector = (actor: Pick<Actor, "role">): boolean => actor.role === "SUPER_ADMIN";
 
 /** Fakta seseorang yang menentukan kewenangan surat (peran akun, tingkat jabatan, status magang, aktif). */
-export async function personFacts(userId: string): Promise<(PersonFacts & { name: string; title: string | null; employeeId: string | null }) | null> {
+export async function personFacts(userId: string): Promise<(PersonFacts & { name: string; title: string | null; employeeId: string | null; divisionId: string | null; divisionName: string | null }) | null> {
   const u = await prisma.user.findUnique({
     where: { id: userId },
-    select: { name: true, role: true, isActive: true, employee: { select: { id: true, fullName: true, position: true, jobLevel: true, employmentStatus: true, isActive: true } } },
+    select: { name: true, role: true, isActive: true, employee: { select: { id: true, fullName: true, position: true, jobLevel: true, employmentStatus: true, isActive: true, divisionId: true, division: { select: { name: true } } } } },
   });
   if (!u) return null;
   const e = u.employee;
   return {
     role: u.role, jobLevel: e?.jobLevel ?? null, isIntern: e?.employmentStatus === "INTERN", isActive: u.isActive && (e ? e.isActive : true),
-    name: e?.fullName ?? u.name, title: e?.position ?? null, employeeId: e?.id ?? null,
+    name: e?.fullName ?? u.name, title: e?.position ?? null, employeeId: e?.id ?? null, divisionId: e?.divisionId ?? null, divisionName: e?.division?.name ?? null,
   };
 }
 

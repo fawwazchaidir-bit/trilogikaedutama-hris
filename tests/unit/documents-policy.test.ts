@@ -26,6 +26,16 @@ describe("kewenangan penandatangan", () => {
     expect(canHoldSignature(person({ jobLevel: "MANAGER" }))).toBe(true);
     expect(canHoldSignature(person())).toBe(false);
   });
+  it("pembatasan divisi: Manajer hanya sah bila divisinya termasuk; Direktur & HR tidak terikat divisi; tanpa batas = semua divisi", () => {
+    const pol = { directorOnly: false, signerJobLevels: ["MANAGER" as const], hrCanSign: true, signerDivisionIds: ["div-pemasaran"] };
+    expect(isEligibleSigner(pol, { ...person({ jobLevel: "MANAGER" }), divisionId: "div-pemasaran" })).toBe(true);
+    expect(isEligibleSigner(pol, { ...person({ jobLevel: "MANAGER" }), divisionId: "div-ops" })).toBe(false);
+    expect(isEligibleSigner(pol, { ...person({ jobLevel: "MANAGER" }), divisionId: null })).toBe(false);
+    expect(isEligibleSigner(pol, { ...person({ role: "SUPER_ADMIN", jobLevel: null }), divisionId: "div-ops" })).toBe(true);
+    expect(isEligibleSigner(pol, { ...person({ role: "HR_ADMIN" }), divisionId: "div-ops" })).toBe(true);
+    expect(isEligibleSigner({ ...pol, signerDivisionIds: [] }, { ...person({ jobLevel: "MANAGER" }), divisionId: "div-ops" })).toBe(true);
+    expect(isEligibleSigner({ ...pol, signerDivisionIds: [] }, { ...person({ jobLevel: "MANAGER" }), divisionId: null })).toBe(true);
+  });
   it("hanya Direktur boleh menandatangani suratnya sendiri; hanya Draf/Dikembalikan yang dapat disunting", () => {
     expect(canSignOwn({ role: "SUPER_ADMIN" })).toBe(true);
     expect(canSignOwn({ role: "EMPLOYEE" })).toBe(false);

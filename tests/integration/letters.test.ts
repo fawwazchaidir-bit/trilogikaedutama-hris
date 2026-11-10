@@ -10,8 +10,8 @@ import { isoToDate } from "@/server/json";
 import type { Actor } from "@/server/actor";
 import { resetDb, makeUser } from "../helpers/db";
 import { createLetter, updateLetter, submitLetter, approveLetter, returnLetter, rejectLetter, cancelLetter, withdrawLetter, getLetter, listLetters, letterPdf, cosignLetter, pendingReviewCount, uploadArchiveFile } from "@/server/services/letters/documents";
-import { listTypes, listSigners, updateTypePolicy, signerMatrix } from "@/server/services/letters/types";
-import { assertCanSetSignature, setCounterOffset } from "@/server/services/letters/admin";
+import { listTypes, listSigners, updateTypePolicy, signerMatrix, applyDivisionSuggestions } from "@/server/services/letters/types";
+import { assertCanSetSignature, setCounterOffset, updateLetterSettings } from "@/server/services/letters/admin";
 import { verifyByToken } from "@/server/services/letters/public";
 import { doc, p } from "@/lib/documents/builders";
 import { PDFDocument } from "pdf-lib";
@@ -394,5 +394,67 @@ describe("tahap 2b: mode arsip-saja (surat dibuat di luar portal)", () => {
     const b = await draftReady(staf, manajer);
     await updateLetter(staf, b.id, { body: doc(p("Isi final.")) }); await submitLetter(staf, b.id);
     expect((await approveLetter(manajer, b.id)).number).toMatch(/^002\/TE-EKS\/003\//);
+  });
+});
+
+describe("divisi penandatangan & ambil alih Direktur", () => {
+  let pemasaran: Actor, ops: Actor, divPem: string, divOps: string;
+  beforeEach(async () => {
+    divPem = (await prisma.division.create({ data: { name: "Marketing & Relations" } })).id;
+    divOps = (await prisma.division.create({ data: { name: "Administrasi & Kurikulum" } })).id;
+    pemasaran = await makeUser("pem@uji.test", "Manajer Pemasaran", "EMPLOYEE", (await emp("M-2", "Manajer Pemasaran", "Manajer Pemasaran & Kerjasama", { jobLevel: "MANAGER", divisionId: divPem })).id);
+    ops = await makeUser("ops@uji.test", "Manajer Operasional", "EMPLOYEE", (await emp("M-3", "Manajer Operasional", "Manajer Operasional, Administrasi & Keuangan", { jobLevel: "MANAGER", divisionId: divOps })).id);
+  });
+  const ids = async (series: "EKS" | "INT", code: number) => (await listSigners(staf, (await typeOf(series, code)).id)).map((x) => x.name).sort();
+
+  it("usulan Register: penawaran → Direktur + Manajer Pemasaran saja; berita acara/surat tugas → Manajer Operasional saja; jenis umum → semua Manajer; staf memilih ke siapa mengajukan", async () => {
+    const r = await applyDivisionSuggestions(direktur);
+    expect(r.applied.map((a) => a.type.slice(0, 7)).sort()).toEqual(["EKS-001", "EKS-002", "EKS-003", "EKS-004", "EKS-005", "EKS-013", "INT-002"]);
+    expect(await ids("EKS", 2)).toEqual(["Direktur Uji", "Manajer Pemasaran"]);
+    expect(await ids("EKS", 13)).toEqual(["Direktur Uji", "Manajer Operasional"]);
+    expect(await ids("INT", 2)).toEqual(["Direktur Uji", "Manajer Operasional"]);
+    expect(await ids("EKS", 11)).toEqual(["Direktur Uji", "Manajer Operasional", "Manajer Pemasaran", "Manajer Uji"]); // "Direktur/Mgr Pemasaran/Mgr Ops": tinggal dipilih
+    // Manajer tanpa divisi tidak lolos jenis yang dibatasi divisi
+    expect((await ids("EKS", 2))).not.toContain("Manajer Uji");
+    expect((await applyDivisionSuggestions(direktur)).applied).toHaveLength(0); // idempoten: yang sudah dibatasi dilewati
+  });
+
+  it("Manajer Operasional tidak dapat dipilih maupun menyetujui penawaran; Manajer Pemasaran tidak dapat menyetujui berita acara", async () => {
+    await applyDivisionSuggestions(direktur);
+    const d = await draftReady(staf, pemasaran, { series: "EKS", code: 2 });
+    expect(await fail(updateLetter(staf, d.id, { signerId: ops.userId }))).toMatchObject(VALIDATION);
+    await updateLetter(staf, d.id, { body: doc(p("Isi final.")) }); await submitLetter(staf, d.id);
+    await prisma.$executeRaw`UPDATE letter_documents SET "signerId" = ${ops.userId}::uuid WHERE id = ${d.id}::uuid`; // paksa lewat DB: tetap ditolak saat menyetujui
+    expect(await fail(approveLetter(ops, d.id))).toMatchObject(FORBIDDEN);
+    await prisma.$executeRaw`UPDATE letter_documents SET "signerId" = ${pemasaran.userId}::uuid WHERE id = ${d.id}::uuid`;
+    expect((await approveLetter(pemasaran, d.id)).status).toBe("ISSUED");
+    expect(await fail(updateLetter(staf, (await draftReady(staf, ops, { series: "EKS", code: 13 })).id, { signerId: pemasaran.userId }))).toMatchObject(VALIDATION);
+  });
+
+  it("kebijakan divisi dapat diatur Direktur (validasi divisi); bagan memperlihatkan divisi pemegang", async () => {
+    const t = await typeOf("EKS", 11);
+    expect(await fail(updateTypePolicy(direktur, t.id, { signerDivisionIds: ["00000000-0000-4000-8000-000000000000"] }))).toMatchObject(VALIDATION);
+    expect((await updateTypePolicy(direktur, t.id, { signerDivisionIds: [divOps] })).signerDivisionIds).toEqual([divOps]);
+    expect(await ids("EKS", 11)).toEqual(["Direktur Uji", "Manajer Operasional"]);
+    expect((await signerMatrix(direktur)).people.find((x) => x.name === "Manajer Operasional")?.division).toBe("Administrasi & Kurikulum");
+  });
+
+  it("ambil alih: penawaran diajukan ke Manajer Pemasaran, Direktur menandatangani → Direktur jadi penandatangan di PDF/daftar, riwayat & notifikasi menyebut yang semula", async () => {
+    await applyDivisionSuggestions(direktur);
+    const d = await draftReady(staf, pemasaran, { series: "EKS", code: 1 });
+    await updateLetter(staf, d.id, { body: doc(p("Isi final.")) }); await submitLetter(staf, d.id);
+    expect(await fail(approveLetter(direktur, d.id))).toMatchObject(FORBIDDEN); // belum lewat batas eskalasi (2 hari kerja)
+    await updateLetterSettings(direktur, { place: "Sleman", escalationDays: 0 }); // 0 = Direktur boleh mengambil alih kapan saja
+    expect((await getLetter(direktur, d.id)).can.takeOver).toBe(true);
+    const out = await approveLetter(direktur, d.id);
+    expect(out).toMatchObject({ status: "ISSUED", signerId: direktur.userId, signerName: "Direktur Uji" });
+    const ev = out.events.at(-1)!;
+    expect(ev.action).toBe("TAKEOVER_ISSUED"); expect(ev.note).toContain("semula diajukan ke Manajer Pemasaran");
+    const row = await prisma.letterDocument.findUniqueOrThrow({ where: { id: d.id } });
+    expect((row.snapshot as { signer: { name: string }; takeoverFromUserId: string }).signer.name).toBe("Direktur Uji"); // kolom tanda tangan di PDF = Direktur
+    expect((row.snapshot as { takeoverFromUserId: string }).takeoverFromUserId).toBe(pemasaran.userId);
+    const n = await prisma.notification.findFirst({ where: { userId: pemasaran.userId, type: "letter.takeover" } });
+    expect(n?.title).toContain("diambil alih");
+    expect((await verifyByToken(row.verifyToken))?.signerName).toBe("Direktur Uji");
   });
 });

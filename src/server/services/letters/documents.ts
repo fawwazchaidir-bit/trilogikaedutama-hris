@@ -89,6 +89,11 @@ async function detail(actor: Actor, r: Row): Promise<LetterDetailDto> {
   };
 }
 
+/** Catatan peristiwa ambil alih: menyebut penandatangan semula agar jejaknya jelas. */
+async function takeoverNote(d: { signerId: string | null }, extra: string): Promise<string> {
+  const orig = d.signerId ? (await personFacts(d.signerId))?.name : null;
+  return `${extra}${orig ? ` (semula diajukan ke ${orig})` : ""}`;
+}
 const noteFor = (d: { type: { confidential: boolean; name: string }; subject: string }) => (d.type.confidential ? d.type.name : d.subject ? `${d.type.name} — ${d.subject}` : d.type.name);
 const event = (tx: Prisma.TransactionClient, documentId: string, actor: Actor, action: string, note?: string | null) =>
   tx.letterEvent.create({ data: { documentId, actorId: actor.userId, action, note: note ?? null } });
@@ -141,7 +146,7 @@ const editSchema = z.object({
 
 async function assertSignerOk(actor: Actor, typeId: string, signerId: string, creatorId: string): Promise<void> {
   const [t, f, cf] = await Promise.all([prisma.letterType.findUnique({ where: { id: typeId } }), personFacts(signerId), personFacts(creatorId)]);
-  if (!t || !f || !isEligibleSigner({ directorOnly: t.directorOnly, signerJobLevels: t.signerJobLevels, hrCanSign: t.hrCanSign }, f)) throw Errors.validation("Penandatangan tidak berwenang untuk jenis surat ini.", { signerId: "Pilih penandatangan yang berwenang" });
+  if (!t || !f || !isEligibleSigner({ directorOnly: t.directorOnly, signerJobLevels: t.signerJobLevels, hrCanSign: t.hrCanSign, signerDivisionIds: t.signerDivisionIds }, f)) throw Errors.validation("Penandatangan tidak berwenang untuk jenis surat ini.", { signerId: "Pilih penandatangan yang berwenang" });
   if (signerId === creatorId && !(cf && canSignOwn(cf))) throw Errors.validation("Anda tidak dapat menandatangani surat yang Anda buat sendiri.", { signerId: "Pilih penandatangan lain" });
 }
 
@@ -321,7 +326,8 @@ export async function returnLetter(actor: Actor, id: string, raw: unknown): Prom
   const takeover = await assertReviewer(actor, d);
   const row = await transaction(async (tx) => {
     const u = await tx.letterDocument.update({ where: { id }, data: { status: "RETURNED", returnNote: note }, include });
-    await event(tx, id, actor, takeover ? "TAKEOVER_RETURNED" : "RETURNED", note);
+    await event(tx, id, actor, takeover ? "TAKEOVER_RETURNED" : "RETURNED", takeover ? await takeoverNote(d, note) : note);
+    if (takeover && d.signerId) await notifyUsers(tx, [d.signerId], { type: "letter.takeover", title: "Surat yang diajukan ke Anda diambil alih Direktur", body: noteFor(d), href: `/persuratan/${id}` });
     await writeAudit(tx, actor, { action: "letter.return", entityType: "LetterDocument", entityId: id, summary: `Surat dikembalikan untuk revisi`, reason: note });
     await notifyUsers(tx, [d.creatorId], { type: "letter.returned", title: "Surat dikembalikan untuk revisi", body: note, href: `/persuratan/${id}` });
     return u;
@@ -335,7 +341,8 @@ export async function rejectLetter(actor: Actor, id: string, raw: unknown): Prom
   const takeover = await assertReviewer(actor, d);
   const row = await transaction(async (tx) => {
     const u = await tx.letterDocument.update({ where: { id }, data: { status: "REJECTED", rejectNote: note }, include });
-    await event(tx, id, actor, takeover ? "TAKEOVER_REJECTED" : "REJECTED", note);
+    await event(tx, id, actor, takeover ? "TAKEOVER_REJECTED" : "REJECTED", takeover ? await takeoverNote(d, note) : note);
+    if (takeover && d.signerId) await notifyUsers(tx, [d.signerId], { type: "letter.takeover", title: "Surat yang diajukan ke Anda diambil alih Direktur", body: noteFor(d), href: `/persuratan/${id}` });
     await writeAudit(tx, actor, { action: "letter.reject", entityType: "LetterDocument", entityId: id, summary: `Surat ditolak`, reason: note });
     await notifyUsers(tx, [d.creatorId], { type: "letter.rejected", title: "Surat ditolak penandatangan", body: note, href: `/persuratan/${id}` });
     return u;
@@ -391,7 +398,7 @@ export async function approveLetter(actor: Actor, id: string): Promise<LetterDet
   const takeover = await assertReviewer(actor, pre);
   const typeFacts = await prisma.letterType.findUniqueOrThrow({ where: { id: pre.typeId } });
   const me = await personFacts(actor.userId);
-  if (!me || !isEligibleSigner({ directorOnly: typeFacts.directorOnly, signerJobLevels: typeFacts.signerJobLevels, hrCanSign: typeFacts.hrCanSign }, me)) throw Errors.forbidden("Anda tidak lagi berwenang menandatangani jenis surat ini.");
+  if (!me || !isEligibleSigner({ directorOnly: typeFacts.directorOnly, signerJobLevels: typeFacts.signerJobLevels, hrCanSign: typeFacts.hrCanSign, signerDivisionIds: typeFacts.signerDivisionIds }, me)) throw Errors.forbidden("Anda tidak lagi berwenang menandatangani jenis surat ini.");
   if (pre.creatorId === actor.userId && !isDirector(actor)) throw Errors.forbidden("Tidak dapat menyetujui surat yang Anda buat sendiri.");
   const issueDate = new Date().toLocaleDateString("en-CA", { timeZone: env().APP_TIMEZONE });
   const year = Number(issueDate.slice(0, 4));
@@ -425,7 +432,7 @@ export async function approveLetter(actor: Actor, id: string): Promise<LetterDet
       const sha = createHash("sha256").update(r.bytes).digest("hex");
       const file = await tx.storedFile.create({ data: { kind: "LETTER_PDF", originalName: `${number.replace(/\//g, "-")}.pdf`, mimeType: "application/pdf", size: r.bytes.byteLength, sha256: sha, data: new Uint8Array(r.bytes), uploadedById: actor.userId }, select: { id: true } });
       pdfData = { fileId: file.id, sha };
-      snapshot = { version: 1, number, issueDate, subject: cur.subject, signer: r.signer, recipientLines: cur.recipientLines, cc: cur.cc, typeName: cur.type.name, body: r.body, attachments: attMeta };
+      snapshot = { version: 1, number, issueDate, subject: cur.subject, ...(takeover && pre.signerId ? { takeoverFromUserId: pre.signerId } : {}), signer: r.signer, recipientLines: cur.recipientLines, cc: cur.cc, typeName: cur.type.name, body: r.body, attachments: attMeta };
     }
     const u = await tx.letterDocument.update({
       where: { id },
@@ -436,7 +443,8 @@ export async function approveLetter(actor: Actor, id: string): Promise<LetterDet
       include,
     });
     const sha = pdfData?.sha ?? null;
-    await event(tx, id, actor, takeover ? "TAKEOVER_ISSUED" : "ISSUED", number);
+    await event(tx, id, actor, takeover ? "TAKEOVER_ISSUED" : "ISSUED", takeover ? await takeoverNote(pre, number) : number);
+    if (takeover && pre.signerId) await notifyUsers(tx, [pre.signerId], { type: "letter.takeover", title: `Surat ${number} diambil alih dan ditandatangani Direktur`, body: noteFor(cur), href: `/persuratan/${id}` });
     await writeAudit(tx, actor, { action: "letter.issue", entityType: "LetterDocument", entityId: id, summary: `Surat ${number} diterbitkan (${cur.type.name})`, after: { number, sha256: sha, takeover, archiveOnly: cur.archiveOnly } });
     await notifyUsers(tx, [cur.creatorId], { type: "letter.issued", title: `Surat terbit: ${number}`, body: cur.type.confidential ? cur.type.name : cur.subject || cur.type.name, href: `/persuratan/${id}` });
     return u;

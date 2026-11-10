@@ -28,7 +28,7 @@ export async function getLetterSettingsDto(actor: Actor): Promise<LetterSettings
 
 const settingsSchema = z.object({
   place: z.string().trim().min(2).max(80), idLine: optionalText(200, "Baris identitas"), footerText: optionalText(200, "Teks kaki"),
-  escalationDays: z.number().int().min(1).max(30),
+  escalationDays: z.number().int().min(0).max(30),
   annualTarget: z.number().int().min(0).max(1_000_000_000_000).optional(),
   products: z.array(z.string().trim().min(1).max(120)).min(1).max(40).optional(),
 }).strict();

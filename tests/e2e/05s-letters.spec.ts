@@ -472,10 +472,12 @@ test("galeri tampilan MANAJER (Citra bertingkat Manajer): antrean tanda tangan, 
 test("galeri tampilan DIREKTUR: semua surat, bagan hak tanda tangan, pemegang per orang, cap & nomor urut, register, dasbor", async ({ browser }) => {
   test.skip(!SHOTS, "hanya untuk tangkapan layar (LETTER_SHOTS)");
   const H = { origin: base };
-  const hrApi = await session(USERS.hr), citra = await session(USERS.citra);
+  const hrApi = await session(USERS.hr), citra = await session(USERS.citra), ayuApi = await session(USERS.ayu);
   const opts = (await (await hrApi.get("/api/employees/options")).json()).data as { id: string; fullName: string }[];
   const citraEmp = opts.find((o) => o.fullName.startsWith("Citra"))!.id;
-  const org = (level: string) => hrApi.post(`/api/employees/${citraEmp}/org`, { data: { jobLevel: level, effectiveFrom: isoDatePlus(0), note: "Uji galeri Persuratan" }, headers: H });
+  const budiEmp = opts.find((o) => o.fullName.startsWith("Budi"))!.id;
+  const orgOf = (emp: string, level: string) => hrApi.post(`/api/employees/${emp}/org`, { data: { jobLevel: level, effectiveFrom: isoDatePlus(0), note: "Uji galeri Persuratan" }, headers: H });
+  const org = async (level: string) => { const a = await orgOf(citraEmp, level); await orgOf(budiEmp, level); return a; }; // Citra = Manajer Pemasaran, Budi = Manajer Operasional (divisi demo)
   try {
     expect((await org("MANAGER")).status()).toBe(200);
     const me = ((await (await citra.get("/api/me")).json()).data as { userId?: string; id?: string });
@@ -489,6 +491,19 @@ test("galeri tampilan DIREKTUR: semua surat, bagan hak tanda tangan, pemegang pe
     await page.goto("/persuratan/pengaturan");
     await expect(page.getByRole("heading", { name: "Bagan hak tanda tangan" })).toBeVisible();
     await shot(page, "45-direktur-bagan-penandatangan");
+    // usulan Register: penawaran hanya Manajer Pemasaran; berita acara & surat tugas hanya Manajer Operasional
+    await page.getByRole("button", { name: "Terapkan usulan Register" }).click();
+    await expect(page.getByRole("status").filter({ hasText: /jenis dibatasi divisi/ })).toBeVisible({ timeout: 8000 });
+    await expect(page.getByRole("row").filter({ hasText: "Penawaran B2B" }).getByText("Semua divisi")).toHaveCount(0, { timeout: 8000 }); // tabel sudah dimuat ulang
+    await page.getByRole("row").filter({ hasText: "Penawaran B2B" }).scrollIntoViewIfNeeded();
+    await shot(page, "48-direktur-bagan-dengan-divisi");
+    const types = (await (await ayuApi.get("/api/letters/types")).json()).data as { id: string; series: string; code: number }[];
+    const signersOf = async (series: string, code: number) => ((await (await ayuApi.get(`/api/letters/signers?typeId=${types.find((t) => t.series === series && t.code === code)!.id}`)).json()).data as { name: string }[]).map((x) => x.name);
+    expect((await signersOf("EKS", 2)).some((n) => n.startsWith("Citra"))).toBe(true);
+    expect((await signersOf("EKS", 2)).some((n) => n.startsWith("Budi"))).toBe(false); // Manajer Operasional tidak dapat menyetujui penawaran
+    expect((await signersOf("EKS", 13)).some((n) => n.startsWith("Budi"))).toBe(true);
+    expect((await signersOf("EKS", 13)).some((n) => n.startsWith("Citra"))).toBe(false);
+    expect((await signersOf("EKS", 11)).filter((n) => /^(Budi|Citra)/.test(n))).toHaveLength(2); // umum: staf tinggal memilih ke siapa mengajukan
     await shot(page, "46-direktur-pengaturan-lengkap", true);
     // ubah hak: beri HR hak menandatangani Surat Pemberitahuan (INT-003) dan lihat pemegang bertambah
     const row = page.getByRole("row").filter({ hasText: "Surat pemberitahuan (internal)" });
@@ -499,7 +514,11 @@ test("galeri tampilan DIREKTUR: semua surat, bagan hak tanda tangan, pemegang pe
     await expect(row.getByText("Maya Anggraini")).toHaveCount(0, { timeout: 8000 });
     await ctx.close();
   } finally {
+    const ts = (await (await ayuApi.get("/api/letters/types")).json()).data as { id: string }[];
+    const dirApi = await session(USERS.pimpinan);
+    for (const t of ts) await dirApi.patch(`/api/letters/types/${t.id}`, { data: { signerDivisionIds: [] }, headers: H, failOnStatusCode: false });
+    await dirApi.dispose();
     await org("STAFF");
-    await hrApi.dispose(); await citra.dispose();
+    await hrApi.dispose(); await citra.dispose(); await ayuApi.dispose();
   }
 });

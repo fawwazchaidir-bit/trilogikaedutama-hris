@@ -11,8 +11,8 @@ export const LETTER_SERIES_LABEL = { EKS: "Eksternal", INT: "Internal" } as cons
 /** Hanya Draf/Dikembalikan yang boleh disunting (oleh pembuatnya). */
 export const isEditable = (s: LetterStatus): boolean => s === "DRAFT" || s === "RETURNED";
 
-export interface SignerPolicy { directorOnly: boolean; signerJobLevels: JobLevel[]; hrCanSign?: boolean }
-export interface PersonFacts { role: "EMPLOYEE" | "HR_ADMIN" | "SUPER_ADMIN"; jobLevel: JobLevel | null; isIntern: boolean; isActive: boolean }
+export interface SignerPolicy { directorOnly: boolean; signerJobLevels: JobLevel[]; hrCanSign?: boolean; /** Kosong/tiada = semua divisi. Hanya berlaku bagi penandatangan tingkat jabatan (Direktur & HR tidak terikat divisi). */ signerDivisionIds?: string[] }
+export interface PersonFacts { role: "EMPLOYEE" | "HR_ADMIN" | "SUPER_ADMIN"; jobLevel: JobLevel | null; isIntern: boolean; isActive: boolean; divisionId?: string | null }
 
 /** Direktur = Super Admin. Selain itu tingkat jabatan yang diizinkan jenis surat, atau HR (role Admin/HR) bila jenis mengizinkan; Magang tidak pernah. */
 export function isEligibleSigner(policy: SignerPolicy, p: PersonFacts): boolean {
@@ -20,7 +20,10 @@ export function isEligibleSigner(policy: SignerPolicy, p: PersonFacts): boolean 
   if (p.role === "SUPER_ADMIN") return true;
   if (policy.directorOnly) return false;
   if (policy.hrCanSign && p.role === "HR_ADMIN") return true;
-  return !!p.jobLevel && policy.signerJobLevels.includes(p.jobLevel);
+  if (!p.jobLevel || !policy.signerJobLevels.includes(p.jobLevel)) return false;
+  // Pembatasan divisi: mis. penawaran hanya Manajer divisi Pemasaran; berita acara hanya Manajer divisi Operasional.
+  if (policy.signerDivisionIds?.length) return !!p.divisionId && policy.signerDivisionIds.includes(p.divisionId);
+  return true;
 }
 
 /** Pembuat yang bukan Direktur tidak boleh menjadi penandatangan dokumennya sendiri. */

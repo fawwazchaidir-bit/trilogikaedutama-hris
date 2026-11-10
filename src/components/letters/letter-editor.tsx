@@ -28,7 +28,7 @@ const ACTION_LABEL: Record<string, string> = {
 };
 const fmt = (iso: string) => new Date(iso).toLocaleString("id-ID", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
 
-type Signer = { userId: string; name: string; title: string | null };
+type Signer = { userId: string; name: string; title: string | null; division?: string | null };
 type Meta = { subject: string; recipientLines: string; recipientPlace: string; attachmentCount: string; attachmentUnit: string; salutation: string; closing: string; cc: string; signerId: string };
 const toMeta = (d: LetterDetailDto): Meta => ({
   subject: d.subject, recipientLines: d.recipientLines.join("\n"), recipientPlace: d.recipientPlace ?? "", attachmentCount: d.attachmentCount ? String(d.attachmentCount) : "", attachmentUnit: d.attachmentUnit ?? "halaman",
@@ -160,9 +160,9 @@ export function LetterEditor({ initial, signers, people, employees = [], me }: {
           </div>
           {side === "data" ? (
             <div className="space-y-3 p-3">
-              <SelectField label="Penandatangan" value={meta.signerId} onChange={set("signerId")} disabled={!editable} error={errors.signerId} hint="Hanya yang berwenang untuk jenis surat ini.">
+              <SelectField label="Penandatangan" value={meta.signerId} onChange={set("signerId")} disabled={!editable} error={errors.signerId} hint="Pilih satu orang yang berwenang menandatangani jenis surat ini (menurut jabatan & divisi). Direktur dapat mengambil alih bila perlu.">
                 <option value="">— pilih —</option>
-                {signers.map((s) => <option key={s.userId} value={s.userId}>{s.name}{s.title ? ` · ${s.title}` : ""}</option>)}
+                {signers.map((s) => <option key={s.userId} value={s.userId}>{s.name}{s.title ? ` · ${s.title}` : ""}{s.division ? ` · ${s.division}` : ""}</option>)}
                 {meta.signerId && !signers.some((s) => s.userId === meta.signerId) && <option value={meta.signerId}>{d.signerName}</option>}
               </SelectField>
               {d.kind === "TUGAS" && <AssignmentDialog letterId={d.id} current={d.assignment} employees={employees} editable={editable} selfEmployeeId={me?.employeeId ?? null} isSuper={!!me?.isSuper} onSaved={(n) => { setD(n); setMeta((m) => ({ ...m, subject: n.subject })); editor?.commands.setContent(n.body, { emitUpdate: false }); setPdfKey((k) => k + 1); setErrors({}); }} />}
