@@ -608,6 +608,9 @@ test("galeri tampilan MAGANG (Citra berstatus Magang): hanya surat umum EKS-011,
     await page.goto("/persuratan");
     await shot(page, "60-magang-daftar-surat");
     await page.getByRole("button", { name: "Buat surat" }).click();
+    await expect(page.getByLabel(/Surat dibuat di luar portal/)).toHaveCount(0); // opsi arsip-saja tidak ditawarkan kepada Magang
+    const arsip = await citra.post("/api/letters", { data: { typeId: types[0]!.id, archiveOnly: true }, headers: H });
+    expect(arsip.status()).toBe(403);
     await shot(page, "61-magang-pilih-jenis");
     await page.keyboard.press("Escape");
     await page.goto(`/persuratan/${id}`);

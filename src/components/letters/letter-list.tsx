@@ -42,7 +42,7 @@ export function LetterTable({ items, showCreator }: { items: LetterDto[]; showCr
 }
 
 /** Tombol + dialog pemilih jenis untuk membuat draf baru. */
-export function NewLetterButton({ types }: { types: LetterTypeDto[] }) {
+export function NewLetterButton({ types, canArchive = true }: { types: LetterTypeDto[]; canArchive?: boolean }) {
   const router = useRouter();
   const toast = useToast();
   const [open, setOpen] = useState(false);
@@ -50,7 +50,7 @@ export function NewLetterButton({ types }: { types: LetterTypeDto[] }) {
   const [archive, setArchive] = useState(false);
   async function pick(id: string) {
     setBusy(id);
-    try { const d = await api<{ id: string }>("/api/letters", { body: { typeId: id, archiveOnly: archive || undefined } }); router.push(`/persuratan/${d.id}`); }
+    try { const d = await api<{ id: string }>("/api/letters", { body: { typeId: id, archiveOnly: (canArchive && archive) || undefined } }); router.push(`/persuratan/${d.id}`); }
     catch (e) { toast.error(errorMessage(e)); setBusy(null); }
   }
   const groups = (["EKS", "INT"] as const).map((s) => ({ s, list: types.filter((t) => t.series === s) })).filter((g) => g.list.length);
@@ -59,7 +59,7 @@ export function NewLetterButton({ types }: { types: LetterTypeDto[] }) {
       <Button variant="primary" onClick={() => setOpen(true)}><FilePlus2 className="size-4" />Buat surat</Button>
       <Dialog open={open} onClose={() => setOpen(false)} title="Pilih jenis surat" description="Isi awal mengikuti templat jenis yang dipilih. Nomor surat diberikan otomatis saat disetujui penandatangan.">
         <div className="space-y-4">
-          <label className="flex items-start gap-2 rounded-lg border border-line bg-canvas p-3 text-sm"><input type="checkbox" checked={archive} onChange={(e) => setArchive(e.target.checked)} className="mt-0.5" /><span><b>Surat dibuat di luar portal (arsip saja)</b><span className="block text-xs text-muted">Hanya minta nomor resmi dan unggah PDF pindaian tanda tangan basah sesudahnya (mis. MoU/PKS).</span></span></label>
+          {canArchive && <label className="flex items-start gap-2 rounded-lg border border-line bg-canvas p-3 text-sm"><input type="checkbox" checked={archive} onChange={(e) => setArchive(e.target.checked)} className="mt-0.5" /><span><b>Surat dibuat di luar portal (arsip saja)</b><span className="block text-xs text-muted">Hanya minta nomor resmi dan unggah PDF pindaian tanda tangan basah sesudahnya (mis. MoU/PKS).</span></span></label>}
           {groups.map((g) => (
             <section key={g.s}>
               <h3 className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-muted">Surat {LETTER_SERIES_LABEL[g.s]}</h3>

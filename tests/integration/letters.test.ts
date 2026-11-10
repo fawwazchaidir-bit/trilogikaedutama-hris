@@ -84,6 +84,12 @@ describe("jenis & penandatangan", () => {
     expect((await signerMatrix(direktur)).rows.find((r) => r.typeId === eks3.id)!.holders.map((h) => h.via)).toContain("HR");
     expect(await fail(updateTypePolicy(manajer, eks3.id, { hrCanSign: false }))).toMatchObject(FORBIDDEN);
   });
+  it("Magang tidak dapat mencatat surat arsip-saja (server menolak); staf biasa boleh", async () => {
+    const umum = await typeOf("EKS", 11); // satu-satunya jenis yang boleh dibuat Magang
+    expect(await fail(createLetter(magang, { typeId: umum.id, archiveOnly: true }))).toMatchObject(FORBIDDEN);
+    expect((await createLetter(magang, { typeId: umum.id })).archiveOnly).toBe(false); // draf biasa tetap boleh
+    expect((await createLetter(staf, { typeId: umum.id, archiveOnly: true })).archiveOnly).toBe(true);
+  });
   it("Magang tidak dapat membuat jenis di luar yang diizinkan", async () => {
     const t = await typeOf("EKS", 3);
     expect(await fail(createLetter(magang, { typeId: t.id }))).toMatchObject(FORBIDDEN);

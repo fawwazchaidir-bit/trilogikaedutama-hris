@@ -108,6 +108,7 @@ export async function createLetter(actor: Actor, raw: unknown): Promise<LetterDe
   if (!facts || (!facts.employeeId && !isDirector(actor))) throw Errors.forbidden("Akun Anda belum tertaut ke data karyawan.");
   const t = await prisma.letterType.findUnique({ where: { id: typeId } });
   if (!t || !t.isActive) throw Errors.notFound("Jenis surat");
+  if (archiveOnly && facts.isIntern) throw Errors.forbidden("Peserta magang tidak dapat mencatat surat arsip.");
   if (t.adminCreateOnly && !actorCan(actor, "assignment:manage")) throw Errors.forbidden("Surat Tugas hanya dapat dibuat oleh HR atau Direktur.");
   if (facts.isIntern && !(t.internAllowed && t.series === "EKS")) throw Errors.forbidden("Peserta magang tidak dapat membuat jenis surat ini.");
   const row = await transaction(async (tx) => {
