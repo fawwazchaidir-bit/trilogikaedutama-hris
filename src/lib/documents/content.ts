@@ -43,11 +43,29 @@ const attrSchemas: Partial<Record<NodeType, z.ZodType>> = {
   /** `label` mengganti penomoran otomatis KESATU, KEDUA… (mis. "Menimbang", "Mengingat", "Menetapkan"). */
   diktumItem: z.object({ label: z.string().max(60).optional() }).strict(),
   table: z.object({ colWidths: z.array(z.number().min(1).max(100)).max(12).optional(), header: z.boolean().optional() }).strict(),
-  tableCell: z.object({ colspan: z.number().int().min(1).max(12).optional(), align: align.optional() }).strict(),
-  tableHeader: z.object({ colspan: z.number().int().min(1).max(12).optional(), align: align.optional() }).strict(),
+  tableCell: z.object({ colspan: z.number().int().min(1).max(12).nullish(), rowspan: z.number().int().min(1).max(50).nullish(), colwidth: z.array(z.number()).nullish() }).strict(),
+  tableHeader: z.object({ colspan: z.number().int().min(1).max(12).nullish(), rowspan: z.number().int().min(1).max(50).nullish(), colwidth: z.array(z.number()).nullish() }).strict(),
   optionalBlock: z.object({ id: z.string().max(60), enabled: z.boolean() }).strict(),
   variable: z.object({ key: z.string().regex(/^[a-z][a-zA-Z0-9_.]{0,59}$/) }).strict(),
 };
+
+/** Bentuk kanonik untuk penyimpanan: buang atribut null/false/default yang ditambahkan editor (round-trip stabil, JSON ringkas). */
+const DEFAULT_ATTRS: Record<string, unknown> = { header: false, firstLine: false, style: "decimal", start: 1, textAlign: "left", labelWidth: null };
+export function normalizeDoc<T extends PmDoc | PmNode>(node: T): T {
+  const out: PmNode = { ...(node as PmNode) };
+  if (out.attrs) {
+    const kept = Object.fromEntries(Object.entries(out.attrs).filter(([k, v]) => {
+      if (v === null || v === undefined) return false;
+      if (k in DEFAULT_ATTRS && v === DEFAULT_ATTRS[k]) return false;
+      if ((k === "colspan" || k === "rowspan") && v === 1) return false;
+      if (k === "level" && out.type === "heading" && v === 3) return false;
+      return true;
+    }));
+    if (Object.keys(kept).length) out.attrs = kept; else delete out.attrs;
+  }
+  if (out.content) out.content = out.content.map((c) => normalizeDoc(c));
+  return out as T;
+}
 
 /** Validasi bentuk dokumen: hanya node/atribut/mark yang dikenal, kedalaman dan ukuran dibatasi. Mengembalikan galat pertama atau null. */
 export function validateDoc(doc: unknown): string | null {

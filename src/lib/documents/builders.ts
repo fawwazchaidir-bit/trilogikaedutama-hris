@@ -19,8 +19,11 @@ export const labels = (rows: PmNode[], attrs: Record<string, unknown> = {}): PmN
 /** Item diktum: tanpa label → KESATU, KEDUA… otomatis; dengan label → label itu (Menimbang, Mengingat, …). */
 export const dk = (content: PmNode[], label?: string): PmNode => ({ type: "diktumItem", ...(label ? { attrs: { label } } : {}), content });
 export const diktum = (items: PmNode[], attrs: Record<string, unknown> = {}): PmNode => ({ type: "diktumList", ...(Object.keys(attrs).length ? { attrs } : {}), content: items });
-export const cell = (c: (PmNode | string)[] | string, attrs: Record<string, unknown> = {}): PmNode => ({ type: "tableCell", ...(Object.keys(attrs).length ? { attrs } : {}), content: [p(c, { textAlign: attrs.align as string | undefined ?? "left" })] });
-export const th = (c: string): PmNode => ({ type: "tableHeader", attrs: { align: "center" }, content: [p([b(c)], { textAlign: "center" })] });
+export const cell = (c: (PmNode | string)[] | string, attrs: Record<string, unknown> = {}): PmNode => {
+  const { align, ...cellAttrs } = attrs;
+  return { type: "tableCell", ...(Object.keys(cellAttrs).length ? { attrs: cellAttrs } : {}), content: [p(c, { textAlign: (align as string | undefined) ?? "left" })] };
+};
+export const th = (c: string): PmNode => ({ type: "tableHeader", content: [p([b(c)], { textAlign: "center" })] });
 export const table = (head: string[], rows: (string | (PmNode | string)[])[][], colWidths?: number[]): PmNode => ({
   type: "table", attrs: { header: true, ...(colWidths ? { colWidths } : {}) },
   content: [{ type: "tableRow", content: head.map(th) }, ...rows.map((r) => ({ type: "tableRow", content: r.map((c) => cell(c as never)) } as PmNode))],
