@@ -15,7 +15,7 @@ import { formatDocNumber } from "@/lib/documents/text";
 import { requiredText, uuid } from "@/lib/validation/common";
 import type { Paged } from "@/lib/types";
 import { ensureDefaultTypes } from "./types";
-import { isDirector, loadVisible, personFacts, requireLetters } from "./access";
+import { isDirector, loadVisible, personFacts, requireLetters, LETTER_INCLUDE } from "./access";
 import { getLetterSettings, buildFrame } from "./frame";
 import { renderDocumentPdf } from "../../pdf/document-render";
 
@@ -25,14 +25,16 @@ export interface LetterDto {
   number: string | null; subject: string; issueDate: string | null; createdAt: string; updatedAt: string; submittedAt: string | null;
   creatorId: string; creatorName: string; signerId: string | null; signerName: string | null; verifyToken: string; hasPdf: boolean;
 }
+export interface SignatoryDto { id: string; position: number; kind: "INTERNAL" | "EXTERNAL"; userId: string | null; name: string; title: string | null; org: string | null; signedAt: string | null; isMe: boolean }
 export interface LetterDetailDto extends LetterDto {
+  confidential: boolean; multiSigner: boolean; signatories: SignatoryDto[];
   recipientLines: string[]; recipientPlace: string | null; attachmentCount: number | null; attachmentUnit: string | null; salutation: string | null; closing: string | null;
   cc: string[]; body: PmDoc; variables: Record<string, string>; returnNote: string | null; rejectNote: string | null; cancelNote: string | null;
   events: LetterEventDto[];
-  can: { edit: boolean; submit: boolean; withdraw: boolean; review: boolean; takeOver: boolean; cancel: boolean };
+  can: { edit: boolean; submit: boolean; withdraw: boolean; review: boolean; takeOver: boolean; cancel: boolean; cosign: boolean };
 }
 
-const include = { type: { select: { id: true, series: true, code: true, name: true, kind: true } } } as const;
+const include = LETTER_INCLUDE;
 type Row = Prisma.LetterDocumentGetPayload<{ include: typeof include }>;
 
 async function names(ids: (string | null)[]): Promise<Map<string, string>> {
@@ -53,9 +55,16 @@ async function detail(actor: Actor, r: Row): Promise<LetterDetailDto> {
   const ls = await getLetterSettings();
   const mine = r.creatorId === actor.userId;
   const isSigner = r.signerId === actor.userId;
+  const sigRows = await prisma.letterSignatory.findMany({ where: { documentId: r.id }, orderBy: { position: "asc" } });
+  const sigFacts = new Map<string, { name: string; title: string | null }>();
+  for (const sg of sigRows) if (sg.userId) { const f = await personFacts(sg.userId); if (f) sigFacts.set(sg.userId, { name: f.name, title: f.title }); }
+  const signatories: SignatoryDto[] = sigRows.map((sg) => ({
+    id: sg.id, position: sg.position, kind: sg.kind, userId: sg.userId, name: sg.userId ? sigFacts.get(sg.userId)?.name ?? "—" : sg.name ?? "", title: sg.userId ? sigFacts.get(sg.userId)?.title ?? null : sg.title,
+    org: sg.org, signedAt: sg.signedAt?.toISOString() ?? null, isMe: !!sg.userId && sg.userId === actor.userId,
+  }));
   const takeOver = isDirector(actor) && !isSigner && r.status === "IN_REVIEW" && canTakeOver(r.submittedAt, new Date(), ls.escalationDays, env().APP_TIMEZONE);
   return {
-    ...toDto(r, n), recipientLines: r.recipientLines, recipientPlace: r.recipientPlace, attachmentCount: r.attachmentCount, attachmentUnit: r.attachmentUnit,
+    ...toDto(r, n), confidential: r.type.confidential, multiSigner: r.type.multiSigner, signatories, recipientLines: r.recipientLines, recipientPlace: r.recipientPlace, attachmentCount: r.attachmentCount, attachmentUnit: r.attachmentUnit,
     salutation: r.salutation, closing: r.closing, cc: r.cc, body: r.body as unknown as PmDoc, variables: (r.variables as Record<string, string> | null) ?? {},
     returnNote: r.returnNote, rejectNote: r.rejectNote, cancelNote: r.cancelNote,
     events: ev.map((e) => ({ id: e.id, action: e.action, note: e.note, at: e.at.toISOString(), actorName: n.get(e.actorId) ?? "—" })),
@@ -63,10 +72,12 @@ async function detail(actor: Actor, r: Row): Promise<LetterDetailDto> {
       edit: mine && isEditable(r.status), submit: mine && isEditable(r.status), withdraw: mine && r.status === "IN_REVIEW",
       review: r.status === "IN_REVIEW" && (isSigner || takeOver), takeOver,
       cancel: r.status === "ISSUED" && (isDirector(actor) || isSigner),
+      cosign: r.status === "IN_REVIEW" && signatories.some((x) => x.isMe && x.kind === "INTERNAL" && !x.signedAt),
     },
   };
 }
 
+const noteFor = (d: { type: { confidential: boolean; name: string }; subject: string }) => (d.type.confidential ? d.type.name : d.subject ? `${d.type.name} — ${d.subject}` : d.type.name);
 const event = (tx: Prisma.TransactionClient, documentId: string, actor: Actor, action: string, note?: string | null) =>
   tx.letterEvent.create({ data: { documentId, actorId: actor.userId, action, note: note ?? null } });
 
@@ -106,13 +117,16 @@ const editSchema = z.object({
   closing: z.string().trim().max(120).nullable().optional(),
   cc: z.array(z.string().trim().min(1).max(160)).max(10).optional(),
   signerId: uuid.nullable().optional(),
+  signatories: z.array(z.object({
+    kind: z.enum(["INTERNAL", "EXTERNAL"]), userId: uuid.nullish(), name: z.string().trim().max(120).nullish(), title: z.string().trim().max(120).nullish(), org: z.string().trim().max(160).nullish(),
+  })).max(6).optional(),
   variables: z.record(z.string().regex(/^[a-z][a-zA-Z0-9_.]{0,59}$/), z.string().max(500)).optional(),
   body: z.unknown().optional(),
 }).strict();
 
 async function assertSignerOk(actor: Actor, typeId: string, signerId: string, creatorId: string): Promise<void> {
   const [t, f, cf] = await Promise.all([prisma.letterType.findUnique({ where: { id: typeId } }), personFacts(signerId), personFacts(creatorId)]);
-  if (!t || !f || !isEligibleSigner({ directorOnly: t.directorOnly, signerJobLevels: t.signerJobLevels }, f)) throw Errors.validation("Penandatangan tidak berwenang untuk jenis surat ini.", { signerId: "Pilih penandatangan yang berwenang" });
+  if (!t || !f || !isEligibleSigner({ directorOnly: t.directorOnly, signerJobLevels: t.signerJobLevels, hrCanSign: t.hrCanSign }, f)) throw Errors.validation("Penandatangan tidak berwenang untuk jenis surat ini.", { signerId: "Pilih penandatangan yang berwenang" });
   if (signerId === creatorId && !(cf && canSignOwn(cf))) throw Errors.validation("Anda tidak dapat menandatangani surat yang Anda buat sendiri.", { signerId: "Pilih penandatangan lain" });
 }
 
@@ -132,6 +146,26 @@ export async function updateLetter(actor: Actor, id: string, raw: unknown): Prom
     if (input[k] !== undefined) (data as Record<string, unknown>)[k] = input[k];
   }
   if (input.variables !== undefined) data.variables = input.variables;
+  if (input.signatories !== undefined) {
+    if (!d.type.multiSigner) throw Errors.validation("Jenis surat ini hanya memiliki satu penandatangan.", { signatories: "Tidak didukung" });
+    const seen = new Set<string>();
+    for (const [i, sg] of input.signatories.entries()) {
+      if (sg.kind === "INTERNAL") {
+        if (!sg.userId) throw Errors.validation("Pilih akun penandatangan internal.", { signatories: `Baris ${i + 1}: pilih akun` });
+        if (sg.userId === d.signerId || seen.has(sg.userId)) throw Errors.validation("Penandatangan yang sama dipilih dua kali.", { signatories: `Baris ${i + 1}: duplikat` });
+        seen.add(sg.userId);
+        const f = await personFacts(sg.userId);
+        if (!f || !f.isActive || f.isIntern) throw Errors.validation("Penandatangan internal harus karyawan aktif (bukan magang).", { signatories: `Baris ${i + 1}: tidak valid` });
+      } else if (!sg.name?.trim()) throw Errors.validation("Isi nama penandatangan mitra.", { signatories: `Baris ${i + 1}: nama wajib` });
+    }
+    const sigs = input.signatories;
+    const row = await transaction(async (tx) => {
+      await tx.letterSignatory.deleteMany({ where: { documentId: id } });
+      await tx.letterSignatory.createMany({ data: sigs.map((sg, i) => ({ documentId: id, position: i, kind: sg.kind, userId: sg.kind === "INTERNAL" ? sg.userId! : null, name: sg.kind === "EXTERNAL" ? sg.name!.trim() : null, title: sg.title?.trim() || null, org: sg.org?.trim() || null })) });
+      return tx.letterDocument.update({ where: { id }, data, include });
+    });
+    return detail(actor, row);
+  }
   const row = await prisma.letterDocument.update({ where: { id }, data, include });
   return detail(actor, row);
 }
@@ -141,11 +175,13 @@ export async function updateLetter(actor: Actor, id: string, raw: unknown): Prom
 export async function listLetters(actor: Actor, q: { scope?: "mine" | "review" | "all"; status?: string; q?: string; page?: number; pageSize?: number }): Promise<Paged<LetterDto>> {
   requireLetters();
   const pageSize = Math.min(Math.max(q.pageSize ?? 20, 1), 100); const page = Math.max(q.page ?? 1, 1);
-  const scope = q.scope === "all" && isDirector(actor) ? "all" : q.scope === "review" ? "review" : "mine";
+  const scope = q.scope === "all" && (isDirector(actor) || actor.role === "HR_ADMIN") ? "all" : q.scope === "review" ? "review" : "mine";
   const where: Prisma.LetterDocumentWhereInput = {
-    ...(scope === "mine" ? { creatorId: actor.userId } : scope === "review" ? { signerId: actor.userId, status: { not: "DRAFT" } } : {}),
+    ...(scope === "mine" ? { creatorId: actor.userId }
+      : scope === "review" ? { OR: [{ signerId: actor.userId, status: { not: "DRAFT" as const } }, { status: "IN_REVIEW" as const, signatories: { some: { userId: actor.userId } } }] }
+      : isDirector(actor) ? {} : { type: { hrCanView: true } }),
     ...(q.status && ["DRAFT", "IN_REVIEW", "RETURNED", "ISSUED", "REJECTED", "CANCELLED"].includes(q.status) ? { status: q.status as LetterStatus } : {}),
-    ...(q.q?.trim() ? { OR: [{ subject: { contains: q.q.trim(), mode: "insensitive" } }, { number: { contains: q.q.trim(), mode: "insensitive" } }] } : {}),
+    ...(q.q?.trim() ? { AND: [{ OR: [{ subject: { contains: q.q.trim(), mode: "insensitive" } }, { number: { contains: q.q.trim(), mode: "insensitive" } }] }] } : {}),
   };
   const [total, rows] = await Promise.all([
     prisma.letterDocument.count({ where }),
@@ -157,12 +193,16 @@ export async function listLetters(actor: Actor, q: { scope?: "mine" | "review" |
 
 export async function getLetter(actor: Actor, id: string): Promise<LetterDetailDto> {
   const d = await loadVisible(actor, id);
+  // Surat Rahasia: pembukaan oleh pihak di luar pembuat/penandatangan (Direktur, HR) dicatat di Audit Log.
+  if (d.type.confidential && d.creatorId !== actor.userId && d.signerId !== actor.userId && !d.signatories.some((s) => s.userId === actor.userId)) {
+    await writeAudit(prisma, actor, { action: "letter.view_confidential", entityType: "LetterDocument", entityId: id, summary: `Surat Rahasia (${d.type.name}) dibuka` });
+  }
   return detail(actor, d as Row);
 }
 
 /** Jumlah surat yang menunggu tinjauan pelaku sebagai penandatangan (lencana menu). */
 export async function pendingReviewCount(actor: Actor): Promise<number> {
-  return prisma.letterDocument.count({ where: { signerId: actor.userId, status: "IN_REVIEW" } });
+  return prisma.letterDocument.count({ where: { status: "IN_REVIEW", OR: [{ signerId: actor.userId }, { signatories: { some: { userId: actor.userId, signedAt: null } } }] } });
 }
 
 /** PDF pratinjau (draf berwatermark) atau PDF terbit tersimpan. */
@@ -201,7 +241,7 @@ export async function submitLetter(actor: Actor, id: string): Promise<LetterDeta
     const u = await tx.letterDocument.update({ where: { id }, data: { status: "IN_REVIEW", submittedAt: new Date(), returnNote: null }, include });
     await event(tx, id, actor, "SUBMITTED");
     await writeAudit(tx, actor, { action: "letter.submit", entityType: "LetterDocument", entityId: id, summary: `Surat (${d.type.name}) diajukan ke penandatangan` });
-    await notifyUsers(tx, [d.signerId!], { type: "letter.review", title: "Surat menunggu tanda tangan Anda", body: `${d.type.name}${d.subject ? ` — ${d.subject}` : ""}`, href: `/persuratan/${id}` });
+    await notifyUsers(tx, [d.signerId!, ...d.signatories.map((s) => s.userId).filter((x): x is string => !!x)], { type: "letter.review", title: "Surat menunggu tanda tangan Anda", body: noteFor(d), href: `/persuratan/${id}` });
     return u;
   });
   return detail(actor, row);
@@ -273,6 +313,24 @@ export async function cancelLetter(actor: Actor, id: string, raw: unknown): Prom
   return detail(actor, row);
 }
 
+/** Penandatangan tambahan internal menandatangani bagiannya; penandatangan utama baru dapat menerbitkan setelah semuanya selesai. */
+export async function cosignLetter(actor: Actor, id: string): Promise<LetterDetailDto> {
+  const d = await loadVisible(actor, id);
+  if (d.status !== "IN_REVIEW") throw Errors.conflict("Surat tidak sedang menunggu tanda tangan.");
+  const mine = d.signatories.find((s) => s.userId === actor.userId);
+  if (!mine) throw Errors.forbidden();
+  const row = await transaction(async (tx) => {
+    const r = await tx.letterSignatory.updateMany({ where: { id: mine.id, signedAt: null }, data: { signedAt: new Date() } });
+    if (r.count === 0) throw Errors.conflict("Anda sudah menandatangani surat ini.");
+    await event(tx, id, actor, "COSIGNED");
+    await writeAudit(tx, actor, { action: "letter.cosign", entityType: "LetterDocument", entityId: id, summary: `Penandatangan tambahan menandatangani (${d.type.name})` });
+    const left = await tx.letterSignatory.count({ where: { documentId: id, kind: "INTERNAL", signedAt: null } });
+    await notifyUsers(tx, [d.creatorId, ...(left === 0 && d.signerId ? [d.signerId] : [])], { type: "letter.cosigned", title: left === 0 ? "Semua penandatangan tambahan sudah menandatangani" : "Penandatangan tambahan menandatangani", body: noteFor(d), href: `/persuratan/${id}` });
+    return tx.letterDocument.findUniqueOrThrow({ where: { id }, include });
+  });
+  return detail(actor, row);
+}
+
 // ───────────────────────── Persetujuan = penomoran + PDF terkunci ─────────────────────────
 
 /**
@@ -284,15 +342,17 @@ export async function approveLetter(actor: Actor, id: string): Promise<LetterDet
   const takeover = await assertReviewer(actor, pre);
   const typeFacts = await prisma.letterType.findUniqueOrThrow({ where: { id: pre.typeId } });
   const me = await personFacts(actor.userId);
-  if (!me || !isEligibleSigner({ directorOnly: typeFacts.directorOnly, signerJobLevels: typeFacts.signerJobLevels }, me)) throw Errors.forbidden("Anda tidak lagi berwenang menandatangani jenis surat ini.");
+  if (!me || !isEligibleSigner({ directorOnly: typeFacts.directorOnly, signerJobLevels: typeFacts.signerJobLevels, hrCanSign: typeFacts.hrCanSign }, me)) throw Errors.forbidden("Anda tidak lagi berwenang menandatangani jenis surat ini.");
   if (pre.creatorId === actor.userId && !isDirector(actor)) throw Errors.forbidden("Tidak dapat menyetujui surat yang Anda buat sendiri.");
   const issueDate = new Date().toLocaleDateString("en-CA", { timeZone: env().APP_TIMEZONE });
   const year = Number(issueDate.slice(0, 4));
   const row = await transaction(async (tx) => {
-    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`letters:${year}`}))`;
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`letters:${pre.series}:${year}`}))`;
     const cur = await tx.letterDocument.findUniqueOrThrow({ where: { id }, include });
     if (cur.status !== "IN_REVIEW") throw Errors.conflict("Surat sudah diproses pihak lain.");
-    const counter = await tx.letterCounter.upsert({ where: { year }, create: { year, lastSeq: 1 }, update: { lastSeq: { increment: 1 } } });
+    const unsigned = await tx.letterSignatory.count({ where: { documentId: id, kind: "INTERNAL", signedAt: null } });
+    if (unsigned > 0) throw Errors.conflict(`Masih ada ${unsigned} penandatangan internal yang belum menandatangani.`);
+    const counter = await tx.letterCounter.upsert({ where: { series_year: { series: pre.series, year } }, create: { series: pre.series, year, lastSeq: 1 }, update: { lastSeq: { increment: 1 } } });
     const seq = counter.lastSeq;
     const number = formatDocNumber({ seq, series: pre.series, typeCode: String(typeFacts.code).padStart(3, "0"), date: issueDate });
     const { frame, missing, signer } = await buildFrame(cur, { number, date: issueDate, signerUserId: actor.userId, draft: false });
@@ -311,7 +371,7 @@ export async function approveLetter(actor: Actor, id: string): Promise<LetterDet
     });
     await event(tx, id, actor, takeover ? "TAKEOVER_ISSUED" : "ISSUED", number);
     await writeAudit(tx, actor, { action: "letter.issue", entityType: "LetterDocument", entityId: id, summary: `Surat ${number} diterbitkan (${cur.type.name})`, after: { number, sha256: sha, takeover } });
-    await notifyUsers(tx, [cur.creatorId], { type: "letter.issued", title: `Surat terbit: ${number}`, body: cur.subject || cur.type.name, href: `/persuratan/${id}` });
+    await notifyUsers(tx, [cur.creatorId], { type: "letter.issued", title: `Surat terbit: ${number}`, body: cur.type.confidential ? cur.type.name : cur.subject || cur.type.name, href: `/persuratan/${id}` });
     return u;
   });
   return detail(actor, row);

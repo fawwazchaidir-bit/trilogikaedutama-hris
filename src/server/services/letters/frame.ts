@@ -40,6 +40,14 @@ export async function buildFrame(
     orgName: company.name.toUpperCase(), title: signerTitle, name: signerName,
     signature: await img(signerRow?.signatureFileId), stamp: await img(ls.stampFileId),
   };
+  const co = await prisma.letterSignatory.findMany({ where: { documentId: d.id }, orderBy: { position: "asc" } });
+  const coSigs: DocSignatory[] = [];
+  for (const c of co) {
+    if (c.kind === "EXTERNAL") { coSigs.push({ orgName: c.org ?? "", title: c.title ?? "", name: c.name ?? "", signature: null, stamp: null, external: true }); continue; }
+    const cf = c.userId ? await personFacts(c.userId) : null;
+    const row = c.userId ? await prisma.letterSigner.findUnique({ where: { userId: c.userId } }) : null;
+    coSigs.push({ orgName: company.name.toUpperCase(), title: cf?.title ?? "", name: cf?.name ?? "—", signature: c.signedAt || !o.draft ? await img(row?.signatureFileId) : null, stamp: null });
+  }
   const isSk = d.type.kind === "SK";
   const contact = [company.email ? `Email: ${company.email}` : null, company.phone ? `${company.phone} (Hotline)` : null, company.website].filter(Boolean).join(" | ");
   const frame: DocFrame = {
@@ -50,7 +58,7 @@ export async function buildFrame(
       prefix: "Kepada Yth.", lines: d.recipientLines.map((text, i) => ({ text, bold: i < 2 })), cityPrefix: "Di", place: d.recipientPlace ?? "Tempat",
     },
     salutation: isSk ? null : d.salutation, body: resolved.doc, closing: isSk ? null : d.closing,
-    signatories: [sign], cc: d.cc, attachments: [],
+    signatories: [sign, ...coSigs], cc: d.cc, attachments: [],
     letterhead: {
       logo: await img(company.logoFileId), tagline: company.tagline ?? "", name: company.name.toUpperCase(),
       addressLines: company.address ? [company.address] : [], contactLine: contact, idLine: ls.idLine,

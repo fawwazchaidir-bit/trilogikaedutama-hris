@@ -15,12 +15,12 @@ export interface PublicVerification {
  */
 export async function verifyByToken(token: string): Promise<PublicVerification | null> {
   if (!/^[0-9a-f]{32}$/.test(token)) return null;
-  const d = await prisma.letterDocument.findUnique({ where: { verifyToken: token }, include: { type: { select: { name: true, kind: true } } } });
+  const d = await prisma.letterDocument.findUnique({ where: { verifyToken: token }, include: { type: { select: { name: true, kind: true, confidential: true } } } });
   if (!d || (d.status !== "ISSUED" && d.status !== "CANCELLED") || !d.number || !d.pdfSha256 || !d.issueDate) return null;
   const snap = (d.snapshot ?? {}) as { signer?: { name?: string; title?: string } };
   const iso = d.issueDate.toISOString().slice(0, 10);
   return {
-    state: d.status === "ISSUED" ? "VALID" : "CANCELLED", number: d.number, typeName: d.type.name, subject: d.type.kind === "SK" ? null : d.subject || null,
+    state: d.status === "ISSUED" ? "VALID" : "CANCELLED", number: d.number, typeName: d.type.name, subject: d.type.kind === "SK" || d.type.confidential ? null : d.subject || null,
     issueDate: iso, issueDateText: longDate(iso), signerName: snap.signer?.name ?? "—", signerTitle: snap.signer?.title ?? "", sha256: d.pdfSha256, cancelledNote: d.status === "CANCELLED" ? d.cancelNote : null,
   };
 }

@@ -13,8 +13,8 @@ ada nomor bolong akibat draf yang dibatalkan.
 
 - Penghitung `letter_counters` per **(seri, tahun)**; dinaikkan dalam transaksi persetujuan dengan *advisory lock*. Bila penerbitan gagal
   (render PDF, dsb.) seluruh transaksi di-rollback dan nomor tidak terpakai.
-- Mengikuti Register Excel: **satu nomor urut global per tahun untuk semua seri & jenis** (kembali ke 001 di tahun baru; nomor surat batal tidak dipakai ulang).
-  Pengaturan → "Nomor urut" menaikkan nomor terakhir untuk melanjutkan register yang sudah berjalan (hanya boleh naik).
+- **Nomor urut dipisah per seri**: TE-EKS dan TE-INT masing-masing 001, 002, … per tahun (keputusan Direktur; berbeda dari Excel yang global), kembali ke 001 di tahun baru;
+  nomor surat batal tidak dipakai ulang. Pengaturan → "Nomor urut" (Direktur) menaikkan nomor terakhir per seri/tahun untuk melanjutkan register yang sudah berjalan (hanya boleh naik).
 - **Kode jenis = master Excel** (sheet Referensi): EKS-001 Penawaran B2C, 002 Penawaran B2B, 003 Permohonan narasumber, 004 Penawaran/ajakan kerja sama,
   005 Permohonan & perizinan, 006 Undangan, 007 Pemberitahuan, 008 Sertifikasi/uji kompetensi, 009 Keterangan & rekomendasi, 010 Keuangan & penagihan,
   011 Umum lainnya, 012 Perjanjian (MoU/PKS), 013 Berita acara; INT-001 SK, 002 Surat tugas, 003 Pemberitahuan, 004 Undangan rapat, 005 Edaran,
@@ -34,6 +34,17 @@ ada nomor bolong akibat draf yang dibatalkan.
 
 Kebijakan jenis (`directorOnly`, `signerJobLevels`, `internAllowed`, `isActive`) diatur Direktur di **Persuratan → Pengaturan**.
 Seluruh 24 jenis katalog master disemai idempoten (penandatangan awal: Direktur saja untuk 006–010 & 012 EKS, INT-001/006/010; selain itu Direktur atau Manajer). Isi awal = templat per jenis (`src/lib/documents/templates.ts`); teks panduan `[…]` yang belum diganti memblokir pengajuan.
+
+## Tahap 2a (ditambahkan)
+
+- **HR sebagai penandatangan**: khusus INT-007 (izin/persetujuan), INT-010 (keterangan kerja), INT-011 (administrasi internal) — flag `hrCanSign` pada jenis.
+- **Surat Rahasia** (INT-006, 009, 010; flag `confidential`): hanya pembuat, penandatangan, penandatangan tambahan, dan Direktur; HR hanya INT-010 (`hrCanView`).
+  Perihal tidak tampil di halaman verifikasi dan notifikasi; pembukaan oleh Direktur/HR dicatat di Audit Log (`letter.view_confidential`).
+- **Multi-penandatangan** (EKS-013, INT-008; `multiSigner`): penandatangan utama + hingga 6 penandatangan tambahan — *internal* (akun portal; wajib menandatangani lewat
+  tombol "Tandatangani bagian saya" sebelum surat dapat diterbitkan) atau *mitra luar* (slot kosong di PDF untuk tanda tangan basah). Tabel `letter_signatories` dikunci trigger sejak Menunggu.
+- **Tanda tangan pribadi**: Direktur untuk siapa saja; pemilik akun sendiri bila ia Direktur/Supervisor/Manajer/HR (tombol "Tanda tangan saya"). Berkas `LETTER_SIGNATURE`
+  hanya dapat dibuka pemilik & Direktur. **Cap** (satu, diunggah Direktur) dipakai pada semua surat, internal maupun eksternal.
+- Nomor urut **dipisah per seri** (EKS/INT), bukan global seperti Excel.
 
 ## Dokumen & PDF terkunci
 

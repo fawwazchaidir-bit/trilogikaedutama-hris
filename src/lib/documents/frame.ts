@@ -16,6 +16,8 @@ export interface DocLetterhead {
 export interface DocSignatory {
   orgName: string; title: string; name: string;
   signature: DocImage | null; stamp: DocImage | null;
+  /** Slot tanda tangan basah mitra luar: ruang kosong (tanpa gambar) di PDF. */
+  external?: boolean;
   signaturePlacement?: ImagePlacement; stampPlacement?: ImagePlacement;
 }
 export interface DocRecipient { prefix: string | null; lines: { text: string; bold?: boolean }[]; cityPrefix: string | null; place: string | null }

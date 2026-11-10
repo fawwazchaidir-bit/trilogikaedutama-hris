@@ -12,20 +12,26 @@ import { personFacts, requireLetters, isDirector } from "./access";
 export interface LetterTypeDto {
   id: string; series: "EKS" | "INT"; code: number; codeText: string; name: string; description: string | null; kind: "SURAT" | "SK";
   directorOnly: boolean; signerJobLevels: JobLevel[]; internAllowed: boolean; isActive: boolean;
+  confidential: boolean; hrCanSign: boolean; hrCanView: boolean; multiSigner: boolean;
 }
-const dto = (t: { id: string; series: "EKS" | "INT"; code: number; name: string; description: string | null; kind: string; directorOnly: boolean; signerJobLevels: JobLevel[]; internAllowed: boolean; isActive: boolean }): LetterTypeDto => ({
+const dto = (t: { id: string; series: "EKS" | "INT"; code: number; name: string; description: string | null; kind: string; directorOnly: boolean; signerJobLevels: JobLevel[]; internAllowed: boolean; isActive: boolean; confidential: boolean; hrCanSign: boolean; hrCanView: boolean; multiSigner: boolean }): LetterTypeDto => ({
   id: t.id, series: t.series, code: t.code, codeText: String(t.code).padStart(3, "0"), name: t.name, description: t.description, kind: t.kind === "SK" ? "SK" : "SURAT",
   directorOnly: t.directorOnly, signerJobLevels: t.signerJobLevels, internAllowed: t.internAllowed, isActive: t.isActive,
+  confidential: t.confidential, hrCanSign: t.hrCanSign, hrCanView: t.hrCanView, multiSigner: t.multiSigner,
 });
 
 /** Semai jenis bawaan yang belum ada (tidak menimpa kebijakan yang sudah diubah Direktur). Idempoten. */
 export async function ensureDefaultTypes(): Promise<void> {
-  const have = await prisma.letterType.findMany({ select: { id: true, series: true, code: true, name: true, _count: { select: { documents: true } } } });
+  const have = await prisma.letterType.findMany({ select: { id: true, series: true, code: true, name: true, _count: { select: { documents: true } }, confidential: true, hrCanSign: true, hrCanView: true, multiSigner: true } });
   const key = (s: string, c: number) => `${s}:${c}`;
   const byKey = new Map(have.map((h) => [key(h.series, h.code), h]));
   for (const t of DEFAULT_LETTER_TYPES) {
     const cur = byKey.get(key(t.series, t.code));
     if (cur) {
+      // Sifat struktural (rahasia/HR/multi-penandatangan) selalu mengikuti katalog master.
+      if (cur.confidential !== t.confidential || cur.hrCanSign !== t.hrCanSign || cur.hrCanView !== t.hrCanView || cur.multiSigner !== t.multiSigner) {
+        await prisma.letterType.update({ where: { id: cur.id }, data: { confidential: t.confidential, hrCanSign: t.hrCanSign, hrCanView: t.hrCanView, multiSigner: t.multiSigner } });
+      }
       // Katalog master berubah (mis. kode lama diganti): selaraskan nama/templat HANYA bila jenis itu belum dipakai satu surat pun. Kebijakan tidak disentuh.
       if (cur.name !== t.name && cur._count.documents === 0) {
         await prisma.letterType.update({ where: { id: cur.id }, data: { name: t.name, description: t.description, kind: t.kind, templateBody: t.template as object, defaultSalutation: t.salutation, defaultClosing: t.closing } });
@@ -35,7 +41,7 @@ export async function ensureDefaultTypes(): Promise<void> {
     await prisma.letterType.create({
       data: {
         series: t.series, code: t.code, name: t.name, description: t.description, kind: t.kind, directorOnly: t.directorOnly, signerJobLevels: t.signerJobLevels,
-        internAllowed: t.internAllowed, templateBody: t.template as object, defaultSalutation: t.salutation, defaultClosing: t.closing,
+        internAllowed: t.internAllowed, confidential: t.confidential, hrCanSign: t.hrCanSign, hrCanView: t.hrCanView, multiSigner: t.multiSigner, templateBody: t.template as object, defaultSalutation: t.salutation, defaultClosing: t.closing,
       },
     }).catch((e: { code?: string }) => { if (e.code !== "P2002") throw e; }); // balapan dua proses: sudah dibuat pihak lain
   }
@@ -60,7 +66,7 @@ export async function listSigners(actor: Actor, typeId: string): Promise<{ userI
   const out: { userId: string; name: string; title: string | null }[] = [];
   for (const u of users) {
     const f = await personFacts(u.id);
-    if (f && isEligibleSigner({ directorOnly: t.directorOnly, signerJobLevels: t.signerJobLevels }, f)) out.push({ userId: u.id, name: f.name, title: f.title });
+    if (f && isEligibleSigner({ directorOnly: t.directorOnly, signerJobLevels: t.signerJobLevels, hrCanSign: t.hrCanSign }, f)) out.push({ userId: u.id, name: f.name, title: f.title });
   }
   return out.sort((a, b) => a.name.localeCompare(b.name, "id"));
 }
@@ -86,4 +92,11 @@ export async function updateTypePolicy(actor: Actor, id: string, raw: unknown): 
     return u;
   });
   return dto(after);
+}
+
+/** Karyawan aktif (bukan magang) bertaut akun — kandidat penandatangan tambahan berita acara. */
+export async function listCoSignerCandidates(actor: Actor): Promise<{ userId: string; name: string; title: string | null }[]> {
+  requireLetters();
+  const rows = await prisma.employee.findMany({ where: { isActive: true, employmentStatus: { not: "INTERN" }, user: { isActive: true } }, select: { userId: true, fullName: true, position: true }, orderBy: { fullName: "asc" } });
+  return rows.filter((r): r is typeof r & { userId: string } => !!r.userId && r.userId !== actor.userId).map((r) => ({ userId: r.userId, name: r.fullName, title: r.position }));
 }

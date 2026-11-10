@@ -27,16 +27,23 @@ export async function personFacts(userId: string): Promise<(PersonFacts & { name
 }
 
 /** Dokumen terlihat bagi pembuat, penandatangan, dan Direktur; selain itu 404 (anti-IDOR). */
-export async function loadVisible(actor: Actor, id: string): Promise<LetterDocument & { type: { id: string; series: "EKS" | "INT"; code: number; name: string; kind: string } }> {
+export type LetterWithType = LetterDocument & { type: { id: string; series: "EKS" | "INT"; code: number; name: string; kind: string; confidential: boolean; hrCanView: boolean; multiSigner: boolean }; signatories: { id: string; userId: string | null }[] };
+export const LETTER_INCLUDE = { type: { select: { id: true, series: true, code: true, name: true, kind: true, confidential: true, hrCanView: true, multiSigner: true } }, signatories: { select: { id: true, userId: true }, orderBy: { position: "asc" as const } } };
+
+/** Pihak yang boleh melihat: pembuat, penandatangan utama, penandatangan tambahan internal, Direktur, dan HR untuk jenis yang memberinya hak lihat. */
+export function canSee(actor: Actor, d: LetterWithType): boolean {
+  return d.creatorId === actor.userId || d.signerId === actor.userId || isDirector(actor) || d.signatories.some((s) => s.userId === actor.userId) || (actor.role === "HR_ADMIN" && d.type.hrCanView);
+}
+export async function loadVisible(actor: Actor, id: string): Promise<LetterWithType> {
   requireLetters();
-  const d = await prisma.letterDocument.findUnique({ where: { id }, include: { type: { select: { id: true, series: true, code: true, name: true, kind: true } } } });
-  if (!d || !(d.creatorId === actor.userId || d.signerId === actor.userId || isDirector(actor))) throw Errors.notFound("Surat");
+  const d = await prisma.letterDocument.findUnique({ where: { id }, include: LETTER_INCLUDE });
+  if (!d || !canSee(actor, d)) throw Errors.notFound("Surat");
   return d;
 }
 
 /** PDF terbit dapat dibuka oleh pihak yang melihat dokumennya. */
 export async function canReadLetterPdf(actor: Actor, fileId: string): Promise<boolean> {
   if (!lettersEnabled()) return false;
-  const d = await prisma.letterDocument.findFirst({ where: { pdfFileId: fileId }, select: { creatorId: true, signerId: true } });
-  return !!d && (d.creatorId === actor.userId || d.signerId === actor.userId || isDirector(actor));
+  const d = await prisma.letterDocument.findFirst({ where: { pdfFileId: fileId }, include: LETTER_INCLUDE });
+  return !!d && canSee(actor, d);
 }

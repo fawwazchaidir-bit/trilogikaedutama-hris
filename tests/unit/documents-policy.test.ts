@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { canSignOwn, canTakeOver, isEditable, isEligibleSigner, workingDaysElapsed } from "@/lib/documents/policy";
+import { canHoldSignature, canSignOwn, canTakeOver, isEditable, isEligibleSigner, workingDaysElapsed } from "@/lib/documents/policy";
 import { hasPlaceholder, normalizeDoc } from "@/lib/documents/content";
 import { doc, p } from "@/lib/documents/builders";
 
@@ -16,6 +16,15 @@ describe("kewenangan penandatangan", () => {
     expect(isEligibleSigner(open, person({ jobLevel: "MANAGER", isActive: false }))).toBe(false);
     expect(isEligibleSigner({ directorOnly: true, signerJobLevels: ["MANAGER"] }, person({ jobLevel: "MANAGER" }))).toBe(false);
     expect(isEligibleSigner({ directorOnly: true, signerJobLevels: [] }, person({ role: "SUPER_ADMIN", jobLevel: null }))).toBe(true);
+  });
+  it("HR (role Admin/HR) berwenang hanya bila jenis mengizinkan hrCanSign; Magang tidak pernah", () => {
+    const pol = { directorOnly: false, signerJobLevels: [] as ("MANAGER")[], hrCanSign: true };
+    expect(isEligibleSigner(pol, person({ role: "HR_ADMIN" }))).toBe(true);
+    expect(isEligibleSigner({ ...pol, hrCanSign: false }, person({ role: "HR_ADMIN" }))).toBe(false);
+    expect(isEligibleSigner(pol, person({ role: "HR_ADMIN", isIntern: true }))).toBe(false);
+    expect(canHoldSignature(person({ role: "HR_ADMIN" }))).toBe(true);
+    expect(canHoldSignature(person({ jobLevel: "MANAGER" }))).toBe(true);
+    expect(canHoldSignature(person())).toBe(false);
   });
   it("hanya Direktur boleh menandatangani suratnya sendiri; hanya Draf/Dikembalikan yang dapat disunting", () => {
     expect(canSignOwn({ role: "SUPER_ADMIN" })).toBe(true);

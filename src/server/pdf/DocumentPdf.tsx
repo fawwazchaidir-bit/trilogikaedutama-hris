@@ -235,13 +235,13 @@ function SignBlock({ f, qr, extra }: { f: DocFrame; qr: string | null; extra?: D
         {qr ? <Image src={qr} style={s.qr} /> : null}
         {f.verify && qr ? <Text style={s.qrCap}>{f.verify.caption}{f.number ? `\n${f.number}` : ""}</Text> : null}
       </View>
-      <View style={{ flexDirection: "row" }}>
+      <View style={{ flexDirection: "row", flexWrap: "wrap", justifyContent: "flex-end", maxWidth: list.length > 2 ? 2 * 200 + 8 : undefined }}>
         {list.map((sg, k) => (
-          <View key={k} style={s.signBox}>
+          <View key={k} style={[s.signBox, list.length > 2 ? { marginBottom: 6 } : {}]}>
             {sg.orgName ? <Text style={{ fontWeight: "bold" }}>{sg.orgName}</Text> : null}
             <Text style={{ fontWeight: "bold" }}>{sg.title}</Text>
-            {f.draft ? <View style={{ height: 82 }} /> : <SignatureArt sg={sg} />}
-            <Text style={{ fontWeight: "bold", textDecoration: "underline" }}>{sg.name}</Text>
+            {f.draft || sg.external ? <View style={{ height: 82 }} /> : <SignatureArt sg={sg} />}
+            <Text style={{ fontWeight: "bold", textDecoration: "underline" }}>{sg.name || "(.............................)"}</Text>
           </View>
         ))}
       </View>

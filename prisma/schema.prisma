@@ -178,6 +178,8 @@ enum FileKind {
   TRAINING_DOCUMENT
   /// PDF surat terbit dari modul Persuratan (privat; dibuka lewat API yang memeriksa hak atas dokumen).
   LETTER_PDF
+  /// Gambar tanda tangan pribadi penandatangan surat (PNG ternormalisasi; hanya pemilik & Direktur yang dapat membukanya).
+  LETTER_SIGNATURE
 }
 
 enum LateDeductionMode {
@@ -339,6 +341,14 @@ model LetterType {
   signerJobLevels   JobLevel[]
   internAllowed     Boolean          @default(false)
   isActive          Boolean          @default(true)
+  /// Surat Rahasia: hanya pembuat, penandatangan, Direktur (dan HR bila hrCanView); perihal tidak tampil di halaman verifikasi/notifikasi; pembukaan oleh pihak lain dicatat di audit.
+  confidential      Boolean          @default(false)
+  /// HR (role Admin/HR) boleh menjadi penandatangan jenis ini.
+  hrCanSign         Boolean          @default(false)
+  /// HR boleh melihat semua surat jenis ini.
+  hrCanView         Boolean          @default(false)
+  /// Mendukung beberapa penandatangan (berita acara): pihak internal + slot tanda tangan basah mitra luar.
+  multiSigner       Boolean          @default(false)
   /// Isi awal (JSON ProseMirror tervalidasi `validateDoc`).
   templateBody      Json
   defaultSalutation String?
@@ -351,12 +361,14 @@ model LetterType {
   @@map("letter_types")
 }
 
-/// Penghitung nomor urut GLOBAL per tahun (satu urutan untuk semua seri & jenis — mengikuti Register Excel). Dinaikkan dalam transaksi persetujuan
-/// dengan advisory lock. `lastSeq` dapat diatur awal (offset register berjalan).
+/// Penghitung nomor urut per SERI (EKS / INT) dan tahun; kembali ke 001 di tahun baru. Dinaikkan dalam transaksi persetujuan dengan advisory lock.
+/// `lastSeq` dapat diatur awal oleh Direktur (offset register yang sudah berjalan).
 model LetterCounter {
-  year    Int @id
-  lastSeq Int @default(0)
+  series  LetterSeries
+  year    Int
+  lastSeq Int          @default(0)
 
+  @@id([series, year])
   @@map("letter_counters")
 }
 
@@ -380,6 +392,29 @@ model LetterSigner {
   updatedAt       DateTime @updatedAt
 
   @@map("letter_signers")
+}
+
+enum SignatoryKind {
+  INTERNAL
+  EXTERNAL
+}
+
+/// Penandatangan tambahan selain penandatangan utama (LetterDocument.signerId). INTERNAL = akun portal yang harus menandatangani (signedAt) sebelum surat dapat diterbitkan;
+/// EXTERNAL = slot kosong di PDF untuk tanda tangan basah mitra luar.
+model LetterSignatory {
+  id         String         @id @default(uuid()) @db.Uuid
+  documentId String         @db.Uuid
+  document   LetterDocument @relation(fields: [documentId], references: [id])
+  position   Int
+  kind       SignatoryKind
+  userId     String?        @db.Uuid
+  name       String?
+  title      String?
+  org        String?
+  signedAt   DateTime?
+
+  @@index([documentId, position])
+  @@map("letter_signatories")
 }
 
 model LetterDocument {
@@ -418,11 +453,12 @@ model LetterDocument {
   snapshot    Json?
   issuedById  String?      @db.Uuid
 
-  createdAt DateTime      @default(now())
-  updatedAt DateTime      @updatedAt
-  events    LetterEvent[]
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+  events      LetterEvent[]
+  signatories LetterSignatory[]
 
-  @@unique([seqYear, seqNo])
+  @@unique([series, seqYear, seqNo])
   @@index([creatorId, status])
   @@index([signerId, status])
   @@map("letter_documents")

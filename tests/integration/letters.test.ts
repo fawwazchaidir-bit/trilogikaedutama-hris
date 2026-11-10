@@ -9,13 +9,13 @@ import { AppError } from "@/server/errors";
 import { isoToDate } from "@/server/json";
 import type { Actor } from "@/server/actor";
 import { resetDb, makeUser } from "../helpers/db";
-import { createLetter, updateLetter, submitLetter, approveLetter, returnLetter, rejectLetter, cancelLetter, withdrawLetter, getLetter, listLetters, letterPdf } from "@/server/services/letters/documents";
+import { createLetter, updateLetter, submitLetter, approveLetter, returnLetter, rejectLetter, cancelLetter, withdrawLetter, getLetter, listLetters, letterPdf, cosignLetter, pendingReviewCount } from "@/server/services/letters/documents";
 import { listTypes, listSigners, updateTypePolicy } from "@/server/services/letters/types";
-import { setCounterOffset } from "@/server/services/letters/admin";
+import { assertCanSetSignature, setCounterOffset } from "@/server/services/letters/admin";
 import { verifyByToken } from "@/server/services/letters/public";
 import { doc, p } from "@/lib/documents/builders";
 
-let direktur: Actor, manajer: Actor, staf: Actor, staf2: Actor, magang: Actor;
+let direktur: Actor, manajer: Actor, staf: Actor, staf2: Actor, magang: Actor, hr: Actor;
 const fail = async (pr: Promise<unknown>) => { try { await pr; return null; } catch (e) { return e as AppError; } };
 const FORBIDDEN = { code: "FORBIDDEN" }, NOT_FOUND = { code: "NOT_FOUND" }, VALIDATION = { code: "VALIDATION" }, CONFLICT = { code: "CONFLICT" };
 
@@ -38,6 +38,7 @@ beforeEach(async () => {
   manajer = await makeUser("mgr@uji.test", "Manajer Uji", "EMPLOYEE", (await emp("M-1", "Manajer Uji", "Manajer Pemasaran", { jobLevel: "MANAGER" })).id);
   staf = await makeUser("staf@uji.test", "Staf Uji", "EMPLOYEE", (await emp("S-1", "Staf Uji", "Staf Admisi")).id);
   staf2 = await makeUser("staf2@uji.test", "Staf Dua", "EMPLOYEE", (await emp("S-2", "Staf Dua", "Staf Sosmed")).id);
+  hr = await makeUser("hr@uji.test", "HR Uji", "HR_ADMIN", (await emp("H-1", "HR Uji", "HR Officer")).id);
   magang = await makeUser("mag@uji.test", "Magang Uji", "EMPLOYEE", (await emp("I-1", "Magang Uji", "Magang", { employmentStatus: "INTERN" })).id);
 });
 
@@ -95,7 +96,7 @@ describe("siklus: draf → diajukan → terbit", () => {
     expect(out.events.map((e) => e.action)).toEqual(["CREATED", "SUBMITTED", "ISSUED"]);
   });
 
-  it("nomor urut GLOBAL per tahun (lintas seri), tanpa lubang; persetujuan serentak tidak menghasilkan nomor ganda", async () => {
+  it("nomor urut per seri & tahun (EKS dan INT terpisah), tanpa lubang; persetujuan serentak tidak menghasilkan nomor ganda", async () => {
     const ids: string[] = [];
     for (let i = 0; i < 4; i++) {
       const d = await draftReady(staf, manajer);
@@ -105,17 +106,17 @@ describe("siklus: draf → diajukan → terbit", () => {
     const res = await Promise.all(ids.map((id) => approveLetter(manajer, id)));
     const seqs = res.map((r) => Number(r.number!.split("/")[0])).sort((a, b) => a - b);
     expect(seqs).toEqual([1, 2, 3, 4]);
-    // urutan GLOBAL: seri INT melanjutkan setelah EKS (bukan mulai dari 001 lagi)
+    // seri INT punya urutan sendiri (tidak dicampur dengan EKS)
     const sk = await draftReady(staf, direktur, { series: "INT", code: 1 });
     await updateLetter(staf, sk.id, { body: doc(p("Isi SK final.")), variables: {} });
     await submitLetter(staf, sk.id);
-    expect((await approveLetter(direktur, sk.id)).number).toMatch(/^005\/TE-INT\/001\//);
+    expect((await approveLetter(direktur, sk.id)).number).toMatch(/^001\/TE-INT\/001\//);
   });
 
   it("offset arsip: lanjut dari nomor terakhir; tidak boleh diturunkan", async () => {
     const yr = Number(new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Jakarta" }).slice(0, 4));
-    await setCounterOffset(direktur, { year: yr, lastSeq: 80 });
-    expect(await fail(setCounterOffset(direktur, { year: yr, lastSeq: 10 }))).toMatchObject(VALIDATION);
+    await setCounterOffset(direktur, { series: "EKS", year: yr, lastSeq: 80 });
+    expect(await fail(setCounterOffset(direktur, { series: "EKS", year: yr, lastSeq: 10 }))).toMatchObject(VALIDATION);
     const d = await draftReady(staf, manajer);
     await updateLetter(staf, d.id, { body: doc(p("Isi final.")) }); await submitLetter(staf, d.id);
     expect((await approveLetter(manajer, d.id)).number).toMatch(/^081\/TE-EKS\/003\//);
@@ -218,5 +219,80 @@ describe("verifikasi publik & penjaga database", () => {
     await expect(prisma.$executeRaw`DELETE FROM letter_documents WHERE id = ${d.id}::uuid`).rejects.toThrow(/HRIS-GUARD/);
     await expect(prisma.$executeRaw`UPDATE letter_events SET note = 'x' WHERE "documentId" = ${d.id}::uuid`).rejects.toThrow(/HRIS-GUARD/);
     await expect(prisma.$executeRaw`UPDATE letter_documents SET status = 'DRAFT' WHERE id = ${d.id}::uuid`).rejects.toThrow(/HRIS-GUARD/);
+  });
+});
+
+describe("tahap 2a: HR penandatangan, surat Rahasia, multi-penandatangan, tanda tangan pribadi", () => {
+  const publish = async (creator: Actor, id: string, signer: Actor, body = "Isi final.") => {
+    await updateLetter(creator, id, { body: doc(p(body)) }); await submitLetter(creator, id); return approveLetter(signer, id);
+  };
+
+  it("HR boleh menandatangani INT-007/010/011 saja; tidak boleh EKS atau INT lain", async () => {
+    for (const code of [7, 10, 11]) expect((await listSigners(staf, (await typeOf("INT", code)).id)).map((x) => x.userId)).toContain(hr.userId);
+    for (const [series, code] of [["EKS", 3], ["INT", 3], ["INT", 6]] as const) expect((await listSigners(staf, (await typeOf(series, code)).id)).map((x) => x.userId)).not.toContain(hr.userId);
+    const d = await draftReady(staf, hr, { series: "INT", code: 11 });
+    expect((await publish(staf, d.id, hr)).number).toMatch(/^001\/TE-INT\/011\//);
+  });
+
+  it("nomor EKS dan INT dipisah (masing-masing 001 pada tahun yang sama)", async () => {
+    const a = await draftReady(staf, manajer); const eks = await publish(staf, a.id, manajer);
+    const b = await draftReady(staf, direktur, { series: "INT", code: 1 }); const int = await publish(staf, b.id, direktur);
+    expect(eks.number!.split("/")[0]).toBe("001"); expect(int.number!.split("/")[0]).toBe("001");
+  });
+
+  it("surat Rahasia: hanya pembuat/penandatangan/Direktur; HR hanya INT-010; perihal tak tampil di verifikasi; pembukaan Direktur diaudit", async () => {
+    const eval9 = await draftReady(staf, manajer, { series: "INT", code: 9 });
+    expect((await getLetter(staf, eval9.id)).confidential).toBe(true);
+    expect(await fail(getLetter(hr, eval9.id))).toMatchObject(NOT_FOUND);
+    expect(await fail(getLetter(staf2, eval9.id))).toMatchObject(NOT_FOUND);
+    await getLetter(direktur, eval9.id);
+    expect(await prisma.auditLog.count({ where: { action: "letter.view_confidential", entityId: eval9.id } })).toBe(1);
+    await getLetter(staf, eval9.id); // pembuat membuka sendiri: tidak diaudit
+    expect(await prisma.auditLog.count({ where: { action: "letter.view_confidential", entityId: eval9.id } })).toBe(1);
+    const ket = await draftReady(staf, direktur, { series: "INT", code: 10 });
+    expect((await getLetter(hr, ket.id)).id).toBe(ket.id); // HR boleh melihat keterangan kerja
+    expect((await listLetters(hr, { scope: "all" })).items.map((x) => x.id)).toEqual([ket.id]);
+    const out = await publish(staf, ket.id, direktur, "Isi surat keterangan.");
+    const tok = (await prisma.letterDocument.findUniqueOrThrow({ where: { id: ket.id } })).verifyToken;
+    const v = await verifyByToken(tok);
+    expect(v?.state).toBe("VALID"); expect(v?.subject).toBeNull(); expect(out.number).toBeTruthy();
+    // notifikasi tidak membocorkan perihal
+    const n = await prisma.notification.findFirst({ where: { type: "letter.issued" } });
+    expect(n?.body).not.toContain("Permohonan uji");
+  });
+
+  it("berita acara multi-penandatangan: pihak internal wajib menandatangani dulu; slot mitra luar kosong; hanya jenis multiSigner", async () => {
+    expect(await fail(updateLetter(staf, (await draftReady(staf, manajer)).id, { signatories: [{ kind: "EXTERNAL", name: "X" }] }))).toMatchObject(VALIDATION);
+    const ba = await draftReady(staf, manajer, { series: "EKS", code: 13 });
+    expect(await fail(updateLetter(staf, ba.id, { signatories: [{ kind: "INTERNAL", userId: magang.userId }] }))).toMatchObject(VALIDATION);
+    expect(await fail(updateLetter(staf, ba.id, { signatories: [{ kind: "INTERNAL", userId: manajer.userId }] }))).toMatchObject(VALIDATION); // sama dgn penandatangan utama
+    expect(await fail(updateLetter(staf, ba.id, { signatories: [{ kind: "EXTERNAL", name: "" }] }))).toMatchObject(VALIDATION);
+    const d = await updateLetter(staf, ba.id, { body: doc(p("Isi final BA.")), signatories: [{ kind: "INTERNAL", userId: staf2.userId }, { kind: "EXTERNAL", name: "Ibu Mitra", title: "Kepala SPPG", org: "SPPG Contoh" }] });
+    expect(d.signatories.map((x) => x.kind)).toEqual(["INTERNAL", "EXTERNAL"]);
+    await submitLetter(staf, ba.id);
+    expect(await pendingReviewCount(staf2)).toBe(1); // penandatangan tambahan melihat antreannya
+    expect((await getLetter(staf2, ba.id)).can.cosign).toBe(true);
+    expect(await fail(approveLetter(manajer, ba.id))).toMatchObject(CONFLICT); // belum lengkap
+    expect(await fail(cosignLetter(manajer, ba.id))).toMatchObject(FORBIDDEN);
+    expect(await fail(cosignLetter(staf, ba.id))).toMatchObject(FORBIDDEN);
+    await cosignLetter(staf2, ba.id);
+    expect(await fail(cosignLetter(staf2, ba.id))).toMatchObject(CONFLICT);
+    const out = await approveLetter(manajer, ba.id);
+    expect(out.status).toBe("ISSUED");
+    expect(out.signatories.find((x) => x.kind === "EXTERNAL")).toMatchObject({ name: "Ibu Mitra", org: "SPPG Contoh" });
+    const row = await prisma.letterDocument.findUniqueOrThrow({ where: { id: ba.id } });
+    expect(createHash("sha256").update((await prisma.storedFile.findUniqueOrThrow({ where: { id: row.pdfFileId! } })).data).digest("hex")).toBe(row.pdfSha256);
+    // terkunci oleh database setelah terbit
+    await expect(prisma.$executeRaw`DELETE FROM letter_signatories WHERE "documentId" = ${ba.id}::uuid`).rejects.toThrow(/HRIS-GUARD/);
+    await expect(prisma.$executeRaw`UPDATE letter_signatories SET name = 'x' WHERE "documentId" = ${ba.id}::uuid`).rejects.toThrow(/HRIS-GUARD/);
+  });
+
+  it("tanda tangan pribadi: Direktur untuk siapa saja; Manajer untuk dirinya; staf tidak; tidak untuk orang lain", async () => {
+    await assertCanSetSignature(direktur, staf.userId);
+    await assertCanSetSignature(manajer, manajer.userId);
+    await assertCanSetSignature(hr, hr.userId);
+    expect(await fail(assertCanSetSignature(manajer, direktur.userId))).toMatchObject(FORBIDDEN);
+    expect(await fail(assertCanSetSignature(staf, staf.userId))).toMatchObject(FORBIDDEN);
+    expect(await fail(assertCanSetSignature(magang, magang.userId))).toMatchObject(FORBIDDEN);
   });
 });

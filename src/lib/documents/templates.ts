@@ -5,6 +5,7 @@ import type { PmDoc } from "./content";
 export interface DefaultLetterType {
   series: "EKS" | "INT"; code: number; name: string; description: string; kind: "SURAT" | "SK";
   directorOnly: boolean; signerJobLevels: ("SUPERVISOR" | "MANAGER")[]; internAllowed: boolean;
+  confidential: boolean; hrCanSign: boolean; hrCanView: boolean; multiSigner: boolean;
   salutation: string | null; closing: string | null; template: PmDoc;
 }
 
@@ -77,7 +78,14 @@ const CATALOG: Row[] = [
   ["INT", 11, "Administrasi internal lainnya", "Pengantar administrasi karyawan dan kebutuhan internal lain.", "M", false, INTERNAL],
 ];
 
+/** Sifat struktural per jenis (Register: kolom "Sifat" & penanda tangan "…atau HR", berita acara "pihak yang terlibat"). */
+const CONFIDENTIAL = new Set(["INT:6", "INT:9", "INT:10"]);
+const HR_SIGN = new Set(["INT:7", "INT:10", "INT:11"]);
+const HR_VIEW = new Set(["INT:10"]);
+const MULTI = new Set(["EKS:13", "INT:8"]);
+
 export const DEFAULT_LETTER_TYPES: DefaultLetterType[] = CATALOG.map(([series, code, name, description, signer, intern, template, kind]) => ({
-  series, code, name, description, kind: kind ?? "SURAT", directorOnly: signer === "D", signerJobLevels: signer === "M" ? ["MANAGER"] : [], internAllowed: intern,
+  series, code, name, description, kind: kind ?? "SURAT", directorOnly: signer === "D" && !HR_SIGN.has(`${series}:${code}`), signerJobLevels: signer === "M" ? ["MANAGER"] : [], internAllowed: intern,
+  confidential: CONFIDENTIAL.has(`${series}:${code}`), hrCanSign: HR_SIGN.has(`${series}:${code}`), hrCanView: HR_VIEW.has(`${series}:${code}`), multiSigner: MULTI.has(`${series}:${code}`),
   salutation: kind === "SK" ? null : salam(series), closing: null, template,
 }));

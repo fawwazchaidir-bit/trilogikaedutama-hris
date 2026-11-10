@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { EditorContent, useEditor } from "@tiptap/react";
-import { CheckCircle2, Clock, Download, Eye, FileText, Loader2, Send, Undo2, XCircle, Ban, PencilLine } from "lucide-react";
+import { CheckCircle2, Clock, Download, Eye, FileText, Loader2, Send, Undo2, XCircle, Ban, PencilLine, PenLine, Plus, Trash2, Lock } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
@@ -13,12 +13,12 @@ import { api, errorMessage } from "@/lib/api-client";
 import { documentExtensions } from "@/lib/documents/editor-extensions";
 import { normalizeDoc, type PmDoc } from "@/lib/documents/content";
 import { LETTER_SERIES_LABEL, type LetterStatus } from "@/lib/documents/policy";
-import type { LetterDetailDto } from "@/server/services/letters/documents";
+import type { LetterDetailDto, SignatoryDto } from "@/server/services/letters/documents";
 import { EditorToolbar } from "./editor-toolbar";
 
 const TONE: Record<LetterStatus, "gray" | "amber" | "green" | "red" | "blue"> = { DRAFT: "gray", IN_REVIEW: "amber", RETURNED: "blue", ISSUED: "green", REJECTED: "red", CANCELLED: "red" };
 const ACTION_LABEL: Record<string, string> = {
-  CREATED: "Draf dibuat", SUBMITTED: "Diajukan ke penandatangan", WITHDRAWN: "Ditarik kembali", RETURNED: "Dikembalikan untuk revisi", REJECTED: "Ditolak", ISSUED: "Disetujui & diterbitkan", CANCELLED: "Dibatalkan",
+  CREATED: "Draf dibuat", COSIGNED: "Penandatangan tambahan menandatangani", SUBMITTED: "Diajukan ke penandatangan", WITHDRAWN: "Ditarik kembali", RETURNED: "Dikembalikan untuk revisi", REJECTED: "Ditolak", ISSUED: "Disetujui & diterbitkan", CANCELLED: "Dibatalkan",
   TAKEOVER_ISSUED: "Diambil alih Direktur & diterbitkan", TAKEOVER_RETURNED: "Diambil alih Direktur & dikembalikan", TAKEOVER_REJECTED: "Diambil alih Direktur & ditolak",
 };
 const fmt = (iso: string) => new Date(iso).toLocaleString("id-ID", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
@@ -31,11 +31,17 @@ const toMeta = (d: LetterDetailDto): Meta => ({
 });
 const lines = (s: string) => s.split("\n").map((x) => x.trim()).filter(Boolean);
 
-export function LetterEditor({ initial, signers }: { initial: LetterDetailDto; signers: Signer[] }) {
+type SigRow = { kind: "INTERNAL" | "EXTERNAL"; userId: string; name: string; title: string; org: string };
+const toSigRows = (list: SignatoryDto[]): SigRow[] => list.map((s) => ({ kind: s.kind, userId: s.userId ?? "", name: s.kind === "EXTERNAL" ? s.name : "", title: s.kind === "EXTERNAL" ? s.title ?? "" : "", org: s.org ?? "" }));
+
+export function LetterEditor({ initial, signers, people }: { initial: LetterDetailDto; signers: Signer[]; people: Signer[] }) {
   const router = useRouter();
   const toast = useToast();
   const [d, setD] = useState(initial);
   const [meta, setMeta] = useState<Meta>(() => toMeta(initial));
+  const [sigs, setSigs] = useState<SigRow[]>(() => toSigRows(initial.signatories));
+  const sigsDirty = useRef(false);
+  const sigsRef = useRef(sigs);
   const [save, setSave] = useState<"saved" | "dirty" | "saving" | "error">("saved");
   const [tab, setTab] = useState<"edit" | "pdf">(initial.can.edit ? "edit" : "pdf");
   const [side, setSide] = useState<"data" | "riwayat">("data");
@@ -64,6 +70,7 @@ export function LetterEditor({ initial, signers }: { initial: LetterDetailDto; s
   });
   useEffect(() => { editorRef.current = editor; }, [editor]);
   useEffect(() => { metaRef.current = meta; }, [meta]);
+  useEffect(() => { sigsRef.current = sigs; }, [sigs]);
 
   const persist = useCallback(async (): Promise<boolean> => {
     const m = metaRef.current; const ed = editorRef.current;
@@ -74,8 +81,9 @@ export function LetterEditor({ initial, signers }: { initial: LetterDetailDto; s
         attachmentUnit: m.attachmentCount ? m.attachmentUnit : null, salutation: m.salutation || null, closing: m.closing || null, cc: lines(m.cc), signerId: m.signerId || null,
       };
       if (dirtyBody.current && ed) body.body = normalizeDoc(ed.getJSON() as PmDoc);
+      if (sigsDirty.current) body.signatories = sigsRef.current.map((s) => (s.kind === "INTERNAL" ? { kind: s.kind, userId: s.userId || null } : { kind: s.kind, name: s.name, title: s.title || null, org: s.org || null }));
       const next = await api<LetterDetailDto>(`/api/letters/${initial.id}`, { method: "PATCH", body });
-      dirtyBody.current = false; setD(next); setErrors({}); setSave("saved"); setPdfKey((k) => k + 1);
+      dirtyBody.current = false; sigsDirty.current = false; setD(next); setErrors({}); setSave("saved"); setPdfKey((k) => k + 1);
       return true;
     } catch (e) {
       setSave("error"); setErrors((e as { fieldErrors?: Record<string, string> }).fieldErrors ?? {}); toast.error(errorMessage(e)); return false;
@@ -87,15 +95,15 @@ export function LetterEditor({ initial, signers }: { initial: LetterDetailDto; s
   useEffect(() => { editor?.setEditable(editable); }, [editor, editable]);
   const set = (k: keyof Meta) => (e: { target: { value: string } }) => { setMeta((m) => ({ ...m, [k]: e.target.value })); if (editable) schedule(); };
 
-  async function act(kind: "submit" | "withdraw" | "approve" | "return" | "reject" | "cancel", withNote = false) {
+  async function act(kind: "submit" | "withdraw" | "approve" | "return" | "reject" | "cancel" | "cosign", withNote = false) {
     setBusy(kind);
     try {
       if (editable && (save === "dirty" || kind === "submit")) { if (timer.current) clearTimeout(timer.current); if (!(await persist())) return; }
       const next = await api<LetterDetailDto>(`/api/letters/${initial.id}/${kind}`, { method: "POST", body: withNote ? { note } : undefined });
-      setD(next); setMeta(toMeta(next)); setDialog(null); setNote(""); setPdfKey((k) => k + 1);
+      setD(next); setMeta(toMeta(next)); setSigs(toSigRows(next.signatories)); setDialog(null); setNote(""); setPdfKey((k) => k + 1);
       editor?.commands.setContent(next.body, { emitUpdate: false });
       setTab(next.can.edit ? "edit" : "pdf");
-      toast.success({ submit: "Surat diajukan ke penandatangan.", withdraw: "Surat ditarik kembali ke draf.", approve: `Surat terbit dengan nomor ${next.number}.`, return: "Surat dikembalikan ke pembuat.", reject: "Surat ditolak.", cancel: "Surat dibatalkan." }[kind]);
+      toast.success({ submit: "Surat diajukan ke penandatangan.", withdraw: "Surat ditarik kembali ke draf.", approve: `Surat terbit dengan nomor ${next.number}.`, return: "Surat dikembalikan ke pembuat.", reject: "Surat ditolak.", cancel: "Surat dibatalkan.", cosign: "Tanda tangan Anda tercatat." }[kind]);
       router.refresh();
     } catch (e) {
       const fe = (e as { fieldErrors?: Record<string, string> }).fieldErrors; if (fe) setErrors(fe);
@@ -121,6 +129,7 @@ export function LetterEditor({ initial, signers }: { initial: LetterDetailDto; s
             </span>
           )}
           {d.can.submit && <Button variant="primary" loading={busy === "submit"} onClick={() => void act("submit")}><Send className="size-4" />Ajukan ke penandatangan</Button>}
+          {d.can.cosign && <Button variant="primary" loading={busy === "cosign"} onClick={() => void act("cosign")}><PenLine className="size-4" />Tandatangani bagian saya</Button>}
           {d.can.withdraw && <Button loading={busy === "withdraw"} onClick={() => void act("withdraw")}><Undo2 className="size-4" />Tarik kembali</Button>}
           {d.can.review && <>
             <Button variant="primary" loading={busy === "approve"} onClick={() => void act("approve")}><CheckCircle2 className="size-4" />{d.can.takeOver ? "Ambil alih & terbitkan" : "Setujui & terbitkan"}</Button>
@@ -162,6 +171,42 @@ export function LetterEditor({ initial, signers }: { initial: LetterDetailDto; s
                 <TextField label="Kalimat penutup (opsional)" value={meta.closing} onChange={set("closing")} disabled={!editable} />
                 <TextAreaField label="Tembusan (satu per baris)" rows={2} value={meta.cc} onChange={set("cc")} disabled={!editable} />
               </>}
+              {d.multiSigner && (
+                <fieldset className="space-y-2 rounded-lg border border-line p-2.5">
+                  <legend className="px-1 text-xs font-semibold text-ink-soft">Penandatangan tambahan</legend>
+                  {sigs.length === 0 && <p className="text-xs text-muted">Belum ada. Tambahkan pihak internal yang wajib menandatangani, atau slot kosong untuk tanda tangan basah mitra luar.</p>}
+                  {sigs.map((sg, i) => {
+                    const st = d.signatories[i];
+                    const upd = (patch: Partial<SigRow>) => { setSigs((l) => l.map((x, k) => (k === i ? { ...x, ...patch } : x))); sigsDirty.current = true; if (editable) schedule(); };
+                    return (
+                      <div key={i} className="space-y-1.5 rounded-md bg-canvas p-2">
+                        <div className="flex items-center gap-1.5">
+                          <select aria-label={`Jenis penandatangan ${i + 1}`} disabled={!editable} value={sg.kind} onChange={(e) => upd({ kind: e.target.value as SigRow["kind"] })} className="h-8 flex-1 rounded-md border border-line bg-white px-2 text-sm">
+                            <option value="INTERNAL">Internal (akun portal)</option><option value="EXTERNAL">Mitra luar (tanda tangan basah)</option>
+                          </select>
+                          {editable && <button type="button" aria-label={`Hapus penandatangan ${i + 1}`} onClick={() => { setSigs((l) => l.filter((_, k) => k !== i)); sigsDirty.current = true; schedule(); }} className="rounded-md p-1.5 text-muted hover:bg-black/5"><Trash2 className="size-4" /></button>}
+                        </div>
+                        {sg.kind === "INTERNAL" ? (
+                          <select aria-label={`Akun penandatangan ${i + 1}`} disabled={!editable} value={sg.userId} onChange={(e) => upd({ userId: e.target.value })} className="h-8 w-full rounded-md border border-line bg-white px-2 text-sm">
+                            <option value="">— pilih orang —</option>
+                            {people.map((p) => <option key={p.userId} value={p.userId}>{p.name}{p.title ? ` · ${p.title}` : ""}</option>)}
+                          </select>
+                        ) : (
+                          <div className="grid gap-1.5">
+                            <input aria-label={`Nama mitra ${i + 1}`} disabled={!editable} value={sg.name} onChange={(e) => upd({ name: e.target.value })} placeholder="Nama penandatangan" className="h-8 rounded-md border border-line bg-white px-2 text-sm" />
+                            <input aria-label={`Jabatan mitra ${i + 1}`} disabled={!editable} value={sg.title} onChange={(e) => upd({ title: e.target.value })} placeholder="Jabatan" className="h-8 rounded-md border border-line bg-white px-2 text-sm" />
+                            <input aria-label={`Lembaga mitra ${i + 1}`} disabled={!editable} value={sg.org} onChange={(e) => upd({ org: e.target.value })} placeholder="Lembaga / perusahaan" className="h-8 rounded-md border border-line bg-white px-2 text-sm" />
+                          </div>
+                        )}
+                        {st && st.kind === "INTERNAL" && d.status === "IN_REVIEW" && <p className={`text-xs ${st.signedAt ? "text-emerald-700" : "text-amber-700"}`}>{st.signedAt ? `Sudah menandatangani · ${fmt(st.signedAt)}` : "Menunggu tanda tangan"}</p>}
+                      </div>
+                    );
+                  })}
+                  {editable && sigs.length < 6 && <Button size="sm" onClick={() => { setSigs((l) => [...l, { kind: "INTERNAL", userId: "", name: "", title: "", org: "" }]); sigsDirty.current = true; }}><Plus className="size-3.5" />Tambah penandatangan</Button>}
+                  {errors.signatories && <p className="text-xs text-brand-700">{errors.signatories}</p>}
+                </fieldset>
+              )}
+              {d.confidential && <p className="flex items-start gap-1.5 rounded-md bg-amber-50 p-2 text-xs text-amber-900"><Lock className="mt-0.5 size-3.5 shrink-0" />Surat Rahasia: hanya pembuat, penandatangan, dan Direktur{d.typeName.includes("keterangan kerja") ? " (serta HR)" : ""} yang dapat membukanya. Tulis perihal tanpa nama karyawan.</p>}
               {d.kind === "SK" && <p className="text-xs text-muted">Judul, konsiderans, dan diktum SK disusun langsung pada kertas. Gunakan <code>{"{{nomor}}"}</code> bila nomor perlu muncul di judul.</p>}
             </div>
           ) : (

@@ -11,14 +11,15 @@ export const LETTER_SERIES_LABEL = { EKS: "Eksternal", INT: "Internal" } as cons
 /** Hanya Draf/Dikembalikan yang boleh disunting (oleh pembuatnya). */
 export const isEditable = (s: LetterStatus): boolean => s === "DRAFT" || s === "RETURNED";
 
-export interface SignerPolicy { directorOnly: boolean; signerJobLevels: JobLevel[] }
+export interface SignerPolicy { directorOnly: boolean; signerJobLevels: JobLevel[]; hrCanSign?: boolean }
 export interface PersonFacts { role: "EMPLOYEE" | "HR_ADMIN" | "SUPER_ADMIN"; jobLevel: JobLevel | null; isIntern: boolean; isActive: boolean }
 
-/** Direktur = Super Admin. Selain itu hanya tingkat jabatan yang diizinkan jenis surat; Magang tidak pernah. */
+/** Direktur = Super Admin. Selain itu tingkat jabatan yang diizinkan jenis surat, atau HR (role Admin/HR) bila jenis mengizinkan; Magang tidak pernah. */
 export function isEligibleSigner(policy: SignerPolicy, p: PersonFacts): boolean {
   if (!p.isActive || p.isIntern) return false;
   if (p.role === "SUPER_ADMIN") return true;
   if (policy.directorOnly) return false;
+  if (policy.hrCanSign && p.role === "HR_ADMIN") return true;
   return !!p.jobLevel && policy.signerJobLevels.includes(p.jobLevel);
 }
 
@@ -40,3 +41,7 @@ export function canTakeOver(submittedAt: Date | null, now: Date, days: number, t
 }
 
 export const verifyPath = (token: string): string => `/verifikasi/${token}`;
+
+/** Pemegang gambar tanda tangan pribadi: Direktur, Supervisor/Manajer, atau HR (calon penandatangan). */
+export const canHoldSignature = (p: Pick<PersonFacts, "role" | "jobLevel" | "isIntern" | "isActive">): boolean =>
+  p.isActive && !p.isIntern && (p.role === "SUPER_ADMIN" || p.role === "HR_ADMIN" || p.jobLevel === "MANAGER" || p.jobLevel === "SUPERVISOR");
