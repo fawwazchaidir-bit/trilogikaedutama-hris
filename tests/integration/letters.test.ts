@@ -50,7 +50,8 @@ describe("jenis & penandatangan", () => {
     expect(all.map((t) => `${t.series}-${t.codeText}`)).toEqual(expect.arrayContaining(["EKS-001", "EKS-002", "EKS-003", "EKS-013", "INT-001", "INT-011"]));
     const mg = await listTypes(magang);
     expect(mg.map((t) => `${t.series}-${t.codeText}`)).toEqual(["EKS-011"]);
-    expect(all.length).toBe(24);
+    expect(all.length).toBe(23); // Surat Tugas (INT-002) hanya terlihat bagi HR/Direktur
+    expect((await listTypes(direktur)).length).toBe(24);
   });
   it("penandatangan sesuai kebijakan: SK hanya Direktur; surat eksternal Direktur + Manajer; bukan diri sendiri; Magang tidak pernah", async () => {
     const sk = await typeOf("INT", 1);
