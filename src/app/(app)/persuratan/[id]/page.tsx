@@ -32,10 +32,10 @@ export default async function LetterPage({ params }: { params: Promise<{ id: str
   return (
     <div>
       <Link href="/persuratan" className="mb-3 inline-flex items-center gap-1 text-sm text-muted hover:text-ink"><ChevronLeft className="size-4" />Persuratan</Link>
-      {d.funnel && !d.archiveOnly && commercial && (
-        <div className="mb-4"><CommercialCard letterId={d.id} initial={commercial} issued={d.status === "ISSUED"} people={employees} /></div>
-      )}
       <LetterEditor initial={d} signers={signers} employees={empOpts.map((e) => ({ id: e.id, employeeNo: e.employeeNo, fullName: e.fullName }))} me={{ employeeId: user.employeeId, isSuper: user.role === "SUPER_ADMIN", canManage: actorCan(user, "assignment:manage") }} people={people.map((p) => ({ userId: p.userId, name: p.name, title: p.title }))} />
+      {d.funnel && !d.archiveOnly && commercial && (
+        <div className="mt-4"><CommercialCard letterId={d.id} initial={commercial} issued={d.status === "ISSUED"} people={employees} /></div>
+      )}
     </div>
   );
 }

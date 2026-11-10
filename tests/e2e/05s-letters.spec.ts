@@ -402,3 +402,69 @@ test("galeri tampilan STAF: daftar surat, pilih jenis, dikembalikan, terbit, pen
   await ctx.close();
   await ayu.dispose();
 });
+
+test("galeri tampilan MANAJER (Citra bertingkat Manajer): antrean tanda tangan, tinjauan, setujui, penjualan, register & dasbor terbatas, tanda tangan saya", async ({ browser }) => {
+  test.skip(!SHOTS, "hanya untuk tangkapan layar (LETTER_SHOTS)");
+  const H = { origin: base };
+  const hrApi = await session(USERS.hr), budi = await session(USERS.budi), citra = await session(USERS.citra);
+  const opts = (await (await hrApi.get("/api/employees/options")).json()).data as { id: string; fullName: string }[];
+  const citraEmp = opts.find((o) => o.fullName.startsWith("Citra"))!.id;
+  const org = (level: string) => hrApi.post(`/api/employees/${citraEmp}/org`, { data: { jobLevel: level, effectiveFrom: isoDatePlus(0), note: "Uji galeri Persuratan" }, headers: H });
+  try {
+    expect((await org("MANAGER")).status()).toBe(200);
+    const types = (await (await budi.get("/api/letters/types")).json()).data as { id: string; series: string; code: number }[];
+    const tid = (c: number) => types.find((t) => t.series === "EKS" && t.code === c)!.id;
+    const meId = ((await (await citra.get("/api/me")).json()).data as { userId?: string; id?: string });
+    const citraUid = (meId.userId ?? meId.id)!;
+    expect((await upload(citra, "/api/letters/signers/me/signature", await demoSignature())).status()).toBe(201);
+    const mk = async (code: number, subject: string, body: string) => {
+      const id = (await (await budi.post("/api/letters", { data: { typeId: tid(code) }, headers: H })).json()).data.id as string;
+      const r = await budi.patch(`/api/letters/${id}`, { data: { subject, recipientLines: ["Bapak Contoh", "PT Contoh Fiktif"], signerId: citraUid, body: { type: "doc", content: [{ type: "paragraph", attrs: { textAlign: "justify", firstLine: true }, content: [{ type: "text", text: body }] }] } }, headers: H });
+      expect(r.status(), await r.text()).toBe(200);
+      expect((await budi.post(`/api/letters/${id}/submit`, { headers: H })).status()).toBe(200);
+      return id;
+    };
+    const offer = await mk(2, "Penawaran In-House Training Food Production", "Bersama ini kami sampaikan penawaran program pelatihan in-house.");
+    const speaker = await mk(3, "Permohonan narasumber pelatihan ToT", "Kami memohon kesediaan Bapak sebagai narasumber.");
+    await mk(5, "Permohonan izin penggunaan laboratorium", "Kami mohon izin penggunaan laboratorium praktik.");
+
+    const ctx = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
+    const page = await ctx.newPage();
+    await login(page, USERS.citra);
+    await page.goto("/persuratan?scope=review");
+    await expect(page.getByRole("link", { name: /Penawaran B2B/ })).toBeVisible();
+    await shot(page, "36-manajer-antrean-tanda-tangan");
+    await page.goto(`/persuratan/${offer}`);
+    await page.getByRole("tab", { name: /Pratinjau PDF/ }).click();
+    await page.waitForTimeout(1500);
+    await shot(page, "37-manajer-tinjau-surat");
+    await page.getByRole("button", { name: "Setujui & terbitkan" }).click();
+    await expect(page.getByText(/^Surat terbit dengan nomor/)).toBeVisible();
+    await page.waitForTimeout(1500);
+    await shot(page, "38-manajer-surat-terbit");
+    await page.goto(`/persuratan/${speaker}`);
+    await page.getByRole("button", { name: "Kembalikan" }).click();
+    await page.getByLabel("Catatan / alasan").fill("Mohon cantumkan tanggal dan jam kegiatan.");
+    await shot(page, "39-manajer-kembalikan-surat");
+    await page.getByRole("button", { name: "Kirim" }).click();
+    await expect(page.getByText("Surat dikembalikan ke pembuat.")).toBeVisible();
+    // penjualan: Manajer dapat memantau & mengubah status penawaran corong
+    await page.goto(`/persuratan/${offer}`);
+    await expect(page.getByRole("heading", { name: "Penawaran & penjualan" })).toBeVisible();
+    await shot(page, "40-manajer-kartu-penjualan");
+    await page.goto("/persuratan/register");
+    await expect(page.getByRole("heading", { name: "Register Surat" })).toBeVisible();
+    await shot(page, "41-manajer-register");
+    await page.goto("/persuratan/dasbor");
+    await shot(page, "42-manajer-dasbor", true);
+    await page.goto("/persuratan");
+    await page.getByRole("button", { name: /Tanda tangan saya/ }).click();
+    await shot(page, "43-manajer-tanda-tangan-saya");
+    await page.keyboard.press("Escape");
+    for (const url of ["/persuratan/pengaturan", "/persuratan/surat-tugas"]) expect((await page.goto(url))?.status(), url).toBe(404);
+    await ctx.close();
+  } finally {
+    await org("STAFF");
+    await hrApi.dispose(); await budi.dispose(); await citra.dispose();
+  }
+});
