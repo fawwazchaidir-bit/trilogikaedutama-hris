@@ -351,13 +351,12 @@ model LetterType {
   @@map("letter_types")
 }
 
-/// Penghitung nomor urut per seri & tahun. Dinaikkan di dalam transaksi persetujuan dengan advisory lock. `lastSeq` dapat diatur awal (offset arsip).
+/// Penghitung nomor urut GLOBAL per tahun (satu urutan untuk semua seri & jenis — mengikuti Register Excel). Dinaikkan dalam transaksi persetujuan
+/// dengan advisory lock. `lastSeq` dapat diatur awal (offset register berjalan).
 model LetterCounter {
-  series  LetterSeries
-  year    Int
-  lastSeq Int          @default(0)
+  year    Int @id
+  lastSeq Int @default(0)
 
-  @@id([series, year])
   @@map("letter_counters")
 }
 
@@ -423,7 +422,7 @@ model LetterDocument {
   updatedAt DateTime      @updatedAt
   events    LetterEvent[]
 
-  @@unique([series, seqYear, seqNo])
+  @@unique([seqYear, seqNo])
   @@index([creatorId, status])
   @@index([signerId, status])
   @@map("letter_documents")

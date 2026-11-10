@@ -289,10 +289,10 @@ export async function approveLetter(actor: Actor, id: string): Promise<LetterDet
   const issueDate = new Date().toLocaleDateString("en-CA", { timeZone: env().APP_TIMEZONE });
   const year = Number(issueDate.slice(0, 4));
   const row = await transaction(async (tx) => {
-    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`letters:${pre.series}:${year}`}))`;
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`letters:${year}`}))`;
     const cur = await tx.letterDocument.findUniqueOrThrow({ where: { id }, include });
     if (cur.status !== "IN_REVIEW") throw Errors.conflict("Surat sudah diproses pihak lain.");
-    const counter = await tx.letterCounter.upsert({ where: { series_year: { series: pre.series, year } }, create: { series: pre.series, year, lastSeq: 1 }, update: { lastSeq: { increment: 1 } } });
+    const counter = await tx.letterCounter.upsert({ where: { year }, create: { year, lastSeq: 1 }, update: { lastSeq: { increment: 1 } } });
     const seq = counter.lastSeq;
     const number = formatDocNumber({ seq, series: pre.series, typeCode: String(typeFacts.code).padStart(3, "0"), date: issueDate });
     const { frame, missing, signer } = await buildFrame(cur, { number, date: issueDate, signerUserId: actor.userId, draft: false });

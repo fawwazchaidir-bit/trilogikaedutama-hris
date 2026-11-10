@@ -46,7 +46,7 @@ test("Staf membuat surat permohonan narasumber dengan editor visual dan mengajuk
   await shot(page, "01-daftar-staf");
   await page.getByRole("button", { name: "Buat surat" }).click();
   await shot(page, "02-pilih-jenis");
-  await page.getByRole("button", { name: /Surat Permohonan Narasumber/ }).click();
+  await page.getByRole("button", { name: /Permohonan narasumber/ }).click();
   await page.waitForURL(/\/persuratan\/[0-9a-f-]{36}$/);
   letterId = page.url().split("/").pop()!;
   await expect(page.getByRole("textbox", { name: "Isi surat" })).toBeVisible();
@@ -78,7 +78,7 @@ test("Direktur melihat surat di 'Perlu tanda tangan' dan menyetujui → nomor ma
   const page = await ctx.newPage();
   await login(page, USERS.pimpinan);
   await page.goto("/persuratan?scope=review");
-  await expect(page.getByRole("link", { name: "Surat Permohonan Narasumber" })).toBeVisible();
+  await expect(page.getByRole("link", { name: /Permohonan narasumber/ })).toBeVisible();
   await shot(page, "06-antrean-direktur");
   await page.goto(`/persuratan/${letterId}`);
   await page.getByRole("tab", { name: /Pratinjau PDF/ }).click();
@@ -136,12 +136,12 @@ test("galeri editor: templat narasumber (blok rincian), SK (diktum), dan tabel",
     await page.waitForURL(/\/persuratan\/[0-9a-f-]{36}$/);
     await expect(page.getByRole("textbox", { name: "Isi surat" })).toBeVisible();
   };
-  await make(/Surat Permohonan Narasumber/);
+  await make(/Permohonan narasumber/);
   await page.getByLabel("Penandatangan").selectOption({ index: 1 });
   await shot(page, "11-templat-narasumber");
-  await make(/Surat Keputusan \(SK\)/);
+  await make(/Surat keputusan\/SK/);
   await shot(page, "12-templat-sk");
-  await make(/Surat Penawaran/);
+  await make(/Penawaran B2B/);
   const ed = page.getByRole("textbox", { name: "Isi surat" });
   await ed.click();
   await page.keyboard.press("ControlOrMeta+End");

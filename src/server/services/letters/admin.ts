@@ -17,11 +17,11 @@ function assertDirector(actor: Actor): void {
 
 export interface LetterSettingsDto {
   place: string; idLine: string | null; footerText: string | null; escalationDays: number; stampUrl: string | null;
-  counters: { series: "EKS" | "INT"; year: number; lastSeq: number }[];
+  counters: { year: number; lastSeq: number }[];
 }
 export async function getLetterSettingsDto(actor: Actor): Promise<LetterSettingsDto> {
   assertDirector(actor);
-  const [s, counters] = await Promise.all([getLetterSettings(), prisma.letterCounter.findMany({ orderBy: [{ year: "desc" }, { series: "asc" }] })]);
+  const [s, counters] = await Promise.all([getLetterSettings(), prisma.letterCounter.findMany({ orderBy: { year: "desc" } })]);
   return { place: s.place, idLine: s.idLine, footerText: s.footerText, escalationDays: s.escalationDays, stampUrl: s.stampFileId ? `/api/files/${s.stampFileId}` : null, counters };
 }
 
@@ -41,13 +41,13 @@ export async function updateLetterSettings(actor: Actor, raw: unknown): Promise<
 /** Atur nomor urut terakhir yang sudah terpakai (mis. melanjutkan register arsip). Hanya boleh naik. */
 export async function setCounterOffset(actor: Actor, raw: unknown): Promise<void> {
   assertDirector(actor);
-  const input = parseInput(z.object({ series: z.enum(["EKS", "INT"]), year: z.number().int().min(2020).max(2100), lastSeq: z.number().int().min(0).max(99999) }), raw);
+  const input = parseInput(z.object({ year: z.number().int().min(2020).max(2100), lastSeq: z.number().int().min(0).max(99999) }), raw);
   await transaction(async (tx) => {
-    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`letters:${input.series}:${input.year}`}))`;
-    const cur = await tx.letterCounter.findUnique({ where: { series_year: { series: input.series, year: input.year } } });
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`letters:${input.year}`}))`;
+    const cur = await tx.letterCounter.findUnique({ where: { year: input.year } });
     if (cur && input.lastSeq < cur.lastSeq) throw Errors.validation(`Nomor terakhir tidak boleh diturunkan (saat ini ${cur.lastSeq}).`);
-    await tx.letterCounter.upsert({ where: { series_year: { series: input.series, year: input.year } }, create: input, update: { lastSeq: input.lastSeq } });
-    await writeAudit(tx, actor, { action: "letter.counter", entityType: "LetterCounter", entityId: `${input.series}:${input.year}`, summary: `Nomor urut ${input.series} ${input.year} diatur ke ${input.lastSeq}`, before: { lastSeq: cur?.lastSeq ?? 0 }, after: { lastSeq: input.lastSeq } });
+    await tx.letterCounter.upsert({ where: { year: input.year }, create: input, update: { lastSeq: input.lastSeq } });
+    await writeAudit(tx, actor, { action: "letter.counter", entityType: "LetterCounter", entityId: String(input.year), summary: `Nomor urut surat tahun ${input.year} diatur ke ${input.lastSeq}`, before: { lastSeq: cur?.lastSeq ?? 0 }, after: { lastSeq: input.lastSeq } });
   });
 }
 

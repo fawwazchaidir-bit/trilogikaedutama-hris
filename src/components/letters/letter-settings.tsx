@@ -14,7 +14,7 @@ type Holder = { userId: string; name: string; title: string | null; hasSignature
 export function LetterSettings({ settings, types, holders }: { settings: LetterSettingsDto; types: LetterTypeDto[]; holders: Holder[] }) {
   const router = useRouter(); const toast = useToast();
   const [s, setS] = useState({ place: settings.place, idLine: settings.idLine ?? "", footerText: settings.footerText ?? "", escalationDays: String(settings.escalationDays) });
-  const [counter, setCounter] = useState({ series: "EKS", year: String(new Date().getFullYear()), lastSeq: "" });
+  const [counter, setCounter] = useState({ year: String(new Date().getFullYear()), lastSeq: "" });
   const [busy, setBusy] = useState<string | null>(null);
   const run = async (key: string, fn: () => Promise<unknown>, ok: string) => { setBusy(key); try { await fn(); toast.success(ok); router.refresh(); } catch (e) { toast.error(errorMessage(e)); } finally { setBusy(null); } };
   const upload = (url: string, f: File | undefined, key: string) => { if (!f) return; const form = new FormData(); form.set("file", f); void run(key, () => api(url, { method: "POST", form }), "Gambar tersimpan."); };
@@ -65,11 +65,10 @@ export function LetterSettings({ settings, types, holders }: { settings: LetterS
       </Card>
 
       <Card>
-        <CardHeader title="Nomor urut" description="Nomor berikutnya = nomor terakhir + 1. Gunakan untuk melanjutkan register yang sudah berjalan; nomor tidak dapat diturunkan." />
+        <CardHeader title="Nomor urut" description="Satu urutan global per tahun untuk semua jenis surat (mengikuti Register). Nomor berikutnya = nomor terakhir + 1; gunakan untuk melanjutkan register yang sudah berjalan. Tidak dapat diturunkan." />
         <div className="space-y-3 p-4">
-          <ul className="flex flex-wrap gap-2 text-sm">{settings.counters.length === 0 ? <li className="text-muted">Belum ada nomor terbit.</li> : settings.counters.map((c) => <li key={`${c.series}${c.year}`} className="rounded-md border border-line bg-canvas px-3 py-1.5">TE-{c.series} {c.year}: terakhir <b>{String(c.lastSeq).padStart(3, "0")}</b></li>)}</ul>
-          <form className="flex flex-wrap items-end gap-3" onSubmit={(e) => { e.preventDefault(); void run("counter", () => api("/api/letters/settings/counter", { body: { series: counter.series, year: Number(counter.year), lastSeq: Number(counter.lastSeq) } }), "Nomor urut diatur."); }}>
-            <label className="text-sm">Seri<select className="mt-1 block h-10 rounded-md border border-line px-2" value={counter.series} onChange={(e) => setCounter({ ...counter, series: e.target.value })}><option value="EKS">TE-EKS</option><option value="INT">TE-INT</option></select></label>
+          <ul className="flex flex-wrap gap-2 text-sm">{settings.counters.length === 0 ? <li className="text-muted">Belum ada nomor terbit.</li> : settings.counters.map((c) => <li key={c.year} className="rounded-md border border-line bg-canvas px-3 py-1.5">Tahun {c.year}: nomor terakhir <b>{String(c.lastSeq).padStart(3, "0")}</b></li>)}</ul>
+          <form className="flex flex-wrap items-end gap-3" onSubmit={(e) => { e.preventDefault(); void run("counter", () => api("/api/letters/settings/counter", { body: { year: Number(counter.year), lastSeq: Number(counter.lastSeq) } }), "Nomor urut diatur."); }}>
             <TextField label="Tahun" type="number" value={counter.year} onChange={(e) => setCounter({ ...counter, year: e.target.value })} className="w-28" />
             <TextField label="Nomor terakhir terpakai" type="number" min={0} value={counter.lastSeq} onChange={(e) => setCounter({ ...counter, lastSeq: e.target.value })} className="w-44" required />
             <Button type="submit" variant="primary" loading={busy === "counter"}>Atur</Button>

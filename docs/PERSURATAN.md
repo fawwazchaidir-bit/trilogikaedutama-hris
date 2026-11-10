@@ -13,8 +13,12 @@ ada nomor bolong akibat draf yang dibatalkan.
 
 - Penghitung `letter_counters` per **(seri, tahun)**; dinaikkan dalam transaksi persetujuan dengan *advisory lock*. Bila penerbitan gagal
   (render PDF, dsb.) seluruh transaksi di-rollback dan nomor tidak terpakai.
-- *Asumsi yang perlu dikonfirmasi (keputusan #6)*: urutan berjalan per seri+tahun (bukan per kode tipe). Pengaturan → "Nomor urut" dapat
-  menaikkan nomor terakhir untuk melanjutkan register yang sudah berjalan (hanya boleh naik).
+- Mengikuti Register Excel: **satu nomor urut global per tahun untuk semua seri & jenis** (kembali ke 001 di tahun baru; nomor surat batal tidak dipakai ulang).
+  Pengaturan → "Nomor urut" menaikkan nomor terakhir untuk melanjutkan register yang sudah berjalan (hanya boleh naik).
+- **Kode jenis = master Excel** (sheet Referensi): EKS-001 Penawaran B2C, 002 Penawaran B2B, 003 Permohonan narasumber, 004 Penawaran/ajakan kerja sama,
+  005 Permohonan & perizinan, 006 Undangan, 007 Pemberitahuan, 008 Sertifikasi/uji kompetensi, 009 Keterangan & rekomendasi, 010 Keuangan & penagihan,
+  011 Umum lainnya, 012 Perjanjian (MoU/PKS), 013 Berita acara; INT-001 SK, 002 Surat tugas, 003 Pemberitahuan, 004 Undangan rapat, 005 Edaran,
+  006 Peringatan, 007 Izin/persetujuan, 008 Berita acara, 009 Evaluasi & pembinaan, 010 Keterangan kerja, 011 Administrasi lainnya. Kode lama tidak dipakai lagi.
 
 ## Siklus
 
@@ -29,8 +33,7 @@ ada nomor bolong akibat draf yang dibatalkan.
 | Batalkan surat terbit | Direktur atau penandatangan; nomor tetap tercatat, halaman verifikasi menampilkan "DIBATALKAN" |
 
 Kebijakan jenis (`directorOnly`, `signerJobLevels`, `internAllowed`, `isActive`) diatur Direktur di **Persuratan → Pengaturan**.
-Jenis bawaan (disemai idempoten): `EKS-001` Surat Resmi Umum, `EKS-002` Penawaran, `EKS-003` Permohonan Narasumber, `INT-001` SK
-(hanya Direktur). Isi awal = templat per jenis (`src/lib/documents/templates.ts`); teks panduan `[…]` yang belum diganti memblokir pengajuan.
+Seluruh 24 jenis katalog master disemai idempoten (penandatangan awal: Direktur saja untuk 006–010 & 012 EKS, INT-001/006/010; selain itu Direktur atau Manajer). Isi awal = templat per jenis (`src/lib/documents/templates.ts`); teks panduan `[…]` yang belum diganti memblokir pengajuan.
 
 ## Dokumen & PDF terkunci
 

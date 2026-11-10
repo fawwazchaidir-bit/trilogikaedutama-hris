@@ -20,11 +20,18 @@ const dto = (t: { id: string; series: "EKS" | "INT"; code: number; name: string;
 
 /** Semai jenis bawaan yang belum ada (tidak menimpa kebijakan yang sudah diubah Direktur). Idempoten. */
 export async function ensureDefaultTypes(): Promise<void> {
-  const have = await prisma.letterType.findMany({ select: { series: true, code: true } });
+  const have = await prisma.letterType.findMany({ select: { id: true, series: true, code: true, name: true, _count: { select: { documents: true } } } });
   const key = (s: string, c: number) => `${s}:${c}`;
-  const exists = new Set(have.map((h) => key(h.series, h.code)));
+  const byKey = new Map(have.map((h) => [key(h.series, h.code), h]));
   for (const t of DEFAULT_LETTER_TYPES) {
-    if (exists.has(key(t.series, t.code))) continue;
+    const cur = byKey.get(key(t.series, t.code));
+    if (cur) {
+      // Katalog master berubah (mis. kode lama diganti): selaraskan nama/templat HANYA bila jenis itu belum dipakai satu surat pun. Kebijakan tidak disentuh.
+      if (cur.name !== t.name && cur._count.documents === 0) {
+        await prisma.letterType.update({ where: { id: cur.id }, data: { name: t.name, description: t.description, kind: t.kind, templateBody: t.template as object, defaultSalutation: t.salutation, defaultClosing: t.closing } });
+      }
+      continue;
+    }
     await prisma.letterType.create({
       data: {
         series: t.series, code: t.code, name: t.name, description: t.description, kind: t.kind, directorOnly: t.directorOnly, signerJobLevels: t.signerJobLevels,

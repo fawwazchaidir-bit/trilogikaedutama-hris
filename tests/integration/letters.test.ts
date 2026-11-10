@@ -44,15 +44,18 @@ beforeEach(async () => {
 describe("jenis & penandatangan", () => {
   it("jenis bawaan tersemai; Magang hanya melihat yang diizinkan", async () => {
     const all = await listTypes(staf);
-    expect(all.map((t) => `${t.series}-${t.codeText}`)).toEqual(expect.arrayContaining(["EKS-001", "EKS-002", "EKS-003", "INT-001"]));
+    expect(all.map((t) => `${t.series}-${t.codeText}`)).toEqual(expect.arrayContaining(["EKS-001", "EKS-002", "EKS-003", "EKS-013", "INT-001", "INT-011"]));
     const mg = await listTypes(magang);
-    expect(mg.map((t) => `${t.series}-${t.codeText}`)).toEqual(["EKS-001"]);
+    expect(mg.map((t) => `${t.series}-${t.codeText}`)).toEqual(["EKS-011"]);
+    expect(all.length).toBe(24);
   });
   it("penandatangan sesuai kebijakan: SK hanya Direktur; surat eksternal Direktur + Manajer; bukan diri sendiri; Magang tidak pernah", async () => {
     const sk = await typeOf("INT", 1);
     expect((await listSigners(staf, sk.id)).map((s) => s.userId)).toEqual([direktur.userId]);
     const eks = await typeOf("EKS", 3);
     expect((await listSigners(staf, eks.id)).map((s) => s.userId).sort()).toEqual([direktur.userId, manajer.userId].sort());
+    const undangan = await typeOf("EKS", 6); // Direktur saja menurut Register
+    expect((await listSigners(staf, undangan.id)).map((s) => s.userId)).toEqual([direktur.userId]);
     expect((await listSigners(manajer, eks.id)).map((s) => s.userId)).toEqual([direktur.userId]);
   });
   it("kebijakan jenis diubah Direktur saja", async () => {
@@ -92,7 +95,7 @@ describe("siklus: draf → diajukan → terbit", () => {
     expect(out.events.map((e) => e.action)).toEqual(["CREATED", "SUBMITTED", "ISSUED"]);
   });
 
-  it("nomor urut berjalan per seri & tahun, tanpa lubang; persetujuan serentak tidak menghasilkan nomor ganda", async () => {
+  it("nomor urut GLOBAL per tahun (lintas seri), tanpa lubang; persetujuan serentak tidak menghasilkan nomor ganda", async () => {
     const ids: string[] = [];
     for (let i = 0; i < 4; i++) {
       const d = await draftReady(staf, manajer);
@@ -102,17 +105,17 @@ describe("siklus: draf → diajukan → terbit", () => {
     const res = await Promise.all(ids.map((id) => approveLetter(manajer, id)));
     const seqs = res.map((r) => Number(r.number!.split("/")[0])).sort((a, b) => a - b);
     expect(seqs).toEqual([1, 2, 3, 4]);
-    // seri INT memiliki hitungan sendiri
+    // urutan GLOBAL: seri INT melanjutkan setelah EKS (bukan mulai dari 001 lagi)
     const sk = await draftReady(staf, direktur, { series: "INT", code: 1 });
     await updateLetter(staf, sk.id, { body: doc(p("Isi SK final.")), variables: {} });
     await submitLetter(staf, sk.id);
-    expect((await approveLetter(direktur, sk.id)).number).toMatch(/^001\/TE-INT\/001\//);
+    expect((await approveLetter(direktur, sk.id)).number).toMatch(/^005\/TE-INT\/001\//);
   });
 
   it("offset arsip: lanjut dari nomor terakhir; tidak boleh diturunkan", async () => {
     const yr = Number(new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Jakarta" }).slice(0, 4));
-    await setCounterOffset(direktur, { series: "EKS", year: yr, lastSeq: 80 });
-    expect(await fail(setCounterOffset(direktur, { series: "EKS", year: yr, lastSeq: 10 }))).toMatchObject(VALIDATION);
+    await setCounterOffset(direktur, { year: yr, lastSeq: 80 });
+    expect(await fail(setCounterOffset(direktur, { year: yr, lastSeq: 10 }))).toMatchObject(VALIDATION);
     const d = await draftReady(staf, manajer);
     await updateLetter(staf, d.id, { body: doc(p("Isi final.")) }); await submitLetter(staf, d.id);
     expect((await approveLetter(manajer, d.id)).number).toMatch(/^081\/TE-EKS\/003\//);
