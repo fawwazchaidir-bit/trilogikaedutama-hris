@@ -105,3 +105,13 @@ export function resolveVariables(doc: PmDoc, values: Record<string, string>): { 
   };
   return { doc: { type: "doc", content: doc.content.map(walk) }, missing: [...missing] };
 }
+
+/** Seluruh teks dokumen (untuk pemeriksaan isi, mis. sisa teks panduan [..]). */
+export function docText(doc: PmDoc | PmNode): string {
+  const parts: string[] = [];
+  const walk = (n: PmNode) => { if (n.type === "text" && n.text) parts.push(n.text); for (const c of n.content ?? []) walk(c); };
+  walk(doc as PmNode);
+  return parts.join(" ");
+}
+/** Penanda teks panduan templat yang belum diganti: [seperti ini]. */
+export const hasPlaceholder = (doc: PmDoc): boolean => /\[[^\]]{2,}\]/.test(docText(doc));

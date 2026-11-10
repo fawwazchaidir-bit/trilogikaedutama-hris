@@ -74,6 +74,8 @@ const schema = z.object({
    * Data tidak dihapus. Lihat docs/OBROLAN.md.
    */
   CHAT_MODULE_ENABLED: bool.default(false),
+  /** Persuratan (surat, penawaran, SK: editor, nomor otomatis, PDF ber-QR, verifikasi publik). DEFAULT MATI. Mati = menu tidak tampil, /persuratan dan /api/letters menjawab 404; halaman verifikasi publik tetap berfungsi untuk surat yang sudah terbit. Lihat docs/PERSURATAN.md. */
+  LETTERS_MODULE_ENABLED: bool.default(false),
   /** Pekerja obrolan di dalam proses aplikasi (retensi pesan + pemulih keanggotaan kanal; idempoten, aman di banyak instance). Hanya aktif bila modul menyala. */
   CHAT_WORKER: bool.default(true),
   /** Masa simpan isi pesan (bulan). Lewat batas, isi dihapus (baris tetap) kecuali ruang ditahan (legalHold). */
@@ -108,6 +110,9 @@ export const trainingEnabled = (): boolean => env().TRAINING_MODULE_ENABLED;
 
 /** Apakah Obrolan internal diaktifkan (feature flag CHAT_MODULE_ENABLED). */
 export const chatEnabled = (): boolean => env().CHAT_MODULE_ENABLED;
+
+/** Apakah Persuratan diaktifkan (feature flag LETTERS_MODULE_ENABLED). */
+export const lettersEnabled = (): boolean => env().LETTERS_MODULE_ENABLED;
 
 export function whatsappConfigured(): boolean {
   const e = env();

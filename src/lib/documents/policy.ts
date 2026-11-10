@@ -1,0 +1,42 @@
+/** Aturan murni siklus & kewenangan persuratan (tanpa database) — dipakai service, UI, dan tes. */
+
+export type LetterStatus = "DRAFT" | "IN_REVIEW" | "RETURNED" | "ISSUED" | "REJECTED" | "CANCELLED";
+export type JobLevel = "STAFF" | "SUPERVISOR" | "MANAGER";
+
+export const LETTER_STATUS_LABEL: Record<LetterStatus, string> = {
+  DRAFT: "Draf", IN_REVIEW: "Menunggu penandatangan", RETURNED: "Dikembalikan", ISSUED: "Terbit", REJECTED: "Ditolak", CANCELLED: "Dibatalkan",
+};
+export const LETTER_SERIES_LABEL = { EKS: "Eksternal", INT: "Internal" } as const;
+
+/** Hanya Draf/Dikembalikan yang boleh disunting (oleh pembuatnya). */
+export const isEditable = (s: LetterStatus): boolean => s === "DRAFT" || s === "RETURNED";
+
+export interface SignerPolicy { directorOnly: boolean; signerJobLevels: JobLevel[] }
+export interface PersonFacts { role: "EMPLOYEE" | "HR_ADMIN" | "SUPER_ADMIN"; jobLevel: JobLevel | null; isIntern: boolean; isActive: boolean }
+
+/** Direktur = Super Admin. Selain itu hanya tingkat jabatan yang diizinkan jenis surat; Magang tidak pernah. */
+export function isEligibleSigner(policy: SignerPolicy, p: PersonFacts): boolean {
+  if (!p.isActive || p.isIntern) return false;
+  if (p.role === "SUPER_ADMIN") return true;
+  if (policy.directorOnly) return false;
+  return !!p.jobLevel && policy.signerJobLevels.includes(p.jobLevel);
+}
+
+/** Pembuat yang bukan Direktur tidak boleh menjadi penandatangan dokumennya sendiri. */
+export function canSignOwn(creator: Pick<PersonFacts, "role">): boolean { return creator.role === "SUPER_ADMIN"; }
+
+/** Jumlah hari kerja (Sen–Jum) yang telah berlalu antara dua instan, dihitung per tanggal kalender di zona waktu yang diberikan. */
+export function workingDaysElapsed(from: Date, to: Date, timeZone = "Asia/Jakarta"): number {
+  const fmt = new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" });
+  const day = (d: Date) => { const [y, m, dd] = fmt.format(d).split("-").map(Number); return Date.UTC(y!, m! - 1, dd!); };
+  let cur = day(from); const end = day(to); let n = 0;
+  while (cur < end) { cur += 86_400_000; const dow = new Date(cur).getUTCDay(); if (dow !== 0 && dow !== 6) n++; }
+  return n;
+}
+
+/** Direktur boleh mengambil alih tinjauan setelah `days` hari kerja sejak diajukan. */
+export function canTakeOver(submittedAt: Date | null, now: Date, days: number, timeZone?: string): boolean {
+  return !!submittedAt && workingDaysElapsed(submittedAt, now, timeZone) >= days;
+}
+
+export const verifyPath = (token: string): string => `/verifikasi/${token}`;

@@ -61,3 +61,34 @@ dialog { margin: auto; }
   mask-image: linear-gradient(to bottom, transparent 0, #000 14px, #000 calc(100% - 22px), transparent 100%);
 }
 .nav-scroll::-webkit-scrollbar { display: none; }
+
+/* ───────── Persuratan: kertas & isi dokumen di editor (meniru PDF: Liberation Serif ~ Times, 11pt, rata kiri-kanan) ───────── */
+@counter-style diktum-id { system: fixed; symbols: "KESATU" "KEDUA" "KETIGA" "KEEMPAT" "KELIMA" "KEENAM" "KETUJUH" "KEDELAPAN" "KESEMBILAN" "KESEPULUH"; fallback: decimal; }
+.letter-paper { font-family: "Liberation Serif", "Times New Roman", Times, serif; font-size: 11pt; line-height: 1.3; color: #000; }
+.letter-paper .ProseMirror { outline: none; min-height: 14cm; }
+.letter-paper .ProseMirror p { margin: 0 0 6pt; }
+.letter-paper .ProseMirror p[data-first-line] { text-indent: 1.25cm; }
+.letter-paper .ProseMirror ul, .letter-paper .ProseMirror ol { margin: 0 0 6pt; padding-left: 1.1cm; }
+.letter-paper .ProseMirror ul { list-style: disc; }
+.letter-paper .ProseMirror ol { list-style: decimal; }
+.letter-paper .ProseMirror ol[data-list-style="lower-alpha"] { list-style: lower-alpha; }
+.letter-paper .ProseMirror ol[data-list-style="upper-alpha"] { list-style: upper-alpha; }
+.letter-paper .ProseMirror ol[data-list-style="lower-roman"] { list-style: lower-roman; }
+.letter-paper .ProseMirror li > p { margin: 0; }
+.letter-paper .ProseMirror [data-label-block] { margin: 0 0 6pt; }
+.letter-paper .ProseMirror [data-label-row] { display: grid; grid-template-columns: 3.2cm 1fr; gap: 0 .2cm; }
+.letter-paper .ProseMirror [data-label-row]::before { content: attr(data-label) " :"; }
+.letter-paper .ProseMirror [data-diktum-list] { counter-reset: diktum; margin: 0 0 6pt; }
+.letter-paper .ProseMirror [data-diktum-item] { display: grid; grid-template-columns: 2.6cm 1fr; margin-bottom: 4pt; }
+.letter-paper .ProseMirror [data-diktum-item]::before { content: attr(data-label) " :"; }
+.letter-paper .ProseMirror [data-diktum-item]:not([data-label]) { counter-increment: diktum; }
+.letter-paper .ProseMirror [data-diktum-item]:not([data-label])::before { content: counter(diktum, diktum-id) " :"; }
+.letter-paper .ProseMirror table { border-collapse: collapse; width: 100%; margin: 0 0 6pt; table-layout: fixed; }
+.letter-paper .ProseMirror td, .letter-paper .ProseMirror th { border: .75pt solid #000; padding: 2pt 4pt; vertical-align: top; position: relative; }
+.letter-paper .ProseMirror th { background: #f0f0f0; font-weight: bold; }
+.letter-paper .ProseMirror td > p, .letter-paper .ProseMirror th > p { margin: 0; }
+.letter-paper .ProseMirror .selectedCell::after { content: ""; position: absolute; inset: 0; background: rgba(140, 29, 45, .15); pointer-events: none; }
+.letter-paper .ProseMirror [data-page-break] { border-top: 1.5px dashed #a8293a; margin: 10pt 0; text-align: center; height: 0; overflow: visible; }
+.letter-paper .ProseMirror [data-page-break]::after { content: "pemisah halaman"; position: relative; top: -.7em; background: #fff; padding: 0 6px; font: 9pt system-ui, sans-serif; color: #a8293a; }
+.letter-paper .ProseMirror [data-variable] { background: #fdf3f4; color: #721626; border-radius: 3px; padding: 0 3px; font-family: ui-monospace, monospace; font-size: 9.5pt; }
+.letter-paper .ProseMirror [data-optional-block] { border-left: 3px solid #f1c3c8; padding-left: 8px; }

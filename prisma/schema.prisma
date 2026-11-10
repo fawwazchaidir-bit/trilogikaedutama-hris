@@ -176,6 +176,8 @@ enum FileKind {
   DOCUMENT
   /// Dokumen proyek Training & Operations (privat; hanya diakses lewat API yang memeriksa lingkup proyek).
   TRAINING_DOCUMENT
+  /// PDF surat terbit dari modul Persuratan (privat; dibuka lewat API yang memeriksa hak atas dokumen).
+  LETTER_PDF
 }
 
 enum LateDeductionMode {
@@ -305,6 +307,141 @@ enum LocationReviewStatus {
 }
 
 // ───────────────────────────── Pengguna & sesi ─────────────────────────────
+
+// ─────────────────────────── Persuratan (surat, penawaran, SK) — docs/PERSURATAN.md ───────────────────────────
+
+enum LetterSeries {
+  EKS
+  INT
+}
+
+enum LetterStatus {
+  DRAFT
+  IN_REVIEW
+  RETURNED
+  ISSUED
+  REJECTED
+  CANCELLED
+}
+
+/// Jenis surat + kebijakannya (siapa boleh menandatangani, apakah Magang boleh membuat) + templat isi awal.
+model LetterType {
+  id                String           @id @default(uuid()) @db.Uuid
+  series            LetterSeries
+  /// Kode tipe 3 digit pada nomor surat (glosarium Excel), mis. 3 → "003".
+  code              Int
+  name              String
+  description       String?
+  /// Layout bingkai renderer: SURAT (kepada/salam/penutup) atau SK (judul + diktum, tanpa penerima).
+  kind              String           @default("SURAT")
+  /// true = hanya Direktur (Super Admin) yang boleh menandatangani; false = Direktur atau tingkat jabatan di signerJobLevels.
+  directorOnly      Boolean          @default(false)
+  signerJobLevels   JobLevel[]
+  internAllowed     Boolean          @default(false)
+  isActive          Boolean          @default(true)
+  /// Isi awal (JSON ProseMirror tervalidasi `validateDoc`).
+  templateBody      Json
+  defaultSalutation String?
+  defaultClosing    String?
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+  documents         LetterDocument[]
+
+  @@unique([series, code])
+  @@map("letter_types")
+}
+
+/// Penghitung nomor urut per seri & tahun. Dinaikkan di dalam transaksi persetujuan dengan advisory lock. `lastSeq` dapat diatur awal (offset arsip).
+model LetterCounter {
+  series  LetterSeries
+  year    Int
+  lastSeq Int          @default(0)
+
+  @@id([series, year])
+  @@map("letter_counters")
+}
+
+/// Pengaturan persuratan (satu baris): kota, baris identitas kop, cap, ambang eskalasi.
+model LetterSettings {
+  id             Int     @id @default(1)
+  place          String  @default("Sleman")
+  idLine         String?
+  footerText     String?
+  stampFileId    String? @db.Uuid
+  /// Hari kerja sejak diajukan sebelum Direktur boleh mengambil alih.
+  escalationDays Int     @default(2)
+
+  @@map("letter_settings")
+}
+
+/// Gambar tanda tangan per akun penandatangan (PNG ternormalisasi, diunggah Direktur).
+model LetterSigner {
+  userId          String   @id @db.Uuid
+  signatureFileId String?  @db.Uuid
+  updatedAt       DateTime @updatedAt
+
+  @@map("letter_signers")
+}
+
+model LetterDocument {
+  id        String       @id @default(uuid()) @db.Uuid
+  typeId    String       @db.Uuid
+  type      LetterType   @relation(fields: [typeId], references: [id])
+  status    LetterStatus @default(DRAFT)
+  creatorId String       @db.Uuid
+  signerId  String?      @db.Uuid
+
+  subject         String
+  recipientLines  String[]
+  recipientPlace  String?
+  attachmentCount Int?
+  attachmentUnit  String?
+  salutation      String?
+  closing         String?
+  cc              String[]
+  body            Json
+  variables       Json?
+
+  submittedAt DateTime?
+  returnNote  String?
+  cancelNote  String?
+  rejectNote  String?
+  issueDate   DateTime?    @db.Date
+  issuedAt    DateTime?
+  series      LetterSeries
+  seqYear     Int?
+  seqNo       Int?
+  number      String?      @unique
+  /// Token acak untuk halaman verifikasi publik.
+  verifyToken String       @unique
+  pdfFileId   String?      @db.Uuid
+  pdfSha256   String?
+  snapshot    Json?
+  issuedById  String?      @db.Uuid
+
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+  events    LetterEvent[]
+
+  @@unique([series, seqYear, seqNo])
+  @@index([creatorId, status])
+  @@index([signerId, status])
+  @@map("letter_documents")
+}
+
+/// Jejak siklus dokumen (tambah-saja).
+model LetterEvent {
+  id         String         @id @default(uuid()) @db.Uuid
+  documentId String         @db.Uuid
+  document   LetterDocument @relation(fields: [documentId], references: [id])
+  actorId    String         @db.Uuid
+  action     String
+  note       String?
+  at         DateTime       @default(now())
+
+  @@index([documentId, at])
+  @@map("letter_events")
+}
 
 model User {
   id                 String    @id @default(uuid()) @db.Uuid

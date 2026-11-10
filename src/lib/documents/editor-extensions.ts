@@ -13,15 +13,24 @@ import StarterKit from "@tiptap/starter-kit";
  */
 const attr = <T,>(def: T) => ({ default: def });
 
+const cmStyle = (v: unknown) => (typeof v === "number" ? { style: `margin-left:${v}cm` } : {});
 const Para = Paragraph.extend({
   addAttributes() {
-    return { indent: attr<number | null>(null), firstLine: attr(false), spaceAfter: attr<number | null>(null) };
+    return {
+      indent: { default: null as number | null, renderHTML: (a: { indent?: number | null }) => cmStyle(a.indent) },
+      firstLine: { default: false, renderHTML: (a: { firstLine?: boolean }) => (a.firstLine ? { "data-first-line": "" } : {}), parseHTML: (el: HTMLElement) => el.hasAttribute("data-first-line") },
+      spaceAfter: { default: null as number | null, renderHTML: (a: { spaceAfter?: number | null }) => (typeof a.spaceAfter === "number" ? { style: `margin-bottom:${a.spaceAfter}pt` } : {}) },
+    };
   },
 });
 const Head = Heading.extend({ addAttributes() { return { ...this.parent?.() }; } });
 const OList = OrderedList.extend({
   addAttributes() {
-    return { ...this.parent?.(), style: attr("decimal"), indent: attr<number | null>(null) };
+    return {
+      ...this.parent?.(),
+      style: { default: "decimal", renderHTML: (a: { style?: string }) => ({ "data-list-style": a.style ?? "decimal" }), parseHTML: (el: HTMLElement) => el.getAttribute("data-list-style") ?? "decimal" },
+      indent: { default: null as number | null, renderHTML: (a: { indent?: number | null }) => cmStyle(a.indent) },
+    };
   },
 });
 
@@ -31,15 +40,15 @@ const Tbl = Table.extend({
 
 const LabelBlock = Node.create({
   name: "labelBlock", group: "block", content: "labelRow+", defining: true,
-  addAttributes() { return { labelWidth: attr<number | null>(null), indent: attr<number | null>(null) }; },
+  addAttributes() { return { labelWidth: attr<number | null>(null), indent: { default: null as number | null, renderHTML: (a: { indent?: number | null }) => cmStyle(a.indent) } }; },
   parseHTML() { return [{ tag: "div[data-label-block]" }]; },
   renderHTML({ HTMLAttributes }) { return ["div", mergeAttributes(HTMLAttributes, { "data-label-block": "" }), 0]; },
 });
 const LabelRow = Node.create({
   name: "labelRow", content: "inline*", defining: true,
-  addAttributes() { return { label: attr("") }; },
+  addAttributes() { return { label: { default: "", renderHTML: (a: { label?: string }) => ({ "data-label": a.label ?? "" }), parseHTML: (el: HTMLElement) => el.getAttribute("data-label") ?? "" } }; },
   parseHTML() { return [{ tag: "div[data-label-row]" }]; },
-  renderHTML({ node, HTMLAttributes }) { return ["div", mergeAttributes(HTMLAttributes, { "data-label-row": "", "data-label": node.attrs.label }), 0]; },
+  renderHTML({ HTMLAttributes }) { return ["div", mergeAttributes(HTMLAttributes, { "data-label-row": "" }), 0]; },
 });
 const DiktumList = Node.create({
   name: "diktumList", group: "block", content: "diktumItem+", defining: true,
@@ -49,7 +58,7 @@ const DiktumList = Node.create({
 });
 const DiktumItem = Node.create({
   name: "diktumItem", content: "block+", defining: true,
-  addAttributes() { return { label: attr<string | null>(null) }; },
+  addAttributes() { return { label: { default: null as string | null, renderHTML: (a: { label?: string | null }) => (a.label ? { "data-label": a.label } : {}), parseHTML: (el: HTMLElement) => el.getAttribute("data-label") } }; },
   parseHTML() { return [{ tag: "div[data-diktum-item]" }]; },
   renderHTML({ HTMLAttributes }) { return ["div", mergeAttributes(HTMLAttributes, { "data-diktum-item": "" }), 0]; },
 });

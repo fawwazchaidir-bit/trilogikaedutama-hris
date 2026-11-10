@@ -1,6 +1,6 @@
 import "server-only";
 import type { Actor } from "./actor";
-import { chatEnabled, trainingEnabled } from "./env";
+import { chatEnabled, lettersEnabled, trainingEnabled } from "./env";
 import { visibleNav, type NavItem, type Role } from "@/lib/permissions";
 import { trainingNav } from "@/lib/training/nav";
 import { getModuleContext } from "./services/training/access";
@@ -19,6 +19,7 @@ export async function loadNav(user: Actor & { role: Role }): Promise<{ nav: Pick
     const at = nav.findIndex((i) => i.href === "/lembur-saya");
     nav = [...nav.slice(0, at + 1), { href: "/persetujuan-tim", label: "Persetujuan Tim", group: "saya" as const }, ...nav.slice(at + 1)];
   }
+  if (lettersEnabled()) nav = [...nav, { href: "/persuratan", label: "Persuratan", group: "saya" as const }];
   if (chatEnabled()) nav = [...nav, { href: "/obrolan", label: "Obrolan", group: "saya" as const }];
   if (trainingEnabled()) {
     const tmod = await getModuleContext(user);

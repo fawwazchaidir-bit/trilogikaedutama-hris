@@ -1,13 +1,14 @@
 import "server-only";
 import { createHash } from "node:crypto";
 import { prisma } from "../db";
-import { env, trainingEnabled } from "../env";
+import { env, lettersEnabled, trainingEnabled } from "../env";
+import { canReadLetterPdf } from "./letters/access";
 import { canReadTrainingFile } from "./training/document-access";
 import { Errors } from "../errors";
 import { writeAudit } from "../audit";
 import { actorCan, type Actor } from "../actor";
 
-export type FileKind = "LOGO" | "EMPLOYEE_PHOTO" | "LEAVE_ATTACHMENT" | "ATTENDANCE_PHOTO" | "SIGNATURE" | "DOCUMENT" | "TRAINING_DOCUMENT";
+export type FileKind = "LOGO" | "EMPLOYEE_PHOTO" | "LEAVE_ATTACHMENT" | "ATTENDANCE_PHOTO" | "SIGNATURE" | "DOCUMENT" | "TRAINING_DOCUMENT" | "LETTER_PDF";
 
 /** Tipe yang diizinkan, diverifikasi dari MAGIC BYTES (bukan dari ekstensi / Content-Type kiriman klien). SVG sengaja ditolak (risiko XSS). */
 const SIGNATURES: { mime: string; ext: string; test: (b: Uint8Array) => boolean }[] = [
@@ -28,6 +29,8 @@ const ALLOWED: Record<FileKind, string[]> = {
   DOCUMENT: ["application/pdf"],
   // Dokumen proyek Training & Operations: PDF/PNG/JPEG saja (tipe diverifikasi dari magic bytes). Otorisasi per proyek dilakukan service training sebelum memanggil storeFile.
   TRAINING_DOCUMENT: ["application/pdf", "image/png", "image/jpeg"],
+  // Hanya dibuat server saat surat terbit (lihat services/letters/issue.ts); tidak pernah dari unggahan klien.
+  LETTER_PDF: ["application/pdf"],
 };
 
 export function sniffMime(bytes: Uint8Array): { mime: string; ext: string } | null {
@@ -52,6 +55,7 @@ export async function storeFile(
   if (kind === "LEAVE_ATTACHMENT" && !actor.employeeId && !actorCan(actor, "leave:review")) throw Errors.forbidden();
   if (kind === "ATTENDANCE_PHOTO" && !actor.employeeId) throw Errors.forbidden();
   if (kind === "DOCUMENT" && !actorCan(actor, "document:manage")) throw Errors.forbidden();
+  if (kind === "LETTER_PDF" && !lettersEnabled()) throw Errors.notFound("Halaman");
   if (kind === "TRAINING_DOCUMENT" && !trainingEnabled()) throw Errors.notFound("Halaman");
   const maxMb = kind === "DOCUMENT" || kind === "TRAINING_DOCUMENT" ? env().MAX_DOCUMENT_UPLOAD_MB : env().MAX_UPLOAD_MB;
   const maxBytes = maxMb * 1024 * 1024;
@@ -111,6 +115,7 @@ export async function readFileForActor(actor: Actor, id: string) {
   if (file.kind === "TRAINING_DOCUMENT") {
     ok = await canReadTrainingFile(actor, id);
   }
+  if (file.kind === "LETTER_PDF") ok = await canReadLetterPdf(actor, id);
   if (file.kind === "DOCUMENT") {
     const own = actor.employeeId ? (await prisma.employeeDocument.count({ where: { fileId: id, employeeId: actor.employeeId, archivedAt: null } })) > 0 : false;
     ok = own || actorCan(actor, "document:view_all");
