@@ -98,7 +98,7 @@ export function LetterEditor({ initial, signers, people, employees = [], me }: {
 
   useEffect(() => { persistRef.current = persist; }, [persist]);
   useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
-  useEffect(() => { editor?.setEditable(editable && d.kind !== "TUGAS"); }, [editor, editable, d.kind]);
+  useEffect(() => { editor?.setEditable(editable && d.kind !== "TUGAS", false); }, [editor, editable, d.kind]);
   const set = (k: keyof Meta) => (e: { target: { value: string } }) => { setMeta((m) => ({ ...m, [k]: e.target.value })); if (editable) schedule(); };
 
   async function act(kind: "submit" | "withdraw" | "approve" | "return" | "reject" | "cancel" | "cosign", withNote = false) {

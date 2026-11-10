@@ -355,3 +355,50 @@ test("galeri tahap 4: Surat Tugas lewat Persuratan, Uang Harian, dan Surat Tugas
   await hrApi.dispose();
   void ayuId;
 });
+
+test("galeri tampilan STAF: daftar surat, pilih jenis, dikembalikan, terbit, penjualan, Surat Tugas Saya, notifikasi, batas akses", async ({ browser }) => {
+  test.skip(!SHOTS, "hanya untuk tangkapan layar (LETTER_SHOTS)");
+  const ayu = await session(USERS.ayu);
+  const H = { origin: base };
+  const types = (await (await ayu.get("/api/letters/types")).json()).data as { id: string; series: string; code: number; kind: string }[];
+  const tid = (series: string, code: number) => types.find((t) => t.series === series && t.code === code)!.id;
+  expect(types.some((t) => t.kind === "TUGAS")).toBe(false); // Surat Tugas tidak ditawarkan kepada staf
+  const signerId = ((await (await ayu.get(`/api/letters/signers?typeId=${tid("EKS", 2)}`)).json()).data as { userId: string }[])[0]!.userId;
+  const mk = async (typeCode: [string, number], subject: string, body: string) => {
+    const c = await (await ayu.post("/api/letters", { data: { typeId: tid(typeCode[0], typeCode[1]) }, headers: H })).json();
+    const id = c.data.id as string;
+    const r = await ayu.patch(`/api/letters/${id}`, { data: { subject, recipientLines: ["Bapak Contoh", "PT Contoh Fiktif"], signerId, body: { type: "doc", content: [{ type: "paragraph", attrs: { textAlign: "justify", firstLine: true }, content: [{ type: "text", text: body }] }] } }, headers: H });
+    expect(r.status()).toBe(200);
+    return id;
+  };
+  await mk(["EKS", 3], "Permohonan narasumber pelatihan (masih draf)", "Isi surat yang masih disusun.");
+  const waiting = await mk(["EKS", 7], "Pemberitahuan perubahan jadwal pelatihan", "Mohon maaf atas perubahan jadwal.");
+  expect((await ayu.post(`/api/letters/${waiting}/submit`, { headers: H })).status()).toBe(200);
+  const returned = await mk(["EKS", 5], "Permohonan izin penggunaan ruang praktik", "Kami mohon izin penggunaan ruang praktik.");
+  expect((await ayu.post(`/api/letters/${returned}/submit`, { headers: H })).status()).toBe(200);
+  expect((await dir.post(`/api/letters/${returned}/return`, { data: { note: "Tolong tambahkan tanggal dan jam penggunaan ruang." }, headers: H })).status()).toBe(200);
+  const offer = await mk(["EKS", 2], "Penawaran In-House Training Food Production", "Bersama ini kami sampaikan penawaran program pelatihan.");
+  expect((await ayu.post(`/api/letters/${offer}/submit`, { headers: H })).status()).toBe(200);
+  expect((await dir.post(`/api/letters/${offer}/approve`, { headers: H })).status()).toBe(200);
+  await ayu.patch(`/api/letters/${offer}/commercial`, { data: { clientName: "PT Contoh Boga", product: "BNSP Tata Boga / Food Production", potentialValue: 45000000, picId: null, followUpAt: isoDatePlus(5) }, headers: H });
+
+  const ctx = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
+  const page = await ctx.newPage();
+  await login(page, USERS.ayu);
+  await page.goto("/persuratan");
+  await shot(page, "31-staf-daftar-surat-saya");
+  await page.getByRole("button", { name: "Buat surat" }).click();
+  await shot(page, "32-staf-pilih-jenis");
+  await page.keyboard.press("Escape");
+  await page.goto(`/persuratan/${returned}`);
+  await expect(page.getByText(/Dikembalikan:/)).toBeVisible();
+  await shot(page, "33-staf-surat-dikembalikan");
+  await page.goto(`/persuratan/${offer}`);
+  await expect(page.getByRole("heading", { name: "Penawaran & penjualan" })).toBeVisible();
+  await shot(page, "34-staf-surat-terbit-penjualan");
+  await page.goto("/notifikasi");
+  await shot(page, "35-staf-notifikasi");
+  for (const url of ["/persuratan/register", "/persuratan/dasbor", "/persuratan/pengaturan", "/persuratan/surat-tugas"]) expect((await page.goto(url))?.status(), url).toBe(404);
+  await ctx.close();
+  await ayu.dispose();
+});
