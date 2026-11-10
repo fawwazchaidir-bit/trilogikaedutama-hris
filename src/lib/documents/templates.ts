@@ -5,7 +5,7 @@ import type { PmDoc } from "./content";
 export interface DefaultLetterType {
   series: "EKS" | "INT"; code: number; name: string; description: string; kind: "SURAT" | "SK";
   directorOnly: boolean; signerJobLevels: ("SUPERVISOR" | "MANAGER")[]; internAllowed: boolean;
-  confidential: boolean; hrCanSign: boolean; hrCanView: boolean; multiSigner: boolean;
+  confidential: boolean; hrCanSign: boolean; hrCanView: boolean; multiSigner: boolean; funnel: boolean;
   salutation: string | null; closing: string | null; template: PmDoc;
 }
 
@@ -83,9 +83,11 @@ const CONFIDENTIAL = new Set(["INT:6", "INT:9", "INT:10"]);
 const HR_SIGN = new Set(["INT:7", "INT:10", "INT:11"]);
 const HR_VIEW = new Set(["INT:10"]);
 const MULTI = new Set(["EKS:13", "INT:8"]);
+/** Masuk corong penjualan (Register: "Corong Penjualan = Ya"): Penawaran B2C, Penawaran B2B, Penawaran/ajakan kerja sama. */
+const FUNNEL = new Set(["EKS:1", "EKS:2", "EKS:4"]);
 
 export const DEFAULT_LETTER_TYPES: DefaultLetterType[] = CATALOG.map(([series, code, name, description, signer, intern, template, kind]) => ({
   series, code, name, description, kind: kind ?? "SURAT", directorOnly: signer === "D" && !HR_SIGN.has(`${series}:${code}`), signerJobLevels: signer === "M" ? ["MANAGER"] : [], internAllowed: intern,
-  confidential: CONFIDENTIAL.has(`${series}:${code}`), hrCanSign: HR_SIGN.has(`${series}:${code}`), hrCanView: HR_VIEW.has(`${series}:${code}`), multiSigner: MULTI.has(`${series}:${code}`),
+  confidential: CONFIDENTIAL.has(`${series}:${code}`), hrCanSign: HR_SIGN.has(`${series}:${code}`), hrCanView: HR_VIEW.has(`${series}:${code}`), multiSigner: MULTI.has(`${series}:${code}`), funnel: FUNNEL.has(`${series}:${code}`),
   salutation: kind === "SK" ? null : salam(series), closing: null, template,
 }));

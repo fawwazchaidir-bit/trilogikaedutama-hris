@@ -182,6 +182,8 @@ enum FileKind {
   LETTER_SIGNATURE
   /// Lampiran PDF yang diunggah untuk surat (privat; digabung ke PDF terbit atau disimpan terpisah dengan hash sendiri).
   LETTER_ATTACHMENT
+  /// Bukti Deal penawaran (PO / persetujuan klien): PDF atau JPG; privat, dibuka pihak yang berhak melihat suratnya.
+  LETTER_EVIDENCE
 }
 
 enum LateDeductionMode {
@@ -351,6 +353,8 @@ model LetterType {
   hrCanView         Boolean          @default(false)
   /// Mendukung beberapa penandatangan (berita acara): pihak internal + slot tanda tangan basah mitra luar.
   multiSigner       Boolean          @default(false)
+  /// Jenis yang masuk corong penjualan (penawaran/ajakan kerja sama): dihitung konversi & nilai deal di dasbor.
+  funnel            Boolean          @default(false)
   /// Isi awal (JSON ProseMirror tervalidasi `validateDoc`).
   templateBody      Json
   defaultSalutation String?
@@ -376,13 +380,17 @@ model LetterCounter {
 
 /// Pengaturan persuratan (satu baris): kota, baris identitas kop, cap, ambang eskalasi.
 model LetterSettings {
-  id             Int     @id @default(1)
-  place          String  @default("Sleman")
+  id             Int      @id @default(1)
+  place          String   @default("Sleman")
   idLine         String?
   footerText     String?
-  stampFileId    String? @db.Uuid
+  stampFileId    String?  @db.Uuid
   /// Hari kerja sejak diajukan sebelum Direktur boleh mengambil alih.
-  escalationDays Int     @default(2)
+  escalationDays Int      @default(2)
+  /// Target revenue tahunan (Rp) untuk capaian di dasbor penjualan.
+  annualTarget   BigInt   @default(10000000000)
+  /// Daftar produk untuk penawaran (dropdown).
+  products       String[] @default(["BNSP Training of Trainers", "BNSP Tenaga Pemasaran", "BNSP Pelayanan Prima / Excellent Service", "BNSP Tata Boga / Food Production", "AI & Pemasaran Digital", "Desa Wisata & UMKM", "Manajemen SDM", "Paket In-House (campuran)", "Lainnya"])
 
   @@map("letter_settings")
 }
@@ -417,6 +425,16 @@ model LetterSignatory {
 
   @@index([documentId, position])
   @@map("letter_signatories")
+}
+
+/// Status komersial penawaran SETELAH surat terbit (sebelum terbit = Draf; surat batal/ditolak = Batal; keduanya diturunkan dari status surat).
+enum CommercialStatus {
+  SENT
+  FOLLOW_UP
+  NEGOTIATION
+  DEAL
+  REJECTED
+  DONE
 }
 
 enum AttachmentKind {
@@ -466,30 +484,46 @@ model LetterDocument {
   body            Json
   variables       Json?
 
-  submittedAt DateTime?
-  returnNote  String?
-  cancelNote  String?
-  rejectNote  String?
-  issueDate   DateTime?    @db.Date
-  issuedAt    DateTime?
-  series      LetterSeries
-  seqYear     Int?
-  seqNo       Int?
-  number      String?      @unique
+  submittedAt        DateTime?
+  returnNote         String?
+  cancelNote         String?
+  rejectNote         String?
+  issueDate          DateTime?         @db.Date
+  issuedAt           DateTime?
+  series             LetterSeries
+  seqYear            Int?
+  seqNo              Int?
+  number             String?           @unique
   /// Token acak untuk halaman verifikasi publik.
-  verifyToken String       @unique
+  verifyToken        String            @unique
   /// Surat dibuat DI LUAR portal (mis. MoU/PKS tanda tangan basah): mesin hanya memberi nomor; PDF pindaian diunggah sesudah terbit.
-  archiveOnly Boolean      @default(false)
-  pdfFileId   String?      @db.Uuid
-  pdfSha256   String?
-  snapshot    Json?
-  issuedById  String?      @db.Uuid
+  archiveOnly        Boolean           @default(false)
+  // ── Data komersial (corong penjualan) ── dapat diubah setelah terbit (tidak termasuk isi yang dibekukan); perubahan status tercatat di letter_events.
+  clientName         String?
+  /// ID/tautan lead di CRM (HaloAI) — hanya rujukan teks; portal tidak menyimpan data CRM.
+  clientRef          String?
+  product            String?
+  picId              String?           @db.Uuid
+  potentialValue     BigInt?
+  dealValue          BigInt?
+  commercialStatus   CommercialStatus?
+  commercialNote     String?
+  sentAt             DateTime?         @db.Date
+  followUpAt         DateTime?         @db.Date
+  lastReminderOn     DateTime?         @db.Date
+  dealEvidenceFileId String?           @db.Uuid
+  dealEvidenceName   String?
+  pdfFileId          String?           @db.Uuid
+  pdfSha256          String?
+  snapshot           Json?
+  issuedById         String?           @db.Uuid
 
-  createdAt   DateTime           @default(now())
-  updatedAt   DateTime           @updatedAt
-  events      LetterEvent[]
-  signatories LetterSignatory[]
-  attachments LetterAttachment[]
+  createdAt    DateTime            @default(now())
+  updatedAt    DateTime            @updatedAt
+  events       LetterEvent[]
+  signatories  LetterSignatory[]
+  attachments  LetterAttachment[]
+  projectLinks LetterProjectLink[]
 
   @@unique([series, seqYear, seqNo])
   @@index([creatorId, status])
@@ -498,6 +532,20 @@ model LetterDocument {
 }
 
 /// Jejak siklus dokumen (tambah-saja).
+/// Tautan penawaran Deal ↔ proyek Training (hanya rujukan; harga tidak disalin ke proyek).
+model LetterProjectLink {
+  id          String         @id @default(uuid()) @db.Uuid
+  documentId  String         @db.Uuid
+  document    LetterDocument @relation(fields: [documentId], references: [id])
+  projectId   String         @db.Uuid
+  createdById String         @db.Uuid
+  createdAt   DateTime       @default(now())
+
+  @@unique([documentId, projectId])
+  @@index([projectId])
+  @@map("letter_project_links")
+}
+
 model LetterEvent {
   id         String         @id @default(uuid()) @db.Uuid
   documentId String         @db.Uuid

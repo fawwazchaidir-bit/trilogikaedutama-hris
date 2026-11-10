@@ -13,7 +13,7 @@ type Holder = { userId: string; name: string; title: string | null; hasSignature
 
 export function LetterSettings({ settings, types, holders }: { settings: LetterSettingsDto; types: LetterTypeDto[]; holders: Holder[] }) {
   const router = useRouter(); const toast = useToast();
-  const [s, setS] = useState({ place: settings.place, idLine: settings.idLine ?? "", footerText: settings.footerText ?? "", escalationDays: String(settings.escalationDays) });
+  const [s, setS] = useState({ place: settings.place, idLine: settings.idLine ?? "", footerText: settings.footerText ?? "", escalationDays: String(settings.escalationDays), annualTarget: String(settings.annualTarget), products: settings.products.join("\n") });
   const [counter, setCounter] = useState({ series: "EKS", year: String(new Date().getFullYear()), lastSeq: "" });
   const [busy, setBusy] = useState<string | null>(null);
   const run = async (key: string, fn: () => Promise<unknown>, ok: string) => { setBusy(key); try { await fn(); toast.success(ok); router.refresh(); } catch (e) { toast.error(errorMessage(e)); } finally { setBusy(null); } };
@@ -40,11 +40,13 @@ export function LetterSettings({ settings, types, holders }: { settings: LetterS
 
       <Card>
         <CardHeader title="Kop & eskalasi" description="Alamat, telepon, dan logo kop diambil dari Pengaturan lembaga." />
-        <form className="grid gap-3 p-4 sm:grid-cols-2" onSubmit={(e) => { e.preventDefault(); void run("settings", () => api("/api/letters/settings", { method: "PATCH", body: { place: s.place, idLine: s.idLine || null, footerText: s.footerText || null, escalationDays: Number(s.escalationDays) } }), "Pengaturan disimpan."); }}>
+        <form className="grid gap-3 p-4 sm:grid-cols-2" onSubmit={(e) => { e.preventDefault(); void run("settings", () => api("/api/letters/settings", { method: "PATCH", body: { place: s.place, idLine: s.idLine || null, footerText: s.footerText || null, escalationDays: Number(s.escalationDays), annualTarget: Number(s.annualTarget), products: s.products.split("\n").map((x) => x.trim()).filter(Boolean) } }), "Pengaturan disimpan."); }}>
           <TextField label="Kota penerbitan" value={s.place} onChange={(e) => setS({ ...s, place: e.target.value })} />
           <TextField label="Batas eskalasi (hari kerja)" type="number" min={1} max={30} value={s.escalationDays} onChange={(e) => setS({ ...s, escalationDays: e.target.value })} hint="Setelah ini Direktur boleh mengambil alih surat yang belum ditandatangani." />
           <TextField label="Baris identitas kop" value={s.idLine} onChange={(e) => setS({ ...s, idLine: e.target.value })} className="sm:col-span-2" placeholder="Vocational Identity Number: …" />
           <TextField label="Teks kaki halaman" value={s.footerText} onChange={(e) => setS({ ...s, footerText: e.target.value })} className="sm:col-span-2" />
+          <TextField label="Target revenue tahunan (Rp)" type="number" min={0} value={s.annualTarget} onChange={(e) => setS({ ...s, annualTarget: e.target.value })} hint="Dipakai untuk capaian di dasbor penjualan." />
+          <label className="block text-sm"><span className="mb-1 block font-medium text-ink">Daftar produk penawaran (satu per baris)</span><textarea rows={5} value={s.products} onChange={(e) => setS({ ...s, products: e.target.value })} className="w-full rounded-md border border-line px-3 py-2 text-sm" /></label>
           <div className="sm:col-span-2"><Button type="submit" variant="primary" loading={busy === "settings"}>Simpan</Button></div>
         </form>
       </Card>

@@ -29,7 +29,7 @@ export interface LetterDto {
 }
 export interface SignatoryDto { id: string; position: number; kind: "INTERNAL" | "EXTERNAL"; userId: string | null; name: string; title: string | null; org: string | null; signedAt: string | null; isMe: boolean }
 export interface LetterDetailDto extends LetterDto {
-  confidential: boolean; multiSigner: boolean; signatories: SignatoryDto[]; attachments: AttachmentDto[];
+  confidential: boolean; multiSigner: boolean; funnel: boolean; signatories: SignatoryDto[]; attachments: AttachmentDto[];
   recipientLines: string[]; recipientPlace: string | null; attachmentCount: number | null; attachmentUnit: string | null; salutation: string | null; closing: string | null;
   cc: string[]; body: PmDoc; variables: Record<string, string>; returnNote: string | null; rejectNote: string | null; cancelNote: string | null;
   events: LetterEventDto[];
@@ -67,7 +67,7 @@ async function detail(actor: Actor, r: Row): Promise<LetterDetailDto> {
   const attRows = await prisma.letterAttachment.findMany({ where: { documentId: r.id }, orderBy: { position: "asc" } });
   const takeOver = isDirector(actor) && !isSigner && r.status === "IN_REVIEW" && canTakeOver(r.submittedAt, new Date(), ls.escalationDays, env().APP_TIMEZONE);
   return {
-    ...toDto(r, n), confidential: r.type.confidential, multiSigner: r.type.multiSigner, signatories, attachments: attRows.map(toAttachmentDto), recipientLines: r.recipientLines, recipientPlace: r.recipientPlace, attachmentCount: r.attachmentCount, attachmentUnit: r.attachmentUnit,
+    ...toDto(r, n), confidential: r.type.confidential, multiSigner: r.type.multiSigner, funnel: r.type.funnel, signatories, attachments: attRows.map(toAttachmentDto), recipientLines: r.recipientLines, recipientPlace: r.recipientPlace, attachmentCount: r.attachmentCount, attachmentUnit: r.attachmentUnit,
     salutation: r.salutation, closing: r.closing, cc: r.cc, body: r.body as unknown as PmDoc, variables: (r.variables as Record<string, string> | null) ?? {},
     returnNote: r.returnNote, rejectNote: r.rejectNote, cancelNote: r.cancelNote,
     events: ev.map((e) => ({ id: e.id, action: e.action, note: e.note, at: e.at.toISOString(), actorName: n.get(e.actorId) ?? "—" })),

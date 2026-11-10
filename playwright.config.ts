@@ -44,7 +44,7 @@ export default defineConfig({
       // Modul Training & Operations default MATI di aplikasi; E2E menyalakannya secara eksplisit (tidak bergantung pada .env lokal).
       TRAINING_MODULE_ENABLED: "true",
       // Obrolan internal juga default MATI; E2E menyalakannya (pekerja dimatikan agar deterministik).
-      CHAT_MODULE_ENABLED: "true", CHAT_WORKER: "false", LETTERS_MODULE_ENABLED: "true",
+      CHAT_MODULE_ENABLED: "true", CHAT_WORKER: "false", LETTERS_MODULE_ENABLED: "true", LETTERS_WORKER: "false",
       // Pekerja harian dimatikan agar tes deterministik. CRON_SECRET sengaja TIDAK diset: sweep API memastikan pemicu internal menjawab 404 tanpa rahasia.
       TRAINING_WORKER: "false", CHECKLIST_REMINDER_WORKER: "false",
       // Kunci VAPID SEMENTARA untuk server uji (dibuat ulang tiap menjalankan Playwright; tidak disimpan di mana pun).

@@ -4,7 +4,7 @@
  * Bila LETTER_SHOTS diisi (folder), tangkapan layar tiap langkah disimpan di sana.
  */
 import { expect, request as pwRequest, test, type APIRequestContext, type Page } from "@playwright/test";
-import { E2E_PASSWORD, USERS, login } from "./helpers";
+import { E2E_PASSWORD, USERS, isoDatePlus, login } from "./helpers";
 import { PDFDocument } from "pdf-lib";
 import { demoLogo, demoSignature, demoStamp } from "../fixtures/documents/assets";
 
@@ -239,4 +239,69 @@ test("arsip saja: Staf minta nomor, Direktur menyetujui, Staf unggah PDF pindaia
   await expect(pub.getByText("Sidik jari berkas (SHA-256)")).toBeVisible();
   await shot(pub, "18-verifikasi-arsip");
   await ctx.close();
+});
+
+test("penjualan: PIC mengisi data penawaran, status Terkirim → Deal (bukti PO), register & dasbor Direktur terisi; staf tak melihat register", async ({ browser }) => {
+  const ctx = await browser.newContext({ viewport: { width: 1440, height: 1100 } });
+  const page = await ctx.newPage();
+  await login(page, USERS.ayu);
+  await page.goto("/persuratan");
+  await page.getByRole("button", { name: "Buat surat" }).click();
+  await page.getByRole("button", { name: /Penawaran B2B/ }).click();
+  await page.waitForURL(/\/persuratan\/[0-9a-f-]{36}$/);
+  const id = page.url().split("/").pop()!;
+  await page.getByLabel("Penandatangan").selectOption({ index: 1 });
+  await page.getByLabel("Perihal").fill("Penawaran In-House Food Production");
+  await page.getByLabel(/^Penerima/).fill("Bapak Klien\nPT Klien Boga");
+  const ed = page.getByRole("textbox", { name: "Isi surat", exact: true });
+  await ed.click(); await page.keyboard.press("ControlOrMeta+A"); await page.keyboard.type("Bersama ini kami sampaikan penawaran program pelatihan in-house.");
+  await expect(page.getByText("Tersimpan otomatis")).toBeVisible({ timeout: 8000 });
+  await page.getByRole("button", { name: "Ajukan ke penandatangan" }).click();
+  await expect(page.getByText("Menunggu penandatangan").first()).toBeVisible();
+  expect((await dir.post(`/api/letters/${id}/approve`, { headers: { origin: base } })).status()).toBe(200);
+  await page.reload();
+  const card = page.getByRole("heading", { name: "Penawaran & penjualan" });
+  await expect(card).toBeVisible();
+  await page.getByLabel("Klien / instansi").fill("PT Klien Boga");
+  await page.getByLabel("Produk").selectOption("BNSP Tata Boga / Food Production");
+  await page.getByLabel("Nilai potensi (Rp)").fill("45000000");
+  await page.getByLabel("Jadwal follow-up").fill(isoDatePlus(-1));
+  await page.getByRole("button", { name: "Simpan data" }).click();
+  await expect(page.getByText("Data penjualan disimpan.")).toBeVisible();
+  await page.getByRole("button", { name: "Ubah status" }).click();
+  await page.getByLabel("Status baru").selectOption("SENT");
+  await page.getByRole("button", { name: "Simpan status" }).click();
+  await expect(page.getByText("Status: Terkirim.")).toBeVisible();
+  await expect(page.getByText("Follow-up terlambat")).toBeVisible();
+  await shot(page, "19-penjualan-terkirim");
+  // Deal tanpa nilai/bukti ditolak
+  await page.getByRole("button", { name: "Ubah status" }).click();
+  await page.getByLabel("Status baru").selectOption("DEAL");
+  await page.getByRole("button", { name: "Simpan status" }).click();
+  await expect(page.getByRole("alert").filter({ hasText: /nilai deal/i }).first()).toBeVisible();
+  await page.getByLabel("Nilai deal (Rp)").fill("40000000");
+  await page.getByLabel(/Catatan bukti/).fill("PO nomor 123 dari klien");
+  await page.getByRole("button", { name: "Simpan status" }).click();
+  await expect(page.getByText("Status: Deal.")).toBeVisible();
+  await page.getByLabel("Unggah bukti Deal").setInputFiles({ name: "po.pdf", mimeType: "application/pdf", buffer: await pdfBuf(1) });
+  await expect(page.getByText("Bukti Deal tersimpan.")).toBeVisible();
+  await shot(page, "20-penjualan-deal");
+  await ctx.close();
+  // register & dasbor (Direktur)
+  const c2 = await browser.newContext({ viewport: { width: 1640, height: 1000 } });
+  const dpage = await c2.newPage();
+  await login(dpage, USERS.pimpinan);
+  await dpage.goto("/persuratan/register");
+  await expect(dpage.getByRole("heading", { name: "Register Surat" })).toBeVisible();
+  await expect(dpage.getByRole("row").filter({ hasText: "PT Klien Boga" }).getByText("Deal")).toBeVisible();
+  await shot(dpage, "21-register");
+  await dpage.goto("/persuratan/dasbor");
+  await expect(dpage.getByText("Nilai deal").first()).toBeVisible();
+  await shot(dpage, "22-dasbor", true);
+  const csv = await dir.get("/api/letters/register/export");
+  expect(csv.status()).toBe(200); expect(await csv.text()).toContain("PT Klien Boga");
+  await c2.close();
+  const other = await session(USERS.budi);
+  expect((await other.get("/api/letters/register")).status()).toBe(403);
+  await other.dispose();
 });

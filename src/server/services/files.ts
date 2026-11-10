@@ -8,7 +8,7 @@ import { Errors } from "../errors";
 import { writeAudit } from "../audit";
 import { actorCan, type Actor } from "../actor";
 
-export type FileKind = "LOGO" | "EMPLOYEE_PHOTO" | "LEAVE_ATTACHMENT" | "ATTENDANCE_PHOTO" | "SIGNATURE" | "DOCUMENT" | "TRAINING_DOCUMENT" | "LETTER_PDF" | "LETTER_SIGNATURE" | "LETTER_ATTACHMENT";
+export type FileKind = "LOGO" | "EMPLOYEE_PHOTO" | "LEAVE_ATTACHMENT" | "ATTENDANCE_PHOTO" | "SIGNATURE" | "DOCUMENT" | "TRAINING_DOCUMENT" | "LETTER_PDF" | "LETTER_SIGNATURE" | "LETTER_ATTACHMENT" | "LETTER_EVIDENCE";
 
 /** Tipe yang diizinkan, diverifikasi dari MAGIC BYTES (bukan dari ekstensi / Content-Type kiriman klien). SVG sengaja ditolak (risiko XSS). */
 const SIGNATURES: { mime: string; ext: string; test: (b: Uint8Array) => boolean }[] = [
@@ -35,6 +35,8 @@ const ALLOWED: Record<FileKind, string[]> = {
   LETTER_SIGNATURE: ["image/png"],
   // Lampiran PDF surat (diunggah pembuat; izin diperiksa service persuratan).
   LETTER_ATTACHMENT: ["application/pdf"],
+  // Bukti Deal penawaran (PO / persetujuan klien): PDF atau JPG.
+  LETTER_EVIDENCE: ["application/pdf", "image/jpeg"],
 };
 
 export function sniffMime(bytes: Uint8Array): { mime: string; ext: string } | null {
@@ -59,9 +61,9 @@ export async function storeFile(
   if (kind === "LEAVE_ATTACHMENT" && !actor.employeeId && !actorCan(actor, "leave:review")) throw Errors.forbidden();
   if (kind === "ATTENDANCE_PHOTO" && !actor.employeeId) throw Errors.forbidden();
   if (kind === "DOCUMENT" && !actorCan(actor, "document:manage")) throw Errors.forbidden();
-  if ((kind === "LETTER_PDF" || kind === "LETTER_SIGNATURE" || kind === "LETTER_ATTACHMENT") && !lettersEnabled()) throw Errors.notFound("Halaman");
+  if ((kind === "LETTER_PDF" || kind === "LETTER_SIGNATURE" || kind === "LETTER_ATTACHMENT" || kind === "LETTER_EVIDENCE") && !lettersEnabled()) throw Errors.notFound("Halaman");
   if (kind === "TRAINING_DOCUMENT" && !trainingEnabled()) throw Errors.notFound("Halaman");
-  const maxMb = kind === "DOCUMENT" || kind === "TRAINING_DOCUMENT" || kind === "LETTER_ATTACHMENT" || kind === "LETTER_PDF" ? env().MAX_DOCUMENT_UPLOAD_MB : env().MAX_UPLOAD_MB;
+  const maxMb = kind === "DOCUMENT" || kind === "TRAINING_DOCUMENT" || kind === "LETTER_ATTACHMENT" || kind === "LETTER_EVIDENCE" || kind === "LETTER_PDF" ? env().MAX_DOCUMENT_UPLOAD_MB : env().MAX_UPLOAD_MB;
   const maxBytes = maxMb * 1024 * 1024;
   if (input.bytes.byteLength === 0) throw Errors.validation("File kosong.");
   if (input.bytes.byteLength > maxBytes) throw Errors.validation(`Ukuran file maksimal ${maxMb} MB.`);
@@ -119,7 +121,7 @@ export async function readFileForActor(actor: Actor, id: string) {
   if (file.kind === "TRAINING_DOCUMENT") {
     ok = await canReadTrainingFile(actor, id);
   }
-  if (file.kind === "LETTER_PDF" || file.kind === "LETTER_ATTACHMENT") ok = await canReadLetterPdf(actor, id);
+  if (file.kind === "LETTER_PDF" || file.kind === "LETTER_ATTACHMENT" || file.kind === "LETTER_EVIDENCE") ok = await canReadLetterPdf(actor, id);
   if (file.kind === "LETTER_SIGNATURE") ok = actor.role === "SUPER_ADMIN" || (await prisma.letterSigner.count({ where: { userId: actor.userId, signatureFileId: id } })) > 0;
   if (file.kind === "DOCUMENT") {
     const own = actor.employeeId ? (await prisma.employeeDocument.count({ where: { fileId: id, employeeId: actor.employeeId, archivedAt: null } })) > 0 : false;

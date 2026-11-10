@@ -60,6 +60,20 @@ Seluruh 24 jenis katalog master disemai idempoten (penandatangan awal: Direktur 
 2. Nomor dicantumkan di surat fisik; setelah ditandatangani, pembuat/penandatangan/Direktur **mengunggah PDF pindaian sekali** → hash tercatat dan terkunci (koreksi = batalkan lalu daftarkan ulang).
 3. Halaman verifikasi menampilkan nomor (sah) dan, setelah pindaian diunggah, hash-nya; sebelum itu "PDF pindaian belum diunggah".
 
+## Tahap 3: penawaran, register, dasbor
+
+- **Corong penjualan** (jenis `funnel`: EKS-001 Penawaran B2C, EKS-002 Penawaran B2B, EKS-004 Penawaran/ajakan kerja sama). Kartu "Penawaran & penjualan" pada surat: klien/instansi, ID lead CRM
+  (HaloAI — hanya rujukan teks), produk (daftar di Pengaturan), PIC, nilai potensi, jadwal follow-up, catatan. Dapat diisi sejak draf; status baru sejak surat terbit.
+- **Status** mengikuti Excel: *Draft* (belum terbit/belum ditandai terkirim) → *Terkirim* → *Follow-up* → *Negosiasi* → *Deal* / *Tolak* → *Selesai* (hanya dari Deal; final); *Batal* diturunkan dari surat batal/ditolak.
+  **Deal wajib nilai deal > 0 dan bukti** (berkas PO/persetujuan klien berformat **PDF atau JPG**) **atau catatan bukti**. Setiap perubahan tercatat di riwayat surat + Audit Log. Nilai tidak pernah tampil di verifikasi publik.
+- **Siapa mengelola**: pembuat, penandatangan, PIC, Direktur, dan Manajer (tingkat jabatan; Manajer juga dapat melihat penawaran corong agar tim pemasaran memantau pipeline).
+- **Buat proyek in-house**: dari penawaran Deal (modul Training menyala, pelaku berhak membuat proyek) → proyek berjenis In-house dengan klien & catatan "Dari penawaran <nomor>"; tautan disimpan (`letter_project_links`). Harga tidak disalin ke proyek.
+- **Register** (`/persuratan/register`, Direktur & Manajer): semua surat bernomor per tahun, kolom Excel (No., tanggal, nomor, jenis, tujuan, perihal, produk, PIC, status, potensi, deal, follow-up + alert TERLAMBAT), filter, **ekspor CSV** (dicatat audit; sel berawalan `= + - @` dinetralkan).
+  Manajer hanya melihat jenis corong; surat Rahasia tampil tanpa perihal.
+- **Dasbor** (`/persuratan/dasbor`): ringkasan seperti Excel (terbit, dibatalkan, terkirim, pipeline, deal, tolak, konversi, win rate, nilai pipeline, nilai deal, capaian vs target, follow-up terlambat) + per jenis, status, produk, **per PIC**, **per bulan**.
+  *Deal* dihitung dari status Deal, atau Selesai yang bernilai deal. Target revenue tahunan (bawaan Rp10 miliar) dan daftar produk diatur Direktur di Pengaturan.
+- **Pengingat follow-up**: pekerja dalam proses (tiap jam; `LETTERS_WORKER`) mengirim notifikasi ke PIC (atau pembuat) bila jadwal jatuh tempo/terlambat, sekali per hari per surat, hanya untuk status Terkirim/Follow-up/Negosiasi.
+
 ## Dokumen & PDF terkunci
 
 - Isi disimpan sebagai **JSON** (ProseMirror, tervalidasi ketat `validateDoc`: hanya node/atribut/mark yang dikenal; tanpa HTML). Editor TipTap

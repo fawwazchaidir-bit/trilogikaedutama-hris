@@ -27,23 +27,33 @@ export async function personFacts(userId: string): Promise<(PersonFacts & { name
 }
 
 /** Dokumen terlihat bagi pembuat, penandatangan, dan Direktur; selain itu 404 (anti-IDOR). */
-export type LetterWithType = LetterDocument & { type: { id: string; series: "EKS" | "INT"; code: number; name: string; kind: string; confidential: boolean; hrCanView: boolean; multiSigner: boolean }; signatories: { id: string; userId: string | null }[] };
-export const LETTER_INCLUDE = { type: { select: { id: true, series: true, code: true, name: true, kind: true, confidential: true, hrCanView: true, multiSigner: true } }, signatories: { select: { id: true, userId: true }, orderBy: { position: "asc" as const } } };
+export type LetterWithType = LetterDocument & { type: { id: string; series: "EKS" | "INT"; code: number; name: string; kind: string; confidential: boolean; hrCanView: boolean; multiSigner: boolean; funnel: boolean }; signatories: { id: string; userId: string | null }[] };
+export const LETTER_INCLUDE = { type: { select: { id: true, series: true, code: true, name: true, kind: true, confidential: true, hrCanView: true, multiSigner: true, funnel: true } }, signatories: { select: { id: true, userId: true }, orderBy: { position: "asc" as const } } };
 
 /** Pihak yang boleh melihat: pembuat, penandatangan utama, penandatangan tambahan internal, Direktur, dan HR untuk jenis yang memberinya hak lihat. */
 export function canSee(actor: Actor, d: LetterWithType): boolean {
   return d.creatorId === actor.userId || d.signerId === actor.userId || isDirector(actor) || d.signatories.some((s) => s.userId === actor.userId) || (actor.role === "HR_ADMIN" && d.type.hrCanView);
 }
+/** Penawaran (jenis corong): terlihat juga bagi PIC-nya dan Manajer (tingkat jabatan) — agar corong penjualan dapat dipantau tim pemasaran. */
+export async function canSeeFunnel(actor: Actor, d: LetterWithType): Promise<boolean> {
+  if (!d.type.funnel) return false;
+  if (d.picId === actor.userId) return true;
+  const f = await personFacts(actor.userId);
+  return !!f && !f.isIntern && f.isActive && f.jobLevel === "MANAGER";
+}
+export async function canSeeAsync(actor: Actor, d: LetterWithType): Promise<boolean> {
+  return canSee(actor, d) || (await canSeeFunnel(actor, d));
+}
 export async function loadVisible(actor: Actor, id: string): Promise<LetterWithType> {
   requireLetters();
   const d = await prisma.letterDocument.findUnique({ where: { id }, include: LETTER_INCLUDE });
-  if (!d || !canSee(actor, d)) throw Errors.notFound("Surat");
+  if (!d || !(await canSeeAsync(actor, d))) throw Errors.notFound("Surat");
   return d;
 }
 
 /** PDF terbit dapat dibuka oleh pihak yang melihat dokumennya. */
 export async function canReadLetterPdf(actor: Actor, fileId: string): Promise<boolean> {
   if (!lettersEnabled()) return false;
-  const d = await prisma.letterDocument.findFirst({ where: { OR: [{ pdfFileId: fileId }, { attachments: { some: { fileId } } }] }, include: LETTER_INCLUDE });
-  return !!d && canSee(actor, d);
+  const d = await prisma.letterDocument.findFirst({ where: { OR: [{ pdfFileId: fileId }, { dealEvidenceFileId: fileId }, { attachments: { some: { fileId } } }] }, include: LETTER_INCLUDE });
+  return !!d && (await canSeeAsync(actor, d));
 }

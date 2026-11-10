@@ -17,25 +17,29 @@ function assertDirector(actor: Actor): void {
 }
 
 export interface LetterSettingsDto {
-  place: string; idLine: string | null; footerText: string | null; escalationDays: number; stampUrl: string | null;
+  place: string; idLine: string | null; footerText: string | null; escalationDays: number; stampUrl: string | null; annualTarget: number; products: string[];
   counters: { series: "EKS" | "INT"; year: number; lastSeq: number }[];
 }
 export async function getLetterSettingsDto(actor: Actor): Promise<LetterSettingsDto> {
   assertDirector(actor);
   const [s, counters] = await Promise.all([getLetterSettings(), prisma.letterCounter.findMany({ orderBy: [{ year: "desc" }, { series: "asc" }] })]);
-  return { place: s.place, idLine: s.idLine, footerText: s.footerText, escalationDays: s.escalationDays, stampUrl: s.stampFileId ? `/api/files/${s.stampFileId}` : null, counters };
+  return { place: s.place, idLine: s.idLine, footerText: s.footerText, escalationDays: s.escalationDays, annualTarget: Number(s.annualTarget), products: s.products, stampUrl: s.stampFileId ? `/api/files/${s.stampFileId}` : null, counters };
 }
 
 const settingsSchema = z.object({
   place: z.string().trim().min(2).max(80), idLine: optionalText(200, "Baris identitas"), footerText: optionalText(200, "Teks kaki"),
   escalationDays: z.number().int().min(1).max(30),
+  annualTarget: z.number().int().min(0).max(1_000_000_000_000).optional(),
+  products: z.array(z.string().trim().min(1).max(120)).min(1).max(40).optional(),
 }).strict();
 export async function updateLetterSettings(actor: Actor, raw: unknown): Promise<void> {
   assertDirector(actor);
   const input = parseInput(settingsSchema, raw);
   await transaction(async (tx) => {
-    await tx.letterSettings.upsert({ where: { id: 1 }, create: { id: 1, ...input }, update: input });
-    await writeAudit(tx, actor, { action: "letter.settings", entityType: "LetterSettings", entityId: "1", summary: "Pengaturan persuratan diubah", after: input });
+    const { annualTarget, ...rest } = input;
+    const data = { ...rest, ...(annualTarget !== undefined ? { annualTarget: BigInt(annualTarget) } : {}) };
+    await tx.letterSettings.upsert({ where: { id: 1 }, create: { id: 1, ...data }, update: data });
+    await writeAudit(tx, actor, { action: "letter.settings", entityType: "LetterSettings", entityId: "1", summary: "Pengaturan persuratan diubah", after: { ...input } });
   });
 }
 
