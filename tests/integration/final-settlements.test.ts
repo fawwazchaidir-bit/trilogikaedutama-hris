@@ -10,7 +10,7 @@ import { isoToDate } from "@/server/json";
 import { addComponent, makeUser, resetDb } from "../helpers/db";
 import { makeLetter, seedTraining, type TrainingFixtures } from "../helpers/training";
 import {
-  addLine, approveSettlement, cancelSettlement, createSettlement, deleteLine, getSettlement, listSettlements, markSettlementPaid, recomputeSettlement,
+  addLine, approveSettlement, auditSettlementDuplicates, cancelSettlement, createSettlement, deleteLine, getSettlement, listSettlements, markSettlementPaid, recomputeSettlement,
   returnSettlement, settlementOfEmployee, submitSettlement, updateLine, updateSettlement,
 } from "@/server/services/final-settlements";
 import { assignAsset, createAsset } from "@/server/services/assets";
@@ -126,20 +126,209 @@ describe("baris manual & hitung ulang", () => {
     expect(await prisma.auditLog.count({ where: { action: "settlement.line.add", entityId: s0.id } })).toBe(2);
   });
 
-  it("mengubah baris sistem menjadikannya manual; hitung ulang mengganti baris sistem saja dan memunculkan lagi yang dihapus", async () => {
+  it("mengubah baris sistem menjadikannya manual (membawa kunci sumber); hitung ulang tidak membuat usulan yang sama lagi", async () => {
     await salary();
     const s0 = await mk();
     const sys = s0.lines.find((l) => l.name === "Gaji pokok (prorata)")!;
+    expect(sys.sourceKey).toMatch(/^PRORATA:[0-9a-f-]{36}$/);
     const s1 = await updateLine(fx.hr, sys.id, { category: "PRORATED_SALARY", name: "Gaji pokok (prorata, disepakati)", amount: 3_000_000, formula: "Disepakati dengan karyawan" });
-    expect(s1.lines.find((l) => l.id === sys.id)).toMatchObject({ source: "MANUAL", amount: 3_000_000 });
-    const meal = s0.lines.find((l) => l.name === "Tunjangan makan (prorata)")!;
-    await deleteLine(fx.hr, meal.id);
+    expect(s1.lines.find((l) => l.id === sys.id)).toMatchObject({ source: "MANUAL", amount: 3_000_000, sourceKey: sys.sourceKey });
     await addLine(fx.hr, s0.id, { category: "OTHER_DEDUCTION", name: "Potongan koperasi", amount: 100_000 });
     const re = await recomputeSettlement(fx.hr, s0.id);
-    // baris manual (termasuk gaji yang diubah) tetap; baris sistem yang dihapus kembali; tidak ada baris ganda untuk gaji pokok? — gaji pokok sistem muncul lagi karena baris lamanya sudah manual
     expect(re.lines.filter((l) => l.source === "MANUAL").map((l) => l.name).sort()).toEqual(["Gaji pokok (prorata, disepakati)", "Potongan koperasi"]);
-    expect(re.lines.filter((l) => l.source === "SYSTEM").map((l) => l.name).sort()).toEqual(["Gaji pokok (prorata)", "Tunjangan makan (prorata)"]);
-    expect(re.netPayable).toBe(3_000_000 + 2_727_273 + 200_000 - 100_000);
+    expect(re.lines.filter((l) => l.source === "SYSTEM").map((l) => l.name)).toEqual(["Tunjangan makan (prorata)"]); // gaji pokok sistem TIDAK muncul lagi
+    expect(re.lines.filter((l) => l.name.startsWith("Gaji pokok"))).toHaveLength(1);
+    expect(re).toMatchObject({ totalEarnings: 3_200_000, totalDeductions: 100_000, netPayable: 3_100_000 });
+  });
+});
+
+describe("satu sumber hanya dihitung satu kali", () => {
+  const gaji = (s: { lines: { name: string; amount: number; source: string; sourceKey: string | null }[] }) => s.lines.filter((l) => l.name.startsWith("Gaji pokok"));
+  const editGaji = async (id: string, amount = 3_000_000) => {
+    const sys = (await getSettlement(fx.hr, id)).lines.find((l) => l.name === "Gaji pokok (prorata)")!;
+    return updateLine(fx.hr, sys.id, { category: "PRORATED_SALARY", name: "Gaji pokok (prorata, koreksi)", amount, formula: "Dikoreksi HR" });
+  };
+
+  it("kasus laporan: gaji prorata diubah ke Rp3.000.000 lalu dihitung ulang → hanya SATU baris gaji (Rp3.000.000), bukan dua (Rp5.727.273)", async () => {
+    await salary();
+    const s0 = await mk();
+    await editGaji(s0.id);
+    const re = await recomputeSettlement(fx.hr, s0.id);
+    expect(gaji(re).map((l) => [l.name, l.amount, l.source])).toEqual([["Gaji pokok (prorata, koreksi)", 3_000_000, "MANUAL"]]);
+    expect(re).toMatchObject({ totalEarnings: 3_200_000, netPayable: 3_200_000 });
+    // peringatan memberi tahu penyetuju bahwa usulan sistem berbeda & tidak dihitung
+    expect(re.warnings.join(" | ")).toMatch(/Usulan sistem "Gaji pokok \(prorata\)" Rp ?2\.727\.273 digantikan baris manual "Gaji pokok \(prorata, koreksi\)" Rp ?3\.000\.000/);
+    // dihitung ulang berkali-kali tetap stabil
+    for (let i = 0; i < 3; i++) { const again = await recomputeSettlement(fx.hr, s0.id); expect(again.netPayable).toBe(3_200_000); expect(again.lines).toHaveLength(2); }
+  });
+
+  it("memperbarui penyelesaian (catatan saja, atau tanggal/dasar/pembagi) juga tidak menggandakan sumber yang sudah dikoreksi", async () => {
+    await salary();
+    const s0 = await mk();
+    await editGaji(s0.id);
+    const n = await updateSettlement(fx.hr, s0.id, { note: "Catatan baru" });
+    expect(gaji(n)).toHaveLength(1);
+    expect(n.netPayable).toBe(3_200_000);
+    const d = await updateSettlement(fx.hr, s0.id, { lastWorkDate: "2026-10-16", basis: "CALENDAR_DAYS" });
+    expect(gaji(d)).toHaveLength(1);
+    expect(gaji(d)[0]).toMatchObject({ source: "MANUAL", amount: 3_000_000 }); // koreksi HR dipertahankan, tidak diam-diam diganti
+    expect(d.lines.find((l) => l.name === "Tunjangan makan (prorata)")!.amount).toBe(Math.round((440_000 * 16) / 31)); // yang belum dikoreksi ikut dihitung ulang
+    expect(d.warnings.join(" | ")).toMatch(/digantikan baris manual/);
+  });
+
+  it("usulan yang DIHAPUS HR dikecualikan permanen: tidak muncul lagi saat hitung ulang maupun saat data penyelesaian diperbarui", async () => {
+    await salary();
+    const s0 = await mk();
+    const meal = s0.lines.find((l) => l.name === "Tunjangan makan (prorata)")!;
+    const s1 = await deleteLine(fx.hr, meal.id);
+    expect(s1.lines.some((l) => l.name === "Tunjangan makan (prorata)")).toBe(false);
+    expect(s1.excluded).toMatchObject([{ sourceKey: meal.sourceKey, name: "Tunjangan makan (prorata)", categoryLabel: "Gaji prorata", amount: 200_000, excludedBy: "HR Uji" }]);
+    const re = await recomputeSettlement(fx.hr, s0.id);
+    expect(re.lines.map((l) => l.name)).toEqual(["Gaji pokok (prorata)"]);
+    const up = await updateSettlement(fx.hr, s0.id, { lastWorkDate: "2026-10-15" });
+    expect(up.lines.map((l) => l.name)).toEqual(["Gaji pokok (prorata)"]);
+    expect(up.excluded).toHaveLength(1);
+    expect(await prisma.finalSettlementExclusion.count({ where: { settlementId: s0.id } })).toBe(1);
+    expect(await prisma.auditLog.count({ where: { action: "settlement.line.delete", entityId: s0.id, summary: { contains: "dikecualikan permanen" } } })).toBe(1);
+    // HR tetap bisa menambahkannya kembali secara sadar sebagai baris manual
+    const back = await addLine(fx.hr, s0.id, { category: "PRORATED_SALARY", name: "Tunjangan makan (prorata, ditambah lagi)", amount: 200_000, formula: "Ditambahkan HR" });
+    expect(back.lines).toHaveLength(2);
+    expect((await recomputeSettlement(fx.hr, s0.id)).lines).toHaveLength(2);
+  });
+
+  it("menghapus baris pengganti (manual hasil koreksi) juga mengecualikan sumbernya — tidak ada usulan sistem yang bangkit lagi", async () => {
+    await salary();
+    const s0 = await mk();
+    const edited = (await editGaji(s0.id)).lines.find((l) => l.name === "Gaji pokok (prorata, koreksi)")!;
+    const s1 = await deleteLine(fx.hr, edited.id);
+    expect(s1.excluded.map((x) => x.name)).toEqual(["Gaji pokok (prorata, koreksi)"]);
+    const re = await recomputeSettlement(fx.hr, s0.id);
+    expect(gaji(re)).toHaveLength(0);
+    expect(re.netPayable).toBe(200_000);
+  });
+
+  it("menghapus baris manual murni (tanpa sumber) tidak membuat pengecualian", async () => {
+    await salary();
+    const s0 = await mk();
+    const sev = (await addLine(fx.hr, s0.id, { category: "SEVERANCE", name: "Uang pesangon", amount: 1_000_000 })).lines.find((l) => l.category === "SEVERANCE")!;
+    expect(sev.sourceKey).toBeNull();
+    const s1 = await deleteLine(fx.hr, sev.id);
+    expect(s1.excluded).toEqual([]);
+    expect(await prisma.finalSettlementExclusion.count({ where: { settlementId: s0.id } })).toBe(0);
+  });
+
+  it("uang cuti sisa: dikoreksi → tidak ganda saat hitung ulang; dihapus → dikecualikan", async () => {
+    await salary();
+    await prisma.leaveBalanceEntry.create({ data: { employeeId: emp(), year: 2026, kind: "GRANT", days: 5, createdById: fx.hr.userId } });
+    const s0 = await mk({ leaveDivisor: 25 });
+    const cuti = s0.lines.find((l) => l.category === "LEAVE_PAYOUT")!;
+    expect(cuti).toMatchObject({ sourceKey: "LEAVE_PAYOUT", amount: 1_200_000 });
+    await updateLine(fx.hr, cuti.id, { category: "LEAVE_PAYOUT", name: "Uang cuti sisa (disepakati)", amount: 1_000_000, formula: "Disepakati" });
+    const re = await recomputeSettlement(fx.hr, s0.id);
+    expect(re.lines.filter((l) => l.category === "LEAVE_PAYOUT").map((l) => [l.name, l.amount])).toEqual([["Uang cuti sisa (disepakati)", 1_000_000]]);
+    const del = await deleteLine(fx.hr, re.lines.find((l) => l.category === "LEAVE_PAYOUT")!.id);
+    expect(del.excluded.map((x) => x.sourceKey)).toEqual(["LEAVE_PAYOUT"]);
+    expect((await updateSettlement(fx.hr, s0.id, { leaveDivisor: 20 })).lines.some((l) => l.category === "LEAVE_PAYOUT")).toBe(false);
+  });
+
+  it("uang harian dinas: satu baris per penerima tugas; dikoreksi tidak ganda; dihapus dikecualikan, sedangkan tugas BARU tetap diusulkan", async () => {
+    await salary();
+    const l1 = await makeLetter(fx.hr.userId);
+    const a1 = await prisma.assignmentAssignee.create({ data: { letterId: l1.id, employeeId: emp(), days: 5, dailyRate: 150_000n, total: 750_000n } });
+    const s0 = await mk();
+    const allow = s0.lines.find((l) => l.category === "UNPAID_ALLOWANCE")!;
+    expect(allow.sourceKey).toBe(`ALLOWANCE:${a1.id}`);
+    await updateLine(fx.hr, allow.id, { category: "UNPAID_ALLOWANCE", name: "Uang harian: Bandung (disepakati)", amount: 600_000, formula: "Hanya 4 hari" });
+    const re = await recomputeSettlement(fx.hr, s0.id);
+    expect(re.lines.filter((l) => l.category === "UNPAID_ALLOWANCE").map((l) => l.amount)).toEqual([600_000]);
+    await deleteLine(fx.hr, re.lines.find((l) => l.category === "UNPAID_ALLOWANCE")!.id);
+    const l2 = await makeLetter(fx.hr.userId, 2);
+    const a2 = await prisma.assignmentAssignee.create({ data: { letterId: l2.id, employeeId: emp(), days: 2, dailyRate: 150_000n, total: 300_000n } });
+    const after = await recomputeSettlement(fx.hr, s0.id);
+    expect(after.lines.filter((l) => l.category === "UNPAID_ALLOWANCE").map((l) => [l.sourceKey, l.amount])).toEqual([[`ALLOWANCE:${a2.id}`, 300_000]]);
+  });
+
+  it("jumlah yang diajukan & disetujui benar (tidak membengkak) setelah koreksi + hitung ulang + ubah data", async () => {
+    await salary();
+    const s0 = await mk();
+    await editGaji(s0.id);
+    await addLine(fx.hr, s0.id, { category: "OTHER_DEDUCTION", name: "Potongan koperasi", amount: 100_000 });
+    await recomputeSettlement(fx.hr, s0.id);
+    await updateSettlement(fx.hr, s0.id, { note: "Dihitung ulang" });
+    await submitSettlement(fx.hr, s0.id);
+    const ok = await approveSettlement(fx.superAdmin, s0.id, {});
+    expect(ok).toMatchObject({ status: "APPROVED", totalEarnings: 3_200_000, totalDeductions: 100_000, netPayable: 3_100_000 });
+    expect(gaji(ok)).toHaveLength(1);
+    const stored = await prisma.finalSettlement.findUniqueOrThrow({ where: { id: s0.id } });
+    expect(stored.netPayable).toBe(3_100_000n);
+  });
+
+  it("penjaga database: satu kunci sumber = paling banyak satu baris; baris tanpa kunci boleh banyak; pengecualian tambah-saja & hanya saat Draf", async () => {
+    await salary();
+    const s0 = await mk();
+    const sys = s0.lines[0]!;
+    const base = { settlementId: s0.id, kind: "EARNING" as const, category: "PRORATED_SALARY" as const, name: "Salinan", amount: 1n, sortOrder: 50 };
+    await expect(prisma.finalSettlementLine.create({ data: { ...base, sourceKey: sys.sourceKey } })).rejects.toMatchObject({ code: "P2002" });
+    await prisma.finalSettlementLine.create({ data: { ...base, source: "MANUAL", sortOrder: 51 } });
+    await prisma.finalSettlementLine.create({ data: { ...base, source: "MANUAL", sortOrder: 52 } }); // tanpa kunci: tidak dibatasi
+    // pengecualian: tidak bisa diubah/dihapus
+    const withEx = await deleteLine(fx.hr, s0.lines[1]!.id);
+    const ex = await prisma.finalSettlementExclusion.findFirstOrThrow({ where: { settlementId: s0.id } });
+    expect(withEx.excluded).toHaveLength(1);
+    await expect(prisma.finalSettlementExclusion.update({ where: { id: ex.id }, data: { name: "ubah" } })).rejects.toThrow(/HRIS-GUARD/);
+    await expect(prisma.finalSettlementExclusion.delete({ where: { id: ex.id } })).rejects.toThrow(/HRIS-GUARD/);
+    // setelah diajukan, pengecualian baru tidak bisa disisipkan
+    await prisma.finalSettlementLine.deleteMany({ where: { settlementId: s0.id, sourceKey: null } });
+    await submitSettlement(fx.hr, s0.id);
+    await expect(prisma.finalSettlementExclusion.create({ data: { settlementId: s0.id, sourceKey: "PRORATA:x", name: "x", category: "PRORATED_SALARY", amount: 1n, createdById: fx.hr.userId } })).rejects.toThrow(/HRIS-GUARD/);
+  });
+});
+
+describe("data lama (sebelum ada identitas sumber)", () => {
+  /** Meniru keadaan lama: kunci sumber hilang, baris sistem diubah jadi manual lalu usulan sistem dibuat lagi (pola laporan). */
+  async function legacyDuplicate() {
+    await salary();
+    const s0 = await mk();
+    await prisma.finalSettlementLine.updateMany({ where: { settlementId: s0.id }, data: { sourceKey: null } });
+    const sys = s0.lines.find((l) => l.name === "Gaji pokok (prorata)")!;
+    await updateLine(fx.hr, sys.id, { category: "PRORATED_SALARY", name: "Gaji pokok (prorata, koreksi)", amount: 3_000_000 });
+    return { s0, sys };
+  }
+
+  it("baris manual tanpa tautan di samping baris sistem sekategori diberi peringatan 'kemungkinan hitungan ganda'", async () => {
+    const { s0 } = await legacyDuplicate();
+    const re = await recomputeSettlement(fx.hr, s0.id); // data lama tidak punya kunci → pola ganda lama masih bisa terbentuk
+    expect(re.lines.filter((l) => l.name.startsWith("Gaji pokok"))).toHaveLength(2);
+    expect(re.warnings.join(" | ")).toMatch(/Kemungkinan hitungan ganda pada kategori "Gaji prorata"/);
+    expect((await getSettlement(fx.hr, s0.id)).warnings.join(" | ")).toMatch(/Kemungkinan hitungan ganda/);
+    // usulan baru yang tercipta sudah berkunci → dari sini tidak bertambah ganda lagi
+    expect(re.lines.find((l) => l.source === "SYSTEM" && l.name === "Gaji pokok (prorata)")!.sourceKey).toMatch(/^PRORATA:/);
+    expect((await recomputeSettlement(fx.hr, s0.id)).lines).toHaveLength(re.lines.length);
+  });
+
+  it("audit baca-saja untuk pimpinan: mendaftar penyelesaian yang terduga ganda (termasuk yang sudah disetujui), tidak mengubah data, mengabaikan yang batal", async () => {
+    const { s0 } = await legacyDuplicate();
+    await recomputeSettlement(fx.hr, s0.id);
+    const before = await prisma.finalSettlementLine.findMany({ where: { settlementId: s0.id }, orderBy: { sortOrder: "asc" } });
+    await submitSettlement(fx.hr, s0.id);
+    await approveSettlement(fx.superAdmin, s0.id, {});
+    const rows = await auditSettlementDuplicates(fx.superAdmin);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ settlementId: s0.id, status: "APPROVED", employeeName: "Ayu Lestari" });
+    expect(rows[0]!.categories).toMatchObject([{ category: "PRORATED_SALARY", categoryLabel: "Gaji prorata" }]);
+    expect(rows[0]!.categories[0]!.lines.map((l) => l.name).sort()).toEqual(["Gaji pokok (prorata)", "Gaji pokok (prorata, koreksi)", "Tunjangan makan (prorata)"]);
+    expect(rows[0]!.categories[0]!.total).toBe(3_000_000 + 2_727_273 + 200_000);
+    expect(await prisma.finalSettlementLine.findMany({ where: { settlementId: s0.id }, orderBy: { sortOrder: "asc" } })).toEqual(before); // tidak ada yang diubah
+    expect((await fail(auditSettlementDuplicates(fx.hr)))?.code).toBe("FORBIDDEN"); // HR tidak punya payroll:approve
+    expect((await fail(auditSettlementDuplicates(fx.emp1)))?.code).toBe("FORBIDDEN");
+  });
+
+  it("penyelesaian bersih (berkunci, tanpa pola ganda) tidak masuk audit", async () => {
+    await salary();
+    const s0 = await mk();
+    await updateLine(fx.hr, s0.lines[0]!.id, { category: "PRORATED_SALARY", name: "Gaji pokok (prorata, koreksi)", amount: 3_000_000 });
+    await recomputeSettlement(fx.hr, s0.id);
+    expect(await auditSettlementDuplicates(fx.superAdmin)).toEqual([]);
   });
 });
 

@@ -74,10 +74,10 @@ export function SettlementEditor({ s, canPrepare, canApprove, canRevoke, isSelf 
       <thead><tr><Th>Rincian</Th><Th>Dasar perhitungan</Th><Th align="right">Nominal</Th>{editable && <Th>Aksi</Th>}</tr></thead>
       <tbody>{rows.map((l) => (
         <tr key={l.id}>
-          <Td><p className="font-medium">{l.name}</p><p className="text-xs text-muted">{l.categoryLabel} · <Badge tone={l.source === "SYSTEM" ? "blue" : "gray"}>{l.source === "SYSTEM" ? "Usulan sistem" : "Manual"}</Badge></p>{l.note && <p className="text-xs text-muted">{l.note}</p>}</Td>
+          <Td><p className="font-medium">{l.name}</p><p className="text-xs text-muted">{l.categoryLabel} · <Badge tone={l.source === "SYSTEM" ? "blue" : "gray"}>{l.source === "SYSTEM" ? "Usulan sistem" : l.sourceKey ? "Manual · menggantikan usulan sistem" : "Manual"}</Badge></p>{l.note && <p className="text-xs text-muted">{l.note}</p>}</Td>
           <Td className="text-xs text-muted">{l.formula ?? "—"}</Td>
           <Td align="right" className="tabular whitespace-nowrap font-medium">{rp(l.amount)}</Td>
-          {editable && <Td><div className="flex gap-2"><Button size="sm" onClick={() => open({ kind: "line", line: l })} aria-label={`Ubah baris: ${l.name}`}>Ubah</Button><Button size="sm" disabled={busy} onClick={() => run(() => api(`/api/final-settlements/line/${l.id}`, { method: "DELETE" }), "Baris dihapus.")} aria-label={`Hapus baris: ${l.name}`}>Hapus</Button></div></Td>}
+          {editable && <Td><div className="flex gap-2"><Button size="sm" onClick={() => open({ kind: "line", line: l })} aria-label={`Ubah baris: ${l.name}`}>Ubah</Button><Button size="sm" disabled={busy} onClick={() => { if (l.sourceKey && !window.confirm(`Hapus "${l.name}"? Usulan sistem ini akan dikecualikan PERMANEN dari penyelesaian ini dan tidak muncul lagi saat dihitung ulang. Bila nanti diperlukan, tambahkan sebagai baris manual.`)) return; void run(() => api(`/api/final-settlements/line/${l.id}`, { method: "DELETE" }), l.sourceKey ? "Baris dihapus dan dikecualikan permanen." : "Baris dihapus."); }} aria-label={`Hapus baris: ${l.name}`}>Hapus</Button></div></Td>}
         </tr>
       ))}</tbody>
     </Table></TableWrap>
@@ -125,6 +125,22 @@ export function SettlementEditor({ s, canPrepare, canApprove, canRevoke, isSelf 
         <CardHeader title="Potongan" />
         {table(deductions, "Belum ada potongan")}
       </Card>
+      {s.excluded.length > 0 && (
+        <Card>
+          <CardHeader title="Usulan sistem yang dikecualikan" />
+          <p className="px-5 pb-2 text-sm text-muted">Dihapus oleh HR dan <strong>tidak dihitung</strong>; tidak muncul lagi saat usulan dihitung ulang. Tambahkan sebagai baris manual bila ternyata diperlukan.</p>
+          <TableWrap><Table>
+            <thead><tr><Th>Usulan</Th><Th align="right">Nominal saat dihapus</Th><Th>Dihapus oleh</Th></tr></thead>
+            <tbody>{s.excluded.map((x) => (
+              <tr key={x.id}>
+                <Td><p className="font-medium">{x.name}</p><p className="text-xs text-muted">{x.categoryLabel}</p></Td>
+                <Td align="right" className="tabular whitespace-nowrap">{rp(x.amount)}</Td>
+                <Td className="text-xs text-muted">{x.excludedBy} · {formatDateLong(x.excludedAt.slice(0, 10))}</Td>
+              </tr>
+            ))}</tbody>
+          </Table></TableWrap>
+        </Card>
+      )}
       <Card>
         <div className="grid gap-2 px-5 py-4 text-sm sm:grid-cols-3">
           <div><p className="text-muted">Total pendapatan</p><p className="tabular text-lg font-semibold">{rp(s.totalEarnings)}</p></div>
@@ -156,7 +172,7 @@ export function SettlementEditor({ s, canPrepare, canApprove, canRevoke, isSelf 
               <TextField label="Nominal (Rp)" required type="number" min={1} value={line.amount} onChange={(e) => setLine({ ...line, amount: e.target.value })} error={fe.amount} hint="Bilangan bulat Rupiah, lebih dari 0. Jenis (pendapatan/potongan) mengikuti kategori." />
               <TextAreaField label="Dasar perhitungan" rows={2} value={line.formula} onChange={(e) => setLine({ ...line, formula: e.target.value })} error={fe.formula} hint="Tulis rumus/dasar hukum atau perjanjian agar penyetuju dapat memeriksa." />
               <TextAreaField label="Catatan (opsional)" rows={2} value={line.note} onChange={(e) => setLine({ ...line, note: e.target.value })} error={fe.note} />
-              {dlg.line?.source === "SYSTEM" && <Notice tone="info">Baris usulan sistem yang diubah menjadi baris manual dan tidak ditimpa saat usulan dihitung ulang.</Notice>}
+              {dlg.line?.sourceKey && <Notice tone="info">Baris ini berasal dari usulan sistem. Setelah diubah ia menjadi baris manual yang <strong>menggantikan</strong> usulan tersebut: hitung ulang tidak membuat usulan yang sama lagi, jadi sumber ini hanya dihitung satu kali.</Notice>}
             </>
           )}
           {dlg?.kind === "header" && (
@@ -167,7 +183,7 @@ export function SettlementEditor({ s, canPrepare, canApprove, canRevoke, isSelf 
               </SelectField>
               <TextField label="Pembagi uang cuti (opsional)" type="number" min={1} max={31} value={head.leaveDivisor} onChange={(e) => setHead({ ...head, leaveDivisor: e.target.value })} error={fe.leaveDivisor} />
               <TextAreaField label="Catatan" rows={2} value={head.note} onChange={(e) => setHead({ ...head, note: e.target.value })} error={fe.note} />
-              <Notice tone="warn">Menyimpan menghitung ulang baris usulan sistem. Baris manual tidak berubah.</Notice>
+              <Notice tone="warn">Menyimpan menghitung ulang baris usulan sistem. Baris manual tidak berubah; usulan yang sudah Anda koreksi atau hapus tidak dibuat lagi.</Notice>
             </>
           )}
           {dlg?.kind === "return" && <TextAreaField label="Catatan untuk penyusun" required rows={3} value={text.note} onChange={(e) => setText({ ...text, note: e.target.value })} error={fe.note} />}

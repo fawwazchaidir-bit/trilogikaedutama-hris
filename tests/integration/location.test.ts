@@ -6,6 +6,7 @@ import { listLocationChecks, openLocationReviewCount, reviewLocationCheck, locat
 import { listNotifications } from "@/server/services/notifications";
 import { updateAttendancePolicy } from "@/server/services/settings";
 import { getAdminDashboard } from "@/server/services/dashboard";
+import { todayIso } from "@/lib/time";
 import { resetDb, seedFixtures, type Fixtures } from "../helpers/db";
 
 let fx: Fixtures;
@@ -210,7 +211,7 @@ describe("penolakan geofence dicatat & antrean tinjauan", () => {
   it("ringkasan untuk laporan: jumlah ditandai/ditolak/terkonfirmasi dan sinyal teratas", async () => {
     await checkIn(fx.emp1, { location: loc({ mocked: true }) }, new Date(), ctxOf());
     await checkIn(fx.emp2, { location: loc({ lat: -7.7 }) }, new Date(), ctxOf()).catch(() => undefined);
-    const today = new Date().toISOString().slice(0, 10);
+    const today = todayIso("Asia/Jakarta"); // tanggal zona waktu aplikasi (bukan UTC) — kalau tidak, tes gagal antara 17.00–24.00 UTC
     const s = await locationSummary(today, today);
     expect(s).toMatchObject({ total: 2, flagged: 1, blocked: 1 });
     expect(s.topFlags.map((f) => f.code)).toEqual(expect.arrayContaining(["MOCK_REPORTED", "OUTSIDE_RADIUS"]));

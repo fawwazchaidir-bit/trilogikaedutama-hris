@@ -14,7 +14,7 @@ import { formatDateLong, formatDays } from "@/lib/format";
 import { formatRupiah, toSafeNumber } from "@/lib/money";
 import { isoDate, optionalText, requiredText, rupiah, uuid } from "@/lib/validation/common";
 import {
-  BASIS_LABEL, LINE_CATEGORIES, LINE_CATEGORY_LABEL, kindOfCategory, suggestLeavePayout, suggestProratedLines, totalsOf,
+  BASIS_LABEL, LINE_CATEGORIES, LINE_CATEGORY_LABEL, allowanceKey, kindOfCategory, possibleDuplicateCategories, reconcileSuggestions, suggestLeavePayout, suggestProratedLines, totalsOf,
   type DraftLine, type SettlementBasisValue, type SettlementLineCategoryValue, type SettlementLineKind, type SettlementLineSourceValue, type SettlementStatusValue,
 } from "@/lib/final-settlement";
 import { employeeLite, loadRangeContext } from "./context";
@@ -35,7 +35,11 @@ const MAX_LINES = 60;
 export interface SettlementLineDto {
   id: string; kind: SettlementLineKind; category: SettlementLineCategoryValue; categoryLabel: string; name: string; amount: number; formula: string | null;
   source: SettlementLineSourceValue; note: string | null; sortOrder: number;
+  /** Identitas sumber usulan sistem (kosong untuk baris manual murni). Baris MANUAL yang berkunci = hasil koreksi usulan sistem. */
+  sourceKey: string | null;
 }
+/** Usulan sistem yang dihapus HR dan dikecualikan PERMANEN dari penyelesaian ini (tidak muncul lagi saat dihitung ulang). */
+export interface SettlementExclusionDto { id: string; sourceKey: string; name: string; categoryLabel: string; amount: number; excludedBy: string; excludedAt: string }
 export interface SettlementDto {
   id: string; employeeId: string; employeeName: string; employeeNo: string; position: string; employeeActive: boolean; status: SettlementStatusValue;
   lastWorkDate: string; basis: SettlementBasisValue; basisLabel: string; leaveDivisor: number | null; note: string | null;
@@ -44,7 +48,7 @@ export interface SettlementDto {
   approvedBy: string | null; approvedAt: string | null; approvalNote: string | null;
   paidBy: string | null; paidOn: string | null; payReference: string | null;
   cancelledBy: string | null; cancelledAt: string | null; cancelReason: string | null;
-  lines: SettlementLineDto[]; warnings: string[];
+  lines: SettlementLineDto[]; excluded: SettlementExclusionDto[]; warnings: string[];
 }
 export interface SettlementRow {
   id: string; employeeId: string; employeeName: string; employeeNo: string; status: SettlementStatusValue; lastWorkDate: string; netPayable: number; updatedAt: string;
@@ -124,7 +128,7 @@ async function computeSuggestions(employeeId: string, lastWorkDate: string, basi
   });
   for (const a of allowances) {
     if (a.total <= 0n) continue;
-    lines.push({ kind: "EARNING", category: "UNPAID_ALLOWANCE", name: `Uang harian: ${a.letter.destination}`, amount: a.total, formula: `${a.days} hari × ${formatRupiah(a.dailyRate, "PLAIN")} — surat tugas ${a.letter.number}; belum ada bukti penerimaan`, source: "SYSTEM", note: null });
+    lines.push({ kind: "EARNING", category: "UNPAID_ALLOWANCE", name: `Uang harian: ${a.letter.destination}`, amount: a.total, formula: `${a.days} hari × ${formatRupiah(a.dailyRate, "PLAIN")} — surat tugas ${a.letter.number}; belum ada bukti penerimaan`, source: "SYSTEM", note: null, sourceKey: allowanceKey(a.id) });
   }
 
   // 4) Peringatan dari data lain (tidak mengubah baris apa pun).
@@ -144,11 +148,11 @@ async function computeSuggestions(employeeId: string, lastWorkDate: string, basi
 
 // ─────────────────────────── DTO ───────────────────────────
 
-const include = { employee: { select: { fullName: true, employeeNo: true, position: true, isActive: true } }, lines: { orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }] } } satisfies Prisma.FinalSettlementInclude;
+const include = { employee: { select: { fullName: true, employeeNo: true, position: true, isActive: true } }, lines: { orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }] }, exclusions: { orderBy: { createdAt: "asc" } } } satisfies Prisma.FinalSettlementInclude;
 type Row = Prisma.FinalSettlementGetPayload<{ include: typeof include }>;
 
 async function toDto(r: Row, warnings: string[]): Promise<SettlementDto> {
-  const ids = [r.preparedById, r.approvedById, r.paidById, r.cancelledById].filter((x): x is string => !!x);
+  const ids = [r.preparedById, r.approvedById, r.paidById, r.cancelledById, ...r.exclusions.map((x) => x.createdById)].filter((x): x is string => !!x);
   const users = ids.length ? await prisma.user.findMany({ where: { id: { in: ids } }, select: { id: true, name: true } }) : [];
   const name = new Map(users.map((u) => [u.id, u.name]));
   const n = (id: string | null) => (id ? name.get(id) ?? "—" : null);
@@ -160,7 +164,8 @@ async function toDto(r: Row, warnings: string[]): Promise<SettlementDto> {
     approvedBy: n(r.approvedById), approvedAt: r.approvedAt?.toISOString() ?? null, approvalNote: r.approvalNote,
     paidBy: n(r.paidById), paidOn: r.paidOn ? dateToIso(r.paidOn) : null, payReference: r.payReference,
     cancelledBy: n(r.cancelledById), cancelledAt: r.cancelledAt?.toISOString() ?? null, cancelReason: r.cancelReason,
-    lines: r.lines.map((l) => ({ id: l.id, kind: l.kind, category: l.category, categoryLabel: LINE_CATEGORY_LABEL[l.category], name: l.name, amount: toSafeNumber(l.amount), formula: l.formula, source: l.source, note: l.note, sortOrder: l.sortOrder })),
+    lines: r.lines.map((l) => ({ id: l.id, kind: l.kind, category: l.category, categoryLabel: LINE_CATEGORY_LABEL[l.category], name: l.name, amount: toSafeNumber(l.amount), formula: l.formula, source: l.source, note: l.note, sortOrder: l.sortOrder, sourceKey: l.sourceKey })),
+    excluded: r.exclusions.map((x) => ({ id: x.id, sourceKey: x.sourceKey, name: x.name, categoryLabel: LINE_CATEGORY_LABEL[x.category], amount: toSafeNumber(x.amount), excludedBy: n(x.createdById) ?? "—", excludedAt: x.createdAt.toISOString() })),
     warnings,
   };
 }
@@ -182,6 +187,23 @@ async function refreshTotals(tx: Tx, id: string): Promise<void> {
   await tx.finalSettlement.update({ where: { id }, data: { totalEarnings: t.earnings, totalDeductions: t.deductions, netPayable: t.net } });
 }
 
+/**
+ * Peringatan dari KEADAAN penyelesaian terhadap usulan terkini (bukan hanya dari data sumber):
+ *   · usulan sistem yang tidak dibuat karena sudah digantikan baris manual dan nominalnya BERBEDA → ditampilkan agar penyetuju tahu,
+ *   · data lama tanpa identitas sumber: baris manual sekategori dengan baris sistem → mungkin hitungan ganda, perlu diperiksa.
+ */
+function stateWarnings(r: Row, suggested: DraftLine[], base: string[]): string[] {
+  const held = r.lines.filter((l) => l.source === "MANUAL" && l.sourceKey !== null);
+  const rec = reconcileSuggestions(suggested, held.map((l) => l.sourceKey!), r.exclusions.map((x) => x.sourceKey));
+  const out = [...base];
+  for (const sug of rec.replaced) {
+    const mine = held.find((l) => l.sourceKey === sug.sourceKey);
+    if (mine && mine.amount !== sug.amount) out.push(`Usulan sistem "${sug.name}" ${formatRupiah(sug.amount, "PLAIN")} digantikan baris manual "${mine.name}" ${formatRupiah(mine.amount, "PLAIN")}; hanya baris manual yang dihitung.`);
+  }
+  for (const c of possibleDuplicateCategories(r.lines)) out.push(`Kemungkinan hitungan ganda pada kategori "${LINE_CATEGORY_LABEL[c]}": ada baris manual tanpa tautan sumber di samping baris usulan sistem (data lama). Bila baris manual itu koreksi dari usulan sistem, hapus salah satunya.`);
+  return out;
+}
+
 // ─────────────────────────── Baca ───────────────────────────
 
 export async function listSettlements(actor: Actor, opts: { status?: SettlementStatusValue } = {}): Promise<SettlementRow[]> {
@@ -201,18 +223,55 @@ export async function getSettlement(actor: Actor, id: string): Promise<Settlemen
   assertCan(actor, "payroll:view");
   const r = await load(prisma, id);
   // Peringatan dihitung langsung dari data terkini selama masih bisa diubah/ditinjau; yang sudah final tidak menampilkan peringatan lagi.
-  const warnings = r.status === "DRAFT" || r.status === "PENDING_APPROVAL" ? (await computeSuggestions(r.employeeId, dateToIso(r.lastWorkDate), r.basis, r.leaveDivisor)).warnings : [];
-  return toDto(r, warnings);
+  if (r.status !== "DRAFT" && r.status !== "PENDING_APPROVAL") return toDto(r, []);
+  const sug = await computeSuggestions(r.employeeId, dateToIso(r.lastWorkDate), r.basis, r.leaveDivisor);
+  return toDto(r, stateWarnings(r, sug.lines, sug.warnings));
+}
+
+export interface DuplicateAuditRow {
+  settlementId: string; employeeName: string; employeeNo: string; status: SettlementStatusValue; lastWorkDate: string; netPayable: number;
+  categories: { category: SettlementLineCategoryValue; categoryLabel: string; total: number; lines: { name: string; amount: number; source: SettlementLineSourceValue }[] }[];
+}
+/**
+ * AUDIT data lama (hanya BACA, tidak mengubah apa pun): penyelesaian akhir yang belum dibatalkan dengan baris manual tanpa identitas sumber di samping baris sistem
+ * pada kategori yang diusulkan sistem (gaji prorata, uang cuti, uang harian) — pola hitungan ganda sebelum ada identitas sumber. Hasilnya TERDUGA, bukan pasti:
+ * baris manual murni yang sah juga terdaftar; pimpinan/HR memeriksa nominalnya. Penyelesaian yang sudah Disetujui/Dibayar tidak dapat diubah; koreksinya
+ * lewat pembatalan (bila belum dibayar) atau penyesuaian di luar aplikasi sesuai kebijakan.
+ */
+export async function auditSettlementDuplicates(actor: Actor): Promise<DuplicateAuditRow[]> {
+  assertCan(actor, "payroll:approve");
+  const rows = await prisma.finalSettlement.findMany({ where: { status: { not: "CANCELLED" } }, include, orderBy: { createdAt: "desc" }, take: 500 });
+  const out: DuplicateAuditRow[] = [];
+  for (const r of rows) {
+    const cats = possibleDuplicateCategories(r.lines);
+    if (!cats.length) continue;
+    out.push({
+      settlementId: r.id, employeeName: r.employee.fullName, employeeNo: r.employee.employeeNo, status: r.status, lastWorkDate: dateToIso(r.lastWorkDate), netPayable: toSafeNumber(r.netPayable),
+      categories: cats.map((c) => { const ls = r.lines.filter((l) => l.category === c); return { category: c, categoryLabel: LINE_CATEGORY_LABEL[c], total: toSafeNumber(ls.reduce((t, l) => t + l.amount, 0n)), lines: ls.map((l) => ({ name: l.name, amount: toSafeNumber(l.amount), source: l.source })) }; }),
+    });
+  }
+  return out;
 }
 
 // ─────────────────────────── Tulis ───────────────────────────
 
-/** Ganti seluruh baris SISTEM dengan usulan baru; baris MANUAL tetap. Harus dalam transaksi dengan baris induk terkunci & berstatus Draf. */
+/**
+ * Ganti baris SISTEM dengan usulan terkini, tetapi SATU SUMBER HANYA SATU BARIS:
+ *   · sumber yang dipegang baris MANUAL (usulan sistem yang dikoreksi HR) tidak dibuat lagi — baris manual itulah penggantinya,
+ *   · sumber yang dikecualikan (usulan yang dihapus HR) tidak muncul lagi,
+ *   · baris manual murni (tanpa kunci) tidak disentuh.
+ * Harus dalam transaksi dengan baris induk terkunci & berstatus Draf. Indeks unik database menjaga "satu kunci = satu baris".
+ */
 async function replaceSystemLines(tx: Tx, id: string, lines: DraftLine[]): Promise<void> {
   await tx.finalSettlementLine.deleteMany({ where: { settlementId: id, source: "SYSTEM" } });
+  const [held, excl] = await Promise.all([
+    tx.finalSettlementLine.findMany({ where: { settlementId: id, sourceKey: { not: null } }, select: { sourceKey: true } }),
+    tx.finalSettlementExclusion.findMany({ where: { settlementId: id }, select: { sourceKey: true } }),
+  ]);
+  const { create } = reconcileSuggestions(lines, held.map((h) => h.sourceKey!), excl.map((e) => e.sourceKey));
   const max = await tx.finalSettlementLine.aggregate({ where: { settlementId: id }, _max: { sortOrder: true } });
   let order = (max._max.sortOrder ?? 0) + 1;
-  if (lines.length) await tx.finalSettlementLine.createMany({ data: lines.map((l) => ({ settlementId: id, kind: l.kind, category: l.category, name: l.name, amount: l.amount, formula: l.formula, source: "SYSTEM" as const, note: l.note, sortOrder: order++ })) });
+  if (create.length) await tx.finalSettlementLine.createMany({ data: create.map((l) => ({ settlementId: id, kind: l.kind, category: l.category, name: l.name, amount: l.amount, formula: l.formula, source: "SYSTEM" as const, sourceKey: l.sourceKey ?? null, note: l.note, sortOrder: order++ })) });
   await refreshTotals(tx, id);
 }
 
@@ -238,14 +297,15 @@ export async function createSettlement(actor: Actor, raw: unknown): Promise<Sett
       await writeAudit(tx, actor, { action: "settlement.create", entityType: "FinalSettlement", entityId: s.id, summary: `Penyelesaian akhir ${emp.fullName} dibuat (terakhir bekerja ${last}, ${sug.lines.length} usulan sistem)`, after: { lastWorkDate: last, basis: input.basis, leaveDivisor: input.leaveDivisor ?? null } });
       return s.id;
     });
-    return toDto(await load(prisma, id), sug.warnings);
+    const row = await load(prisma, id);
+    return toDto(row, stateWarnings(row, sug.lines, sug.warnings));
   } catch (e) {
     if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") throw Errors.conflict("Karyawan ini sudah punya penyelesaian akhir yang berlaku.");
     throw e;
   }
 }
 
-/** Ubah tanggal/dasar/pembagi/catatan; usulan SISTEM dihitung ulang (baris manual tetap). */
+/** Ubah tanggal/dasar/pembagi/catatan; usulan SISTEM dihitung ulang (baris manual tetap; sumber yang sudah dikoreksi/dihapus tidak dibuat lagi). */
 export async function updateSettlement(actor: Actor, id: string, raw: unknown): Promise<SettlementDto> {
   assertCan(actor, "payroll:prepare");
   const input = parseInput(settlementPatchSchema, raw);
@@ -265,10 +325,11 @@ export async function updateSettlement(actor: Actor, id: string, raw: unknown): 
     await replaceSystemLines(tx, id, sug.lines);
     await writeAudit(tx, actor, { action: "settlement.update", entityType: "FinalSettlement", entityId: id, summary: `Penyelesaian akhir ${cur.employee.fullName} diubah; usulan sistem dihitung ulang`, before: { lastWorkDate: dateToIso(cur.lastWorkDate), basis: cur.basis, leaveDivisor: cur.leaveDivisor }, after: { lastWorkDate: last, basis, leaveDivisor } });
   });
-  return toDto(await load(prisma, id), sug.warnings);
+  const row = await load(prisma, id);
+  return toDto(row, stateWarnings(row, sug.lines, sug.warnings));
 }
 
-/** Hitung ulang usulan sistem dengan data terkini (baris manual tidak berubah; usulan yang sebelumnya dihapus muncul lagi). */
+/** Hitung ulang usulan sistem dengan data terkini. Baris manual tidak berubah; usulan yang sudah dikoreksi HR tidak dibuat lagi; usulan yang dihapus HR tetap dikecualikan. */
 export async function recomputeSettlement(actor: Actor, id: string): Promise<SettlementDto> {
   assertCan(actor, "payroll:prepare");
   const cur = await load(prisma, id);
@@ -280,7 +341,8 @@ export async function recomputeSettlement(actor: Actor, id: string): Promise<Set
     await replaceSystemLines(tx, id, sug.lines);
     await writeAudit(tx, actor, { action: "settlement.recompute", entityType: "FinalSettlement", entityId: id, summary: `Usulan sistem penyelesaian akhir ${cur.employee.fullName} dihitung ulang` });
   });
-  return toDto(await load(prisma, id), sug.warnings);
+  const row = await load(prisma, id);
+  return toDto(row, stateWarnings(row, sug.lines, sug.warnings));
 }
 
 export async function addLine(actor: Actor, id: string, raw: unknown): Promise<SettlementDto> {
@@ -306,7 +368,7 @@ async function lineOwner(lineId: string): Promise<{ settlementId: string }> {
   return l;
 }
 
-/** Ubah baris. Baris usulan SISTEM yang diubah menjadi MANUAL (tidak ditimpa saat hitung ulang). */
+/** Ubah baris. Baris usulan SISTEM yang diubah menjadi MANUAL tetapi TETAP membawa identitas sumbernya, sehingga hitung ulang tidak membuat usulan yang sama lagi. */
 export async function updateLine(actor: Actor, lineId: string, raw: unknown): Promise<SettlementDto> {
   assertCan(actor, "payroll:prepare");
   const input = parseInput(lineSchema, raw);
@@ -334,8 +396,10 @@ export async function deleteLine(actor: Actor, lineId: string): Promise<Settleme
     const before = cur.lines.find((l) => l.id === lineId);
     if (!before) throw Errors.notFound("Baris");
     await tx.finalSettlementLine.delete({ where: { id: lineId } });
+    // Baris yang berasal dari usulan sistem (masih SISTEM, atau sudah dikoreksi jadi MANUAL) dikecualikan PERMANEN agar tidak muncul lagi saat dihitung ulang.
+    if (before.sourceKey) await tx.finalSettlementExclusion.createMany({ data: [{ settlementId, sourceKey: before.sourceKey, name: before.name, category: before.category, amount: before.amount, createdById: actor.userId }], skipDuplicates: true });
     await refreshTotals(tx, settlementId);
-    await writeAudit(tx, actor, { action: "settlement.line.delete", entityType: "FinalSettlement", entityId: settlementId, summary: `Baris "${before.name}" (${formatRupiah(before.amount, "PLAIN")}) dihapus dari penyelesaian ${cur.employee.fullName}`, before: { name: before.name, category: before.category, amount: toSafeNumber(before.amount), source: before.source } });
+    await writeAudit(tx, actor, { action: "settlement.line.delete", entityType: "FinalSettlement", entityId: settlementId, summary: `Baris "${before.name}" (${formatRupiah(before.amount, "PLAIN")}) dihapus dari penyelesaian ${cur.employee.fullName}${before.sourceKey ? "; usulan sistem ini dikecualikan permanen" : ""}`, before: { name: before.name, category: before.category, amount: toSafeNumber(before.amount), source: before.source, sourceKey: before.sourceKey } });
   });
   return toDto(await load(prisma, settlementId), []);
 }

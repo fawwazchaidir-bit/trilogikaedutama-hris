@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { prorate, suggestLeavePayout, suggestProratedLines, totalsOf, kindOfCategory, LINE_CATEGORIES, type ProrateComponent } from "@/lib/final-settlement";
+import {
+  prorate, suggestLeavePayout, suggestProratedLines, totalsOf, kindOfCategory, LINE_CATEGORIES, reconcileSuggestions, possibleDuplicateCategories, prorataKey, allowanceKey, LEAVE_PAYOUT_KEY,
+  type DraftLine, type ProrateComponent,
+} from "@/lib/final-settlement";
 
 const month = { start: "2026-11-01", end: "2026-11-30" };
 const comp = (over: Partial<ProrateComponent> = {}): ProrateComponent => ({
@@ -78,5 +81,46 @@ describe("totalsOf & kategori", () => {
     expect(kindOfCategory("SEVERANCE")).toBe("EARNING");
     expect(kindOfCategory("TAX")).toBe("DEDUCTION");
     expect(kindOfCategory("ASSET")).toBe("DEDUCTION");
+  });
+});
+
+describe("identitas sumber & rekonsiliasi usulan (satu sumber satu kali)", () => {
+  const line = (sourceKey: string | null, name = "x", amount = 100n): DraftLine => ({ kind: "EARNING", category: "PRORATED_SALARY", name, amount, formula: null, source: "SYSTEM", note: null, sourceKey });
+
+  it("setiap usulan sistem membawa kunci sumber yang tetap: komponen gaji, uang cuti, uang harian", () => {
+    const r = suggestProratedLines({ month, worked: 11, total: 22, basisLabel: "Hari kerja terjadwal", components: [comp({ id: "A1" }), comp({ id: "B2", name: "Makan", amount: 440_000n })] });
+    expect(r.lines.map((l) => l.sourceKey)).toEqual([prorataKey("A1"), prorataKey("B2")]);
+    expect(r.lines.map((l) => l.sourceKey)).toEqual(["PRORATA:A1", "PRORATA:B2"]);
+    expect(suggestLeavePayout({ baseMonthly: 6_000_000n, days: 5, divisor: 25 })?.sourceKey).toBe(LEAVE_PAYOUT_KEY);
+    expect(allowanceKey("T9")).toBe("ALLOWANCE:T9");
+    // kunci sama untuk perhitungan ulang dengan nominal berbeda (identitas = sumber, bukan angka)
+    const again = suggestProratedLines({ month, worked: 5, total: 22, basisLabel: "x", components: [comp({ id: "A1" })] });
+    expect(again.lines[0]!.sourceKey).toBe("PRORATA:A1");
+  });
+
+  it("sumber yang dipegang baris manual dilewati (digantikan); yang dikecualikan dilewati permanen; sisanya dibuat", () => {
+    const sug = [line("PRORATA:A", "gaji"), line("PRORATA:B", "makan"), line("LEAVE_PAYOUT", "cuti")];
+    const r = reconcileSuggestions(sug, ["PRORATA:A"], ["PRORATA:B"]);
+    expect(r.create.map((l) => l.name)).toEqual(["cuti"]);
+    expect(r.replaced.map((l) => l.name)).toEqual(["gaji"]);
+    expect(r.excluded.map((l) => l.name)).toEqual(["makan"]);
+  });
+
+  it("sumber ganda di dalam usulan hanya dihitung sekali; usulan tanpa kunci tidak bisa dicocokkan sehingga tetap dibuat", () => {
+    const r = reconcileSuggestions([line("K"), line("K", "dobel"), line(null, "tanpa-1"), line(null, "tanpa-2")], [], []);
+    expect(r.create.map((l) => l.name)).toEqual(["x", "tanpa-1", "tanpa-2"]);
+  });
+
+  it("tanpa baris manual berkunci & tanpa pengecualian, semua usulan dibuat", () => {
+    const sug = [line("A"), line("B")];
+    expect(reconcileSuggestions(sug, [], []).create).toEqual(sug);
+  });
+
+  it("data lama: baris manual tanpa kunci + baris sistem sekategori (yang diusulkan sistem) ditandai mungkin ganda; kategori lain tidak", () => {
+    const L = (category: DraftLine["category"], source: DraftLine["source"], sourceKey: string | null) => ({ category, source, sourceKey });
+    expect(possibleDuplicateCategories([L("PRORATED_SALARY", "SYSTEM", null), L("PRORATED_SALARY", "MANUAL", null)])).toEqual(["PRORATED_SALARY"]);
+    expect(possibleDuplicateCategories([L("PRORATED_SALARY", "SYSTEM", "PRORATA:A"), L("PRORATED_SALARY", "MANUAL", "PRORATA:B")])).toEqual([]); // manual berkunci = pengganti sah
+    expect(possibleDuplicateCategories([L("SEVERANCE", "MANUAL", null), L("PRORATED_SALARY", "SYSTEM", "PRORATA:A")])).toEqual([]);
+    expect(possibleDuplicateCategories([L("LEAVE_PAYOUT", "SYSTEM", null), L("LEAVE_PAYOUT", "MANUAL", null), L("UNPAID_ALLOWANCE", "SYSTEM", null), L("UNPAID_ALLOWANCE", "MANUAL", null)])).toEqual(["LEAVE_PAYOUT", "UNPAID_ALLOWANCE"]);
   });
 });

@@ -34,9 +34,66 @@ export const NOT_COMPUTED_BY_SYSTEM = ["Uang pesangon", "UPMK", "UPH / hak lain"
 
 export interface DraftLine {
   kind: SettlementLineKind; category: SettlementLineCategoryValue; name: string; amount: bigint; formula: string | null; source: SettlementLineSourceValue; note: string | null;
+  /**
+   * Identitas SUMBER usulan sistem, tetap walau barisnya diubah HR: `PRORATA:<id komponen gaji>`, `LEAVE_PAYOUT`, `ALLOWANCE:<id penerima tugas>`.
+   * Satu sumber hanya boleh menjadi SATU baris dalam satu penyelesaian (dijaga juga oleh indeks unik di database). Baris manual murni tidak punya kunci.
+   */
+  sourceKey?: string | null;
 }
 
 const rp = (n: bigint) => formatRupiah(n, "PLAIN");
+
+// ─────────────────────────── Identitas sumber usulan ───────────────────────────
+export const LEAVE_PAYOUT_KEY = "LEAVE_PAYOUT";
+export const prorataKey = (salaryComponentId: string) => `PRORATA:${salaryComponentId}`;
+export const allowanceKey = (assignmentAssigneeId: string) => `ALLOWANCE:${assignmentAssigneeId}`;
+
+export interface ReconcileResult {
+  /** Usulan yang boleh dibuat sebagai baris SISTEM baru. */
+  create: DraftLine[];
+  /** Usulan yang TIDAK dibuat karena sumbernya sudah dipegang baris manual (hasil koreksi HR). */
+  replaced: DraftLine[];
+  /** Usulan yang TIDAK dibuat karena HR pernah menghapusnya (dikecualikan permanen). */
+  excluded: DraftLine[];
+}
+/**
+ * Saring usulan sistem terhadap yang sudah ada: satu sumber hanya dihitung SATU kali.
+ *   · sumber yang dipegang baris manual (diubah HR)  → dilewati (baris manual menjadi penggantinya),
+ *   · sumber yang dikecualikan (dihapus HR)           → dilewati permanen,
+ *   · sumber ganda di dalam usulan itu sendiri        → hanya yang pertama.
+ * Usulan tanpa kunci selalu dibuat (tidak ada identitas untuk dicocokkan).
+ */
+export function reconcileSuggestions(suggested: DraftLine[], heldByLines: Iterable<string>, excluded: Iterable<string>): ReconcileResult {
+  const held = new Set(heldByLines), gone = new Set(excluded), seen = new Set<string>();
+  const out: ReconcileResult = { create: [], replaced: [], excluded: [] };
+  for (const l of suggested) {
+    const k = l.sourceKey ?? null;
+    if (k === null) { out.create.push(l); continue; }
+    if (gone.has(k)) { out.excluded.push(l); continue; }
+    if (held.has(k)) { out.replaced.push(l); continue; }
+    if (seen.has(k)) continue;
+    seen.add(k);
+    out.create.push(l);
+  }
+  return out;
+}
+
+/** Kategori yang bisa muncul ganda: yang juga diusulkan sistem. */
+export const SYSTEM_SUGGESTED_CATEGORIES: readonly SettlementLineCategoryValue[] = ["PRORATED_SALARY", "LEAVE_PAYOUT", "UNPAID_ALLOWANCE"];
+
+/**
+ * DATA LAMA (sebelum ada identitas sumber): baris manual tanpa kunci yang sekategori dengan baris sistem mungkin hasil koreksi usulan sistem
+ * yang kemudian ikut tercipta lagi. Tidak bisa dipastikan otomatis (baris manual murni pun sah) → hanya ditandai untuk diperiksa.
+ */
+export function possibleDuplicateCategories(lines: { category: SettlementLineCategoryValue; source: SettlementLineSourceValue; sourceKey: string | null }[]): SettlementLineCategoryValue[] {
+  const out: SettlementLineCategoryValue[] = [];
+  for (const c of SYSTEM_SUGGESTED_CATEGORIES) {
+    const hasSystem = lines.some((l) => l.category === c && l.source === "SYSTEM");
+    const hasKeylessManual = lines.some((l) => l.category === c && l.source === "MANUAL" && l.sourceKey === null);
+    if (hasSystem && hasKeylessManual) out.push(c);
+  }
+  return out;
+}
 
 /** nominal × dikerjakan ÷ total, half-up. Dikerjakan dibatasi [0, total]. */
 export function prorate(amount: bigint, worked: number, total: number): bigint {
@@ -69,7 +126,7 @@ export function suggestProratedLines(args: { month: { start: string; end: string
     if (c.effectiveFrom > month.start || (c.effectiveTo !== null && c.effectiveTo < month.end)) warnings.push(`Komponen "${c.name}" mulai/berakhir di tengah bulan; prorata memakai nominal penuh — periksa barisnya.`);
     const amount = prorate(c.amount, worked, total);
     if (amount <= 0n) continue;
-    lines.push({ kind: "EARNING", category: "PRORATED_SALARY", name: `${c.name} (prorata)`, amount, formula: `${rp(c.amount)} × ${Math.min(Math.max(worked, 0), total)}/${total} ${basisLabel.toLowerCase()}`, source: "SYSTEM", note: null });
+    lines.push({ kind: "EARNING", category: "PRORATED_SALARY", name: `${c.name} (prorata)`, amount, formula: `${rp(c.amount)} × ${Math.min(Math.max(worked, 0), total)}/${total} ${basisLabel.toLowerCase()}`, source: "SYSTEM", note: null, sourceKey: prorataKey(c.id) });
   }
   return { lines, warnings };
 }
@@ -81,7 +138,7 @@ export function suggestLeavePayout(args: { baseMonthly: bigint; days: number; di
   const halves = Math.round(args.days * 2);
   const amount = roundDivHalfUp(args.baseMonthly * BigInt(halves), BigInt(args.divisor) * 2n);
   if (amount <= 0n) return null;
-  return { kind: "EARNING", category: "LEAVE_PAYOUT", name: "Uang cuti sisa", amount, formula: `${rp(args.baseMonthly)} × ${args.days} hari ÷ ${args.divisor}`, source: "SYSTEM", note: null };
+  return { kind: "EARNING", category: "LEAVE_PAYOUT", name: "Uang cuti sisa", amount, formula: `${rp(args.baseMonthly)} × ${args.days} hari ÷ ${args.divisor}`, source: "SYSTEM", note: null, sourceKey: LEAVE_PAYOUT_KEY };
 }
 
 export function totalsOf(lines: { kind: SettlementLineKind; amount: bigint }[]): { earnings: bigint; deductions: bigint; net: bigint } {

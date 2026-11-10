@@ -2579,12 +2579,30 @@ model FinalSettlement {
   createdAt       DateTime         @default(now())
   updatedAt       DateTime         @updatedAt
 
-  employee Employee              @relation(fields: [employeeId], references: [id], onDelete: Restrict)
-  lines    FinalSettlementLine[]
+  employee   Employee                   @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  lines      FinalSettlementLine[]
+  exclusions FinalSettlementExclusion[]
 
   @@index([employeeId, status])
   @@index([status, createdAt])
   @@map("final_settlements")
+}
+
+/// Usulan sistem yang DIHAPUS HR: dikecualikan permanen dari penyelesaian itu (tidak muncul lagi saat hitung ulang). Tambah-saja.
+model FinalSettlementExclusion {
+  id           String                 @id @default(uuid()) @db.Uuid
+  settlementId String                 @db.Uuid
+  sourceKey    String
+  name         String
+  category     SettlementLineCategory
+  amount       BigInt
+  createdById  String                 @db.Uuid
+  createdAt    DateTime               @default(now())
+
+  settlement FinalSettlement @relation(fields: [settlementId], references: [id], onDelete: Restrict)
+
+  @@unique([settlementId, sourceKey])
+  @@map("final_settlement_exclusions")
 }
 
 model FinalSettlementLine {
@@ -2598,6 +2616,9 @@ model FinalSettlementLine {
   /// Rumus/dasar perhitungan yang ditulis agar dapat diperiksa penyetuju.
   formula      String?
   source       SettlementLineSource   @default(MANUAL)
+  /// Identitas SUMBER usulan sistem (mis. `PRORATA:<id komponen gaji>`, `LEAVE_PAYOUT`, `ALLOWANCE:<id penerima tugas>`). Tetap menempel saat baris dikoreksi HR (jadi MANUAL)
+  /// agar hitung ulang tahu usulan itu sudah diganti. Indeks unik parsial (settlementId, sourceKey) menjamin SATU sumber hanya SATU baris.
+  sourceKey    String?
   note         String?
   sortOrder    Int
   createdAt    DateTime               @default(now())

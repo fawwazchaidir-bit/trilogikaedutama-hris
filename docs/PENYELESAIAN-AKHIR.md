@@ -14,7 +14,34 @@ Prinsipnya sama dengan penggajian: **tidak ada tarif atau aturan baku yang ditan
 | Pesangon, UPMK, UPH / hak lain, THR prorata | **Tidak** | HR mengisi baris manual sesuai perjanjian/ketentuan yang berlaku |
 | Pajak (PPh 21), BPJS, sisa kasbon, ganti rugi aset, potongan lain | **Tidak** | baris manual; pajak dari hasil hitung yang sah (mis. konsultan pajak) |
 
-Komponen *per hari hadir* dan *persen dari gaji pokok* tidak dihitung otomatis (butuh rekap kehadiran/dasar); sistem memberi peringatan supaya HR menambah baris manual bila perlu. Baris usulan sistem yang **diubah** HR menjadi baris manual (tidak ditimpa saat hitung ulang).
+Komponen *per hari hadir* dan *persen dari gaji pokok* tidak dihitung otomatis (butuh rekap kehadiran/dasar); sistem memberi peringatan supaya HR menambah baris manual bila perlu.
+
+## Satu sumber hanya dihitung satu kali
+
+Setiap baris usulan membawa **identitas sumber** yang tetap, bukan sekadar nama/nominal:
+
+| Usulan | Identitas sumber (`sourceKey`) |
+|---|---|
+| Gaji prorata per komponen | `PRORATA:<id komponen gaji>` |
+| Uang cuti sisa | `LEAVE_PAYOUT` |
+| Uang harian dinas | `ALLOWANCE:<id penerima surat tugas>` |
+
+Aturannya (diterapkan saat **membuat**, **hitung ulang**, dan **ubah tanggal/dasar/pembagi/catatan** — ketiganya memakai satu jalur yang sama):
+
+1. **Diubah HR** → baris menjadi *Manual* tetapi **tetap membawa identitas sumbernya** (tampil "Manual · menggantikan usulan sistem"). Hitung ulang **tidak membuat usulan yang sama lagi**; baris manual itulah yang dihitung. Contoh: gaji prorata Rp2.727.273 diubah menjadi Rp3.000.000 → setelah hitung ulang tetap **satu** baris gaji (Rp3.000.000), bukan dua.
+2. **Dihapus HR** → sumbernya **dikecualikan permanen** dari penyelesaian itu (tabel `final_settlement_exclusions`, tambah-saja). Tidak muncul lagi saat hitung ulang maupun saat data diubah, termasuk bila yang dihapus adalah baris hasil koreksi. Daftar yang dikecualikan tampil di editor (nama, nominal saat dihapus, siapa yang menghapus). Bila ternyata diperlukan, tambahkan sebagai **baris manual** secara sadar. Pengecualian tidak ikut direset oleh perubahan tanggal terakhir bekerja.
+3. **Usulan yang belum disentuh** tetap dihitung ulang mengikuti data terkini; usulan **baru** (mis. surat tugas baru) tetap diusulkan.
+4. **Baris manual murni** (pesangon, pajak, dst.) tidak punya identitas sumber dan tidak pernah disentuh hitung ulang.
+5. Bila nominal usulan sistem terkini **berbeda** dari baris manual penggantinya, muncul peringatan agar penyetuju tahu usulan mana yang tidak dihitung.
+6. Penjaga database: indeks unik parsial `(penyelesaian, sourceKey)` — satu sumber **tidak mungkin** menjadi dua baris walau service dilewati.
+
+### Data lama (sebelum identitas sumber ada)
+
+Baris lama tidak punya identitas sumber, jadi sistem **tidak bisa memastikan** mana baris manual yang merupakan koreksi dari usulan sistem. Yang dilakukan sistem:
+
+- Editor menampilkan peringatan **"Kemungkinan hitungan ganda"** bila ada baris manual tanpa tautan sumber di samping baris sistem pada kategori yang juga diusulkan sistem (gaji prorata, uang cuti, uang harian). Hitung ulang pertama setelah pembaruan ini memberi identitas pada usulan baru, sehingga tidak bertambah ganda lagi.
+- **Audit baca-saja** untuk pimpinan (`payroll:approve`): `GET /api/final-settlements/audit-duplicates` mendaftar penyelesaian yang belum dibatalkan (termasuk yang sudah *Disetujui*/*Dibayar*) dengan pola tersebut, beserta baris dan total per kategori. Daftar ini **terduga**, bukan pasti — baris manual murni yang sah juga tercantum; periksa nominalnya. Audit tidak mengubah data apa pun.
+- Penyelesaian *Draf* yang terduga ganda: hapus salah satu baris yang kembar (baris sistem yang dihapus kini dikecualikan permanen). Yang sudah *Disetujui* terkunci; koreksinya lewat pembatalan oleh pimpinan (bila belum dibayar) lalu disiapkan ulang, atau penyesuaian di luar aplikasi bila sudah dibayar.
 
 ## Peringatan (dihitung langsung dari data terkini)
 
@@ -37,7 +64,7 @@ Draf ──ajukan──▶ Menunggu persetujuan ──setujui──▶ Disetujui
 
 ## Penjaga database
 
-Baris hanya dapat berubah saat induknya **Draf** (trigger); setelah diajukan, tanggal/dasar/total tidak dapat diubah diam-diam (kembalikan ke Draf dulu); loncatan status ilegal ditolak; *Dibayar*/*Dibatalkan* terkunci; penyelesaian tidak dihapus; nominal baris > 0 dan kategori sesuai jenis (pajak = potongan); total = pendapatan − potongan; bersih tidak negatif sejak diajukan. Setiap langkah tercatat di audit (`settlement.*`).
+Baris hanya dapat berubah saat induknya **Draf** (trigger); setelah diajukan, tanggal/dasar/total tidak dapat diubah diam-diam (kembalikan ke Draf dulu); loncatan status ilegal ditolak; *Dibayar*/*Dibatalkan* terkunci; penyelesaian tidak dihapus; nominal baris > 0 dan kategori sesuai jenis (pajak = potongan); total = pendapatan − potongan; bersih tidak negatif sejak diajukan. Satu identitas sumber hanya boleh satu baris per penyelesaian; pengecualian usulan hanya bisa ditambah saat Draf dan tidak pernah diubah/dihapus. Setiap langkah tercatat di audit (`settlement.*`).
 
 ## Integrasi
 
