@@ -180,6 +180,8 @@ enum FileKind {
   LETTER_PDF
   /// Gambar tanda tangan pribadi penandatangan surat (PNG ternormalisasi; hanya pemilik & Direktur yang dapat membukanya).
   LETTER_SIGNATURE
+  /// Lampiran PDF yang diunggah untuk surat (privat; digabung ke PDF terbit atau disimpan terpisah dengan hash sendiri).
+  LETTER_ATTACHMENT
 }
 
 enum LateDeductionMode {
@@ -417,6 +419,34 @@ model LetterSignatory {
   @@map("letter_signatories")
 }
 
+enum AttachmentKind {
+  /// Disusun di editor; dirender sebagai halaman lampiran di PDF surat.
+  EDITOR
+  /// PDF buatan luar sistem yang digabung di belakang PDF surat (masuk hash surat).
+  UPLOAD_MERGED
+  /// PDF buatan luar sistem yang disimpan terpisah; hash-nya sendiri dicantumkan di halaman verifikasi.
+  UPLOAD_SEPARATE
+}
+
+/// Lampiran surat. EDITOR memakai `body`; UPLOAD_* memakai `fileId` (+ hash, ukuran, jumlah halaman). Terkunci sejak surat diajukan.
+model LetterAttachment {
+  id         String         @id @default(uuid()) @db.Uuid
+  documentId String         @db.Uuid
+  document   LetterDocument @relation(fields: [documentId], references: [id])
+  position   Int
+  kind       AttachmentKind
+  title      String
+  body       Json?
+  fileId     String?        @db.Uuid
+  fileName   String?
+  sha256     String?
+  size       Int?
+  pages      Int?
+
+  @@index([documentId, position])
+  @@map("letter_attachments")
+}
+
 model LetterDocument {
   id        String       @id @default(uuid()) @db.Uuid
   typeId    String       @db.Uuid
@@ -448,15 +478,18 @@ model LetterDocument {
   number      String?      @unique
   /// Token acak untuk halaman verifikasi publik.
   verifyToken String       @unique
+  /// Surat dibuat DI LUAR portal (mis. MoU/PKS tanda tangan basah): mesin hanya memberi nomor; PDF pindaian diunggah sesudah terbit.
+  archiveOnly Boolean      @default(false)
   pdfFileId   String?      @db.Uuid
   pdfSha256   String?
   snapshot    Json?
   issuedById  String?      @db.Uuid
 
-  createdAt   DateTime          @default(now())
-  updatedAt   DateTime          @updatedAt
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
   events      LetterEvent[]
   signatories LetterSignatory[]
+  attachments LetterAttachment[]
 
   @@unique([series, seqYear, seqNo])
   @@index([creatorId, status])

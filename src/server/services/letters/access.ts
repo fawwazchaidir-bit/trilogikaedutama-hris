@@ -44,6 +44,6 @@ export async function loadVisible(actor: Actor, id: string): Promise<LetterWithT
 /** PDF terbit dapat dibuka oleh pihak yang melihat dokumennya. */
 export async function canReadLetterPdf(actor: Actor, fileId: string): Promise<boolean> {
   if (!lettersEnabled()) return false;
-  const d = await prisma.letterDocument.findFirst({ where: { pdfFileId: fileId }, include: LETTER_INCLUDE });
+  const d = await prisma.letterDocument.findFirst({ where: { OR: [{ pdfFileId: fileId }, { attachments: { some: { fileId } } }] }, include: LETTER_INCLUDE });
   return !!d && canSee(actor, d);
 }

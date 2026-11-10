@@ -9,11 +9,13 @@ import { AppError } from "@/server/errors";
 import { isoToDate } from "@/server/json";
 import type { Actor } from "@/server/actor";
 import { resetDb, makeUser } from "../helpers/db";
-import { createLetter, updateLetter, submitLetter, approveLetter, returnLetter, rejectLetter, cancelLetter, withdrawLetter, getLetter, listLetters, letterPdf, cosignLetter, pendingReviewCount } from "@/server/services/letters/documents";
+import { createLetter, updateLetter, submitLetter, approveLetter, returnLetter, rejectLetter, cancelLetter, withdrawLetter, getLetter, listLetters, letterPdf, cosignLetter, pendingReviewCount, uploadArchiveFile } from "@/server/services/letters/documents";
 import { listTypes, listSigners, updateTypePolicy } from "@/server/services/letters/types";
 import { assertCanSetSignature, setCounterOffset } from "@/server/services/letters/admin";
 import { verifyByToken } from "@/server/services/letters/public";
 import { doc, p } from "@/lib/documents/builders";
+import { PDFDocument } from "pdf-lib";
+import { addEditorAttachment, deleteAttachment, updateAttachment, uploadAttachment } from "@/server/services/letters/attachments";
 
 let direktur: Actor, manajer: Actor, staf: Actor, staf2: Actor, magang: Actor, hr: Actor;
 const fail = async (pr: Promise<unknown>) => { try { await pr; return null; } catch (e) { return e as AppError; } };
@@ -294,5 +296,86 @@ describe("tahap 2a: HR penandatangan, surat Rahasia, multi-penandatangan, tanda 
     expect(await fail(assertCanSetSignature(manajer, direktur.userId))).toMatchObject(FORBIDDEN);
     expect(await fail(assertCanSetSignature(staf, staf.userId))).toMatchObject(FORBIDDEN);
     expect(await fail(assertCanSetSignature(magang, magang.userId))).toMatchObject(FORBIDDEN);
+  });
+});
+
+const pdfOf = async (pages: number) => { const d = await PDFDocument.create(); for (let i = 0; i < pages; i++) d.addPage([595, 842]); return new Uint8Array(await d.save()); };
+const pageCount = async (bytes: Uint8Array | Buffer) => (await PDFDocument.load(bytes)).getPageCount();
+const sha = (b: Uint8Array | Buffer) => createHash("sha256").update(b).digest("hex");
+
+describe("tahap 2b: lampiran", () => {
+  it("lampiran editor + PDF digabung + PDF terpisah: halaman PDF bertambah sesuai, hash tercatat, verifikasi publik mencantumkan hash lampiran", async () => {
+    const d = await draftReady(staf, manajer);
+    await updateLetter(staf, d.id, { body: doc(p("Isi final dengan lampiran.")) });
+    const base = await pageCount((await letterPdf(staf, d.id)).bytes);
+    const ed = await addEditorAttachment(staf, d.id, { title: "Rincian Investasi" });
+    await updateAttachment(staf, d.id, ed.id, { body: doc(p("Isi lampiran editor.")) });
+    const merged = await uploadAttachment(staf, d.id, { title: "Proposal Lengkap", mode: "MERGED", name: "proposal.pdf", bytes: await pdfOf(3) });
+    const sep = await uploadAttachment(staf, d.id, { title: "Profil Lembaga", mode: "SEPARATE", name: "profil.pdf", bytes: await pdfOf(2) });
+    expect([ed.kind, merged.kind, sep.kind]).toEqual(["EDITOR", "UPLOAD_MERGED", "UPLOAD_SEPARATE"]);
+    expect(await pageCount((await letterPdf(staf, d.id)).bytes)).toBe(base + 1 + 3); // +1 halaman lampiran editor, +3 PDF digabung; terpisah tidak ikut
+    await submitLetter(staf, d.id);
+    const out = await approveLetter(manajer, d.id);
+    const row = await prisma.letterDocument.findUniqueOrThrow({ where: { id: d.id } });
+    const file = await prisma.storedFile.findUniqueOrThrow({ where: { id: row.pdfFileId! } });
+    expect(await pageCount(file.data)).toBe(base + 4);
+    expect(sha(file.data)).toBe(row.pdfSha256);
+    expect(out.attachments.map((a) => a.title)).toEqual(["Rincian Investasi", "Proposal Lengkap", "Profil Lembaga"]);
+    const v = await verifyByToken(row.verifyToken);
+    expect(v?.attachments.map((a) => [a.title, a.mode])).toEqual([["Proposal Lengkap", "MERGED"], ["Profil Lembaga", "SEPARATE"]]);
+    expect(v?.attachments[1]?.sha256).toBe(sep.sha256);
+    // terkunci sejak diajukan
+    expect(await fail(deleteAttachment(staf, d.id, merged.id))).toMatchObject(CONFLICT);
+    await expect(prisma.$executeRaw`UPDATE letter_attachments SET title = 'x' WHERE id = ${merged.id}::uuid`).rejects.toThrow(/HRIS-GUARD/);
+    // berkas lampiran hanya terbuka bagi yang melihat surat (anti-IDOR)
+    const { canReadLetterPdf } = await import("@/server/services/letters/access");
+    expect(await canReadLetterPdf(staf, merged.fileId!)).toBe(true);
+    expect(await canReadLetterPdf(staf2, merged.fileId!)).toBe(false);
+  });
+
+  it("menolak: bukan PDF, PDF rusak, bukan pembuat, status terkunci, lebih dari batas; mengganti mode & judul", async () => {
+    const d = await draftReady(staf, manajer);
+    expect(await fail(uploadAttachment(staf, d.id, { title: "Rusak", mode: "MERGED", name: "x.pdf", bytes: new TextEncoder().encode("%PDF-1.4 bukan pdf sungguhan") }))).toMatchObject(VALIDATION);
+    expect(await fail(uploadAttachment(staf, d.id, { title: "Teks", mode: "MERGED", name: "x.pdf", bytes: new TextEncoder().encode("halo dunia") }))).toMatchObject(VALIDATION);
+    expect(await fail(uploadAttachment(manajer, d.id, { title: "Bukan pembuat", mode: "MERGED", name: "x.pdf", bytes: await pdfOf(1) }))).toMatchObject(FORBIDDEN);
+    expect(await fail(uploadAttachment(staf, d.id, { title: "x", mode: "MERGED", name: "x.pdf", bytes: await pdfOf(1) }))).toMatchObject(VALIDATION); // judul terlalu pendek
+    const a = await uploadAttachment(staf, d.id, { title: "Lampiran A", mode: "MERGED", name: "a.pdf", bytes: await pdfOf(1) });
+    expect((await updateAttachment(staf, d.id, a.id, { mode: "SEPARATE", title: "Lampiran A (terpisah)" })).kind).toBe("UPLOAD_SEPARATE");
+    expect(await fail(updateAttachment(staf, d.id, a.id, { body: doc(p("x")) }))).toMatchObject(VALIDATION); // hanya lampiran editor yang punya isi
+    for (let i = 0; i < 9; i++) await addEditorAttachment(staf, d.id, { title: `Lampiran ${i + 2}` });
+    expect(await fail(addEditorAttachment(staf, d.id, { title: "Kesebelas" }))).toMatchObject(VALIDATION);
+    expect(await fail(getLetter(staf2, d.id))).toMatchObject(NOT_FOUND);
+  });
+});
+
+describe("tahap 2b: mode arsip-saja (surat dibuat di luar portal)", () => {
+  it("mesin hanya memberi nomor; PDF pindaian diunggah sesudah terbit sekali saja; verifikasi menampilkan hash setelah diunggah", async () => {
+    const type = await typeOf("EKS", 12);
+    const a = await createLetter(staf, { typeId: type.id, archiveOnly: true });
+    expect(a.archiveOnly).toBe(true);
+    expect(await fail(addEditorAttachment(staf, a.id, { title: "Lampiran" }))).toMatchObject(VALIDATION);
+    expect(await fail(submitLetter(staf, a.id))).toMatchObject(VALIDATION); // perihal & penandatangan wajib
+    await updateLetter(staf, a.id, { subject: "MoU dengan Mitra Contoh", signerId: direktur.userId });
+    expect(await fail(letterPdf(staf, a.id))).toMatchObject(CONFLICT); // tidak ada pratinjau
+    await submitLetter(staf, a.id);
+    const out = await approveLetter(direktur, a.id);
+    expect(out.status).toBe("ISSUED"); expect(out.number).toMatch(/^001\/TE-EKS\/012\//); expect(out.hasPdf).toBe(false);
+    expect(out.can.uploadArchive).toBe(true); // Direktur/penandatangan/pembuat boleh mengunggah pindaian
+    const tok = (await prisma.letterDocument.findUniqueOrThrow({ where: { id: a.id } })).verifyToken;
+    const v0 = await verifyByToken(tok);
+    expect(v0).toMatchObject({ state: "VALID", archiveOnly: true, sha256: null });
+    const scan = await pdfOf(2);
+    expect(await fail(uploadArchiveFile(staf2, a.id, { name: "scan.pdf", bytes: scan }))).toMatchObject(NOT_FOUND);
+    expect(await fail(uploadArchiveFile(staf, a.id, { name: "scan.pdf", bytes: new TextEncoder().encode("bukan pdf") }))).toBeTruthy();
+    const done = await uploadArchiveFile(staf, a.id, { name: "scan.pdf", bytes: scan });
+    expect(done.hasPdf).toBe(true);
+    expect((await verifyByToken(tok))?.sha256).toBe(sha(scan));
+    expect((await letterPdf(staf, a.id)).bytes.length).toBe(scan.length);
+    expect(await fail(uploadArchiveFile(staf, a.id, { name: "scan2.pdf", bytes: await pdfOf(1) }))).toMatchObject(CONFLICT);
+    await expect(prisma.$executeRaw`UPDATE letter_documents SET "pdfSha256" = 'x' WHERE id = ${a.id}::uuid`).rejects.toThrow(/HRIS-GUARD/);
+    // nomor arsip memakai urutan seri yang sama (tanpa lubang): surat berikutnya = 002
+    const b = await draftReady(staf, manajer);
+    await updateLetter(staf, b.id, { body: doc(p("Isi final.")) }); await submitLetter(staf, b.id);
+    expect((await approveLetter(manajer, b.id)).number).toMatch(/^002\/TE-EKS\/003\//);
   });
 });

@@ -13,25 +13,27 @@ import { hasPlaceholder, normalizeDoc, validateDoc, type PmDoc } from "@/lib/doc
 import { canSignOwn, canTakeOver, isEditable, isEligibleSigner, LETTER_STATUS_LABEL, type LetterStatus } from "@/lib/documents/policy";
 import { formatDocNumber } from "@/lib/documents/text";
 import { requiredText, uuid } from "@/lib/validation/common";
+import { doc, p } from "@/lib/documents/builders";
 import type { Paged } from "@/lib/types";
 import { ensureDefaultTypes } from "./types";
+import { inspectPdf, toAttachmentDto, type AttachmentDto } from "./attachments";
+import { storeFile } from "../files";
 import { isDirector, loadVisible, personFacts, requireLetters, LETTER_INCLUDE } from "./access";
-import { getLetterSettings, buildFrame } from "./frame";
-import { renderDocumentPdf } from "../../pdf/document-render";
+import { getLetterSettings, buildFrame, renderLetterPdf } from "./frame";
 
 export interface LetterEventDto { id: string; action: string; note: string | null; at: string; actorName: string }
 export interface LetterDto {
   id: string; status: LetterStatus; statusLabel: string; typeId: string; typeName: string; series: "EKS" | "INT"; kind: "SURAT" | "SK";
   number: string | null; subject: string; issueDate: string | null; createdAt: string; updatedAt: string; submittedAt: string | null;
-  creatorId: string; creatorName: string; signerId: string | null; signerName: string | null; verifyToken: string; hasPdf: boolean;
+  creatorId: string; creatorName: string; signerId: string | null; signerName: string | null; verifyToken: string; hasPdf: boolean; archiveOnly: boolean;
 }
 export interface SignatoryDto { id: string; position: number; kind: "INTERNAL" | "EXTERNAL"; userId: string | null; name: string; title: string | null; org: string | null; signedAt: string | null; isMe: boolean }
 export interface LetterDetailDto extends LetterDto {
-  confidential: boolean; multiSigner: boolean; signatories: SignatoryDto[];
+  confidential: boolean; multiSigner: boolean; signatories: SignatoryDto[]; attachments: AttachmentDto[];
   recipientLines: string[]; recipientPlace: string | null; attachmentCount: number | null; attachmentUnit: string | null; salutation: string | null; closing: string | null;
   cc: string[]; body: PmDoc; variables: Record<string, string>; returnNote: string | null; rejectNote: string | null; cancelNote: string | null;
   events: LetterEventDto[];
-  can: { edit: boolean; submit: boolean; withdraw: boolean; review: boolean; takeOver: boolean; cancel: boolean; cosign: boolean };
+  can: { edit: boolean; submit: boolean; withdraw: boolean; review: boolean; takeOver: boolean; cancel: boolean; cosign: boolean; uploadArchive: boolean };
 }
 
 const include = LETTER_INCLUDE;
@@ -46,7 +48,7 @@ const toDto = (r: Row, n: Map<string, string>): LetterDto => ({
   id: r.id, status: r.status, statusLabel: LETTER_STATUS_LABEL[r.status], typeId: r.typeId, typeName: r.type.name, series: r.type.series, kind: r.type.kind === "SK" ? "SK" : "SURAT",
   number: r.number, subject: r.subject, issueDate: r.issueDate ? r.issueDate.toISOString().slice(0, 10) : null, createdAt: r.createdAt.toISOString(), updatedAt: r.updatedAt.toISOString(),
   submittedAt: r.submittedAt?.toISOString() ?? null, creatorId: r.creatorId, creatorName: n.get(r.creatorId) ?? "—", signerId: r.signerId, signerName: r.signerId ? n.get(r.signerId) ?? "—" : null,
-  verifyToken: r.verifyToken, hasPdf: !!r.pdfFileId,
+  verifyToken: r.verifyToken, hasPdf: !!r.pdfFileId, archiveOnly: r.archiveOnly,
 });
 
 async function detail(actor: Actor, r: Row): Promise<LetterDetailDto> {
@@ -62,9 +64,10 @@ async function detail(actor: Actor, r: Row): Promise<LetterDetailDto> {
     id: sg.id, position: sg.position, kind: sg.kind, userId: sg.userId, name: sg.userId ? sigFacts.get(sg.userId)?.name ?? "—" : sg.name ?? "", title: sg.userId ? sigFacts.get(sg.userId)?.title ?? null : sg.title,
     org: sg.org, signedAt: sg.signedAt?.toISOString() ?? null, isMe: !!sg.userId && sg.userId === actor.userId,
   }));
+  const attRows = await prisma.letterAttachment.findMany({ where: { documentId: r.id }, orderBy: { position: "asc" } });
   const takeOver = isDirector(actor) && !isSigner && r.status === "IN_REVIEW" && canTakeOver(r.submittedAt, new Date(), ls.escalationDays, env().APP_TIMEZONE);
   return {
-    ...toDto(r, n), confidential: r.type.confidential, multiSigner: r.type.multiSigner, signatories, recipientLines: r.recipientLines, recipientPlace: r.recipientPlace, attachmentCount: r.attachmentCount, attachmentUnit: r.attachmentUnit,
+    ...toDto(r, n), confidential: r.type.confidential, multiSigner: r.type.multiSigner, signatories, attachments: attRows.map(toAttachmentDto), recipientLines: r.recipientLines, recipientPlace: r.recipientPlace, attachmentCount: r.attachmentCount, attachmentUnit: r.attachmentUnit,
     salutation: r.salutation, closing: r.closing, cc: r.cc, body: r.body as unknown as PmDoc, variables: (r.variables as Record<string, string> | null) ?? {},
     returnNote: r.returnNote, rejectNote: r.rejectNote, cancelNote: r.cancelNote,
     events: ev.map((e) => ({ id: e.id, action: e.action, note: e.note, at: e.at.toISOString(), actorName: n.get(e.actorId) ?? "—" })),
@@ -72,6 +75,7 @@ async function detail(actor: Actor, r: Row): Promise<LetterDetailDto> {
       edit: mine && isEditable(r.status), submit: mine && isEditable(r.status), withdraw: mine && r.status === "IN_REVIEW",
       review: r.status === "IN_REVIEW" && (isSigner || takeOver), takeOver,
       cancel: r.status === "ISSUED" && (isDirector(actor) || isSigner),
+      uploadArchive: r.archiveOnly && r.status === "ISSUED" && !r.pdfFileId && (mine || isSigner || isDirector(actor)),
       cosign: r.status === "IN_REVIEW" && signatories.some((x) => x.isMe && x.kind === "INTERNAL" && !x.signedAt),
     },
   };
@@ -85,7 +89,7 @@ const event = (tx: Prisma.TransactionClient, documentId: string, actor: Actor, a
 
 export async function createLetter(actor: Actor, raw: unknown): Promise<LetterDetailDto> {
   requireLetters();
-  const { typeId } = parseInput(z.object({ typeId: uuid }), raw);
+  const { typeId, archiveOnly } = parseInput(z.object({ typeId: uuid, archiveOnly: z.boolean().optional() }), raw);
   await ensureDefaultTypes();
   const facts = await personFacts(actor.userId);
   if (!facts || (!facts.employeeId && !isDirector(actor))) throw Errors.forbidden("Akun Anda belum tertaut ke data karyawan.");
@@ -95,13 +99,14 @@ export async function createLetter(actor: Actor, raw: unknown): Promise<LetterDe
   const row = await transaction(async (tx) => {
     const d = await tx.letterDocument.create({
       data: {
-        typeId, series: t.series, creatorId: actor.userId, subject: t.kind === "SK" ? t.name : "", body: t.templateBody as object,
-        salutation: t.defaultSalutation, closing: t.defaultClosing, verifyToken: randomBytes(16).toString("hex"),
+        typeId, series: t.series, creatorId: actor.userId, subject: t.kind === "SK" && !archiveOnly ? t.name : "", archiveOnly: !!archiveOnly,
+        body: (archiveOnly ? doc(p("")) : t.templateBody) as object,
+        salutation: archiveOnly ? null : t.defaultSalutation, closing: archiveOnly ? null : t.defaultClosing, verifyToken: randomBytes(16).toString("hex"),
       },
       include,
     });
     await event(tx, d.id, actor, "CREATED");
-    await writeAudit(tx, actor, { action: "letter.create", entityType: "LetterDocument", entityId: d.id, summary: `Draf surat dibuat (${t.name})` });
+    await writeAudit(tx, actor, { action: "letter.create", entityType: "LetterDocument", entityId: d.id, summary: `Draf surat dibuat (${t.name})${archiveOnly ? " — mode arsip-saja" : ""}` });
     return d;
   });
   return detail(actor, row);
@@ -216,8 +221,9 @@ export async function letterPdf(actor: Actor, id: string): Promise<{ bytes: Buff
   }
   const signerUserId = d.signerId ?? actor.userId;
   const today = new Date().toISOString().slice(0, 10);
-  const { frame } = await buildFrame(d, { number: null, date: today, signerUserId, draft: true });
-  return { bytes: await renderDocumentPdf(frame), name: "pratinjau-draf.pdf" };
+  if (d.archiveOnly) throw Errors.conflict("Surat arsip-saja tidak memiliki pratinjau; unggah PDF pindaian setelah terbit.");
+  const { bytes } = await renderLetterPdf(d, { number: null, date: today, signerUserId, draft: true });
+  return { bytes, name: "pratinjau-draf.pdf" };
 }
 
 // ───────────────────────── Siklus ─────────────────────────
@@ -229,13 +235,13 @@ export async function submitLetter(actor: Actor, id: string): Promise<LetterDeta
   if (d.creatorId !== actor.userId) throw Errors.forbidden();
   if (!isEditable(d.status)) throw Errors.conflict("Surat sudah diajukan.");
   const fe: Record<string, string> = {};
-  if (d.type.kind !== "SK" && d.subject.trim().length < 3) fe.subject = "Perihal wajib diisi";
-  if (d.type.kind !== "SK" && d.recipientLines.filter((l) => l.trim()).length === 0) fe.recipientLines = "Penerima wajib diisi";
+  if ((d.type.kind !== "SK" || d.archiveOnly) && d.subject.trim().length < 3) fe.subject = "Perihal wajib diisi";
+  if (d.type.kind !== "SK" && !d.archiveOnly && d.recipientLines.filter((l) => l.trim()).length === 0) fe.recipientLines = "Penerima wajib diisi";
   if (!d.signerId) fe.signerId = "Pilih penandatangan";
   else await assertSignerOk(actor, d.typeId, d.signerId, d.creatorId).catch((e) => { fe.signerId = e.message; });
-  const { missing } = await buildFrame(d, { number: null, date: new Date().toISOString().slice(0, 10), signerUserId: d.signerId ?? actor.userId, draft: true });
+  const { missing } = d.archiveOnly ? { missing: [] as string[] } : await buildFrame(d, { number: null, date: new Date().toISOString().slice(0, 10), signerUserId: d.signerId ?? actor.userId, draft: true });
   if (missing.length) fe.body = `Data belum terisi: ${missing.join(", ")}`;
-  if (hasPlaceholder(d.body as unknown as PmDoc)) fe.body ??= "Masih ada teks panduan dalam [kurung siku] yang belum diganti";
+  if (!d.archiveOnly && hasPlaceholder(d.body as unknown as PmDoc)) fe.body ??= "Masih ada teks panduan dalam [kurung siku] yang belum diganti";
   if (Object.keys(fe).length) throw Errors.validation("Surat belum lengkap: " + Object.values(fe).join("; "), fe);
   const row = await transaction(async (tx) => {
     const u = await tx.letterDocument.update({ where: { id }, data: { status: "IN_REVIEW", submittedAt: new Date(), returnNote: null }, include });
@@ -355,23 +361,54 @@ export async function approveLetter(actor: Actor, id: string): Promise<LetterDet
     const counter = await tx.letterCounter.upsert({ where: { series_year: { series: pre.series, year } }, create: { series: pre.series, year, lastSeq: 1 }, update: { lastSeq: { increment: 1 } } });
     const seq = counter.lastSeq;
     const number = formatDocNumber({ seq, series: pre.series, typeCode: String(typeFacts.code).padStart(3, "0"), date: issueDate });
-    const { frame, missing, signer } = await buildFrame(cur, { number, date: issueDate, signerUserId: actor.userId, draft: false });
-    if (missing.length) throw Errors.validation(`Data belum terisi: ${missing.join(", ")}`);
-    const pdf = await renderDocumentPdf(frame);
-    const sha = createHash("sha256").update(pdf).digest("hex");
-    const file = await tx.storedFile.create({ data: { kind: "LETTER_PDF", originalName: `${number.replace(/\//g, "-")}.pdf`, mimeType: "application/pdf", size: pdf.byteLength, sha256: sha, data: new Uint8Array(pdf), uploadedById: actor.userId }, select: { id: true } });
+    const atts = await tx.letterAttachment.findMany({ where: { documentId: id }, orderBy: { position: "asc" } });
+    const attMeta = atts.map((a) => ({ title: a.title, kind: a.kind, fileName: a.fileName, sha256: a.sha256, size: a.size, pages: a.pages }));
+    let pdfData: { fileId: string; sha: string } | null = null;
+    let snapshot: Record<string, unknown>;
+    if (cur.archiveOnly) {
+      // Surat dibuat di luar portal: mesin hanya memberi nomor. PDF pindaian diunggah setelah ditandatangani basah.
+      snapshot = { version: 1, number, issueDate, subject: cur.subject, signer: { name: me.name, title: me.title ?? "" }, recipientLines: cur.recipientLines, typeName: cur.type.name, archiveOnly: true };
+    } else {
+      const r = await renderLetterPdf(cur, { number, date: issueDate, signerUserId: actor.userId, draft: false });
+      if (r.missing.length) throw Errors.validation(`Data belum terisi: ${r.missing.join(", ")}`);
+      const sha = createHash("sha256").update(r.bytes).digest("hex");
+      const file = await tx.storedFile.create({ data: { kind: "LETTER_PDF", originalName: `${number.replace(/\//g, "-")}.pdf`, mimeType: "application/pdf", size: r.bytes.byteLength, sha256: sha, data: new Uint8Array(r.bytes), uploadedById: actor.userId }, select: { id: true } });
+      pdfData = { fileId: file.id, sha };
+      snapshot = { version: 1, number, issueDate, subject: cur.subject, signer: r.signer, recipientLines: cur.recipientLines, cc: cur.cc, typeName: cur.type.name, body: r.body, attachments: attMeta };
+    }
     const u = await tx.letterDocument.update({
       where: { id },
       data: {
         status: "ISSUED", signerId: actor.userId, issuedById: actor.userId, issuedAt: new Date(), issueDate: new Date(`${issueDate}T00:00:00Z`), seqYear: year, seqNo: seq, number,
-        pdfFileId: file.id, pdfSha256: sha,
-        snapshot: { version: 1, number, issueDate, subject: cur.subject, signer, recipientLines: cur.recipientLines, cc: cur.cc, typeName: cur.type.name, body: frame.body } as unknown as object,
+        pdfFileId: pdfData?.fileId ?? null, pdfSha256: pdfData?.sha ?? null, snapshot: snapshot as unknown as object,
       },
       include,
     });
+    const sha = pdfData?.sha ?? null;
     await event(tx, id, actor, takeover ? "TAKEOVER_ISSUED" : "ISSUED", number);
-    await writeAudit(tx, actor, { action: "letter.issue", entityType: "LetterDocument", entityId: id, summary: `Surat ${number} diterbitkan (${cur.type.name})`, after: { number, sha256: sha, takeover } });
+    await writeAudit(tx, actor, { action: "letter.issue", entityType: "LetterDocument", entityId: id, summary: `Surat ${number} diterbitkan (${cur.type.name})`, after: { number, sha256: sha, takeover, archiveOnly: cur.archiveOnly } });
     await notifyUsers(tx, [cur.creatorId], { type: "letter.issued", title: `Surat terbit: ${number}`, body: cur.type.confidential ? cur.type.name : cur.subject || cur.type.name, href: `/persuratan/${id}` });
+    return u;
+  });
+  return detail(actor, row);
+}
+
+// ───────────────────────── Mode arsip-saja: unggah PDF pindaian setelah terbit ─────────────────────────
+
+/** Pasang PDF pindaian (tanda tangan basah) pada surat arsip-saja yang sudah bernomor. Hanya sekali; koreksi = batalkan dan daftarkan ulang. */
+export async function uploadArchiveFile(actor: Actor, id: string, input: { name: string; bytes: Uint8Array }): Promise<LetterDetailDto> {
+  const d = await loadVisible(actor, id);
+  if (!d.archiveOnly) throw Errors.validation("Hanya surat arsip-saja yang menerima unggahan PDF pindaian.");
+  if (d.status !== "ISSUED") throw Errors.conflict("PDF pindaian dapat diunggah setelah surat bernomor (Terbit).");
+  if (d.pdfFileId) throw Errors.conflict("PDF pindaian sudah terpasang dan terkunci.");
+  if (!(d.creatorId === actor.userId || d.signerId === actor.userId || isDirector(actor))) throw Errors.forbidden();
+  await inspectPdf(input.bytes);
+  const row = await transaction(async (tx) => {
+    const file = await storeFile(actor, "LETTER_PDF", { name: `${(d.number ?? "arsip").replace(/\//g, "-")}.pdf`, bytes: input.bytes }, tx);
+    const full = await tx.storedFile.findUniqueOrThrow({ where: { id: file.id }, select: { sha256: true } });
+    const u = await tx.letterDocument.update({ where: { id }, data: { pdfFileId: file.id, pdfSha256: full.sha256 }, include });
+    await event(tx, id, actor, "ARCHIVE_UPLOADED", full.sha256);
+    await writeAudit(tx, actor, { action: "letter.archive_upload", entityType: "LetterDocument", entityId: id, summary: `PDF pindaian surat arsip ${d.number} dipasang`, after: { sha256: full.sha256 } });
     return u;
   });
   return detail(actor, row);

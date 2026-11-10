@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { EditorContent, useEditor } from "@tiptap/react";
-import { CheckCircle2, Clock, Download, Eye, FileText, Loader2, Send, Undo2, XCircle, Ban, PencilLine, PenLine, Plus, Trash2, Lock } from "lucide-react";
+import { CheckCircle2, Clock, Download, Eye, FileText, Loader2, Send, Undo2, XCircle, Ban, PencilLine, PenLine, Plus, Trash2, Lock, FileUp, Paperclip } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
@@ -15,6 +15,9 @@ import { normalizeDoc, type PmDoc } from "@/lib/documents/content";
 import { LETTER_SERIES_LABEL, type LetterStatus } from "@/lib/documents/policy";
 import type { LetterDetailDto, SignatoryDto } from "@/server/services/letters/documents";
 import { EditorToolbar } from "./editor-toolbar";
+import { AttachmentEditor } from "./attachment-editor";
+import { AttachmentsPanel } from "./attachments-panel";
+import type { AttachmentDto } from "@/server/services/letters/attachments";
 
 const TONE: Record<LetterStatus, "gray" | "amber" | "green" | "red" | "blue"> = { DRAFT: "gray", IN_REVIEW: "amber", RETURNED: "blue", ISSUED: "green", REJECTED: "red", CANCELLED: "red" };
 const ACTION_LABEL: Record<string, string> = {
@@ -43,7 +46,8 @@ export function LetterEditor({ initial, signers, people }: { initial: LetterDeta
   const sigsDirty = useRef(false);
   const sigsRef = useRef(sigs);
   const [save, setSave] = useState<"saved" | "dirty" | "saving" | "error">("saved");
-  const [tab, setTab] = useState<"edit" | "pdf">(initial.can.edit ? "edit" : "pdf");
+  const [tab, setTab] = useState<string>(initial.archiveOnly ? "arsip" : initial.can.edit ? "edit" : "pdf");
+  const [atts, setAtts] = useState<AttachmentDto[]>(initial.attachments);
   const [side, setSide] = useState<"data" | "riwayat">("data");
   const [pdfKey, setPdfKey] = useState(0);
   const [busy, setBusy] = useState<string | null>(null);
@@ -100,9 +104,9 @@ export function LetterEditor({ initial, signers, people }: { initial: LetterDeta
     try {
       if (editable && (save === "dirty" || kind === "submit")) { if (timer.current) clearTimeout(timer.current); if (!(await persist())) return; }
       const next = await api<LetterDetailDto>(`/api/letters/${initial.id}/${kind}`, { method: "POST", body: withNote ? { note } : undefined });
-      setD(next); setMeta(toMeta(next)); setSigs(toSigRows(next.signatories)); setDialog(null); setNote(""); setPdfKey((k) => k + 1);
+      setD(next); setMeta(toMeta(next)); setSigs(toSigRows(next.signatories)); setAtts(next.attachments); setDialog(null); setNote(""); setPdfKey((k) => k + 1);
       editor?.commands.setContent(next.body, { emitUpdate: false });
-      setTab(next.can.edit ? "edit" : "pdf");
+      setTab(next.archiveOnly ? "arsip" : next.can.edit ? "edit" : "pdf");
       toast.success({ submit: "Surat diajukan ke penandatangan.", withdraw: "Surat ditarik kembali ke draf.", approve: `Surat terbit dengan nomor ${next.number}.`, return: "Surat dikembalikan ke pembuat.", reject: "Surat ditolak.", cancel: "Surat dibatalkan.", cosign: "Tanda tangan Anda tercatat." }[kind]);
       router.refresh();
     } catch (e) {
@@ -161,6 +165,7 @@ export function LetterEditor({ initial, signers, people }: { initial: LetterDeta
               </SelectField>
               {d.kind === "SURAT" && <>
                 <TextField label="Perihal" value={meta.subject} onChange={set("subject")} disabled={!editable} error={errors.subject} maxLength={300} />
+                {!d.archiveOnly && <>
                 <TextAreaField label="Penerima (satu baris per baris)" rows={3} value={meta.recipientLines} onChange={set("recipientLines")} disabled={!editable} error={errors.recipientLines} hint="Dua baris pertama dicetak tebal." />
                 <TextField label="Tempat penerima" value={meta.recipientPlace} onChange={set("recipientPlace")} disabled={!editable} placeholder="Tempat" />
                 <div className="grid grid-cols-[5rem_1fr] gap-2">
@@ -170,7 +175,9 @@ export function LetterEditor({ initial, signers, people }: { initial: LetterDeta
                 <TextField label="Salam pembuka" value={meta.salutation} onChange={set("salutation")} disabled={!editable} />
                 <TextField label="Kalimat penutup (opsional)" value={meta.closing} onChange={set("closing")} disabled={!editable} />
                 <TextAreaField label="Tembusan (satu per baris)" rows={2} value={meta.cc} onChange={set("cc")} disabled={!editable} />
+                </>}
               </>}
+              {!d.archiveOnly && <AttachmentsPanel letterId={d.id} items={atts} editable={editable} onChange={(l) => { setAtts(l); setPdfKey((k) => k + 1); }} onOpen={(id) => setTab(`att:${id}`)} />}
               {d.multiSigner && (
                 <fieldset className="space-y-2 rounded-lg border border-line p-2.5">
                   <legend className="px-1 text-xs font-semibold text-ink-soft">Penandatangan tambahan</legend>
@@ -224,11 +231,13 @@ export function LetterEditor({ initial, signers, people }: { initial: LetterDeta
 
         <section className="min-w-0 rounded-xl border border-line bg-[#ececea]" aria-label="Isi surat">
           <div className="flex items-center gap-1 border-b border-line bg-white px-3 py-1.5" role="tablist">
-            <button role="tab" aria-selected={tab === "edit"} onClick={() => setTab("edit")} className={`rounded-md px-3 py-1 text-sm font-medium ${tab === "edit" ? "bg-brand-100 text-brand-700" : "text-muted"}`}><PencilLine className="mr-1 inline size-3.5" />{editable ? "Editor" : "Isi"}</button>
-            <button role="tab" aria-selected={tab === "pdf"} onClick={() => { setTab("pdf"); if (editable && save === "dirty") { if (timer.current) clearTimeout(timer.current); void persist(); } }} className={`rounded-md px-3 py-1 text-sm font-medium ${tab === "pdf" ? "bg-brand-100 text-brand-700" : "text-muted"}`}><Eye className="mr-1 inline size-3.5" />{d.status === "ISSUED" || d.status === "CANCELLED" ? "PDF terbit" : "Pratinjau PDF"}</button>
+            {d.archiveOnly && <button role="tab" aria-selected={tab === "arsip"} onClick={() => setTab("arsip")} className={`rounded-md px-3 py-1 text-sm font-medium ${tab === "arsip" ? "bg-brand-100 text-brand-700" : "text-muted"}`}><FileUp className="mr-1 inline size-3.5" />Surat arsip</button>}
+            {!d.archiveOnly && <button role="tab" aria-selected={tab === "edit"} onClick={() => setTab("edit")} className={`rounded-md px-3 py-1 text-sm font-medium ${tab === "edit" ? "bg-brand-100 text-brand-700" : "text-muted"}`}><PencilLine className="mr-1 inline size-3.5" />{editable ? "Editor" : "Isi"}</button>}
+            {atts.filter((a) => a.kind === "EDITOR").map((a) => <button key={a.id} role="tab" aria-selected={tab === `att:${a.id}`} onClick={() => setTab(`att:${a.id}`)} className={`max-w-40 truncate rounded-md px-3 py-1 text-sm font-medium ${tab === `att:${a.id}` ? "bg-brand-100 text-brand-700" : "text-muted"}`}><Paperclip className="mr-1 inline size-3.5" />{a.title}</button>)}
+            {!d.archiveOnly && <button role="tab" aria-selected={tab === "pdf"} onClick={() => { setTab("pdf"); if (editable && save === "dirty") { if (timer.current) clearTimeout(timer.current); void persist(); } }} className={`rounded-md px-3 py-1 text-sm font-medium ${tab === "pdf" ? "bg-brand-100 text-brand-700" : "text-muted"}`}><Eye className="mr-1 inline size-3.5" />{d.status === "ISSUED" || d.status === "CANCELLED" ? "PDF terbit" : "Pratinjau PDF"}</button>}
             {tab === "pdf" && !d.number && <span className="ml-2 text-xs text-muted">Pratinjau berwatermark DRAF; nomor & QR muncul setelah disetujui.</span>}
           </div>
-          <div className={tab === "edit" ? "block" : "hidden"}>
+          <div className={tab === "edit" && !d.archiveOnly ? "block" : "hidden"}>
             {editor && editable && <EditorToolbar editor={editor} />}
             {editable && <p className="border-b border-line bg-brand-50 px-4 py-1.5 text-xs text-brand-800">Kop surat, nomor, penerima, salam, blok tanda tangan + cap, dan QR verifikasi disusun otomatis — lihat tab <b>Pratinjau PDF</b>. Di sini Anda menyunting isi surat saja.</p>}
             <div className="max-h-[calc(100vh-18rem)] overflow-auto p-4 sm:p-6">
@@ -237,7 +246,9 @@ export function LetterEditor({ initial, signers, people }: { initial: LetterDeta
               </article>
             </div>
           </div>
-          {tab === "pdf" && <iframe key={pdfKey} title="Pratinjau PDF surat" src={pdfUrl} className="h-[calc(100vh-14rem)] min-h-[32rem] w-full bg-white" />}
+          {atts.filter((a) => a.kind === "EDITOR").map((a) => tab === `att:${a.id}` && <AttachmentEditor key={a.id} letterId={d.id} att={a} editable={editable} onSaved={(n) => { setAtts((l) => l.map((x) => (x.id === n.id ? n : x))); setPdfKey((k) => k + 1); }} />)}
+          {tab === "arsip" && <ArchivePanel d={d} onDone={(n) => { setD(n); setPdfKey((k) => k + 1); router.refresh(); }} />}
+          {tab === "pdf" && !d.archiveOnly && <iframe key={pdfKey} title="Pratinjau PDF surat" src={pdfUrl} className="h-[calc(100vh-14rem)] min-h-[32rem] w-full bg-white" />}
         </section>
       </div>
 
@@ -247,6 +258,35 @@ export function LetterEditor({ initial, signers, people }: { initial: LetterDeta
         footer={<><Button onClick={() => setDialog(null)}>Batal</Button><Button variant="primary" disabled={note.trim().length < 3} loading={busy === dialog} onClick={() => dialog && void act(dialog, true)}>Kirim</Button></>}>
         <TextAreaField label="Catatan / alasan" rows={4} value={note} onChange={(e) => setNote(e.target.value)} required />
       </Dialog>
+    </div>
+  );
+}
+
+/** Panel surat arsip-saja: nomor dari mesin; unggah PDF pindaian (tanda tangan basah) sekali setelah terbit. */
+function ArchivePanel({ d, onDone }: { d: LetterDetailDto; onDone: (n: LetterDetailDto) => void }) {
+  const toast = useToast();
+  const [busy, setBusy] = useState(false);
+  async function upload(f: File | undefined) {
+    if (!f) return;
+    setBusy(true);
+    try { const form = new FormData(); form.set("file", f); onDone(await api<LetterDetailDto>(`/api/letters/${d.id}/archive`, { method: "POST", form })); toast.success("PDF pindaian terpasang dan terkunci."); }
+    catch (e) { toast.error(errorMessage(e)); } finally { setBusy(false); }
+  }
+  return (
+    <div className="space-y-3 bg-white p-6 text-sm">
+      <h3 className="text-base font-semibold text-ink">Surat dibuat di luar portal (arsip saja)</h3>
+      <p className="text-ink-soft">Portal hanya memberi <b>nomor resmi</b> dan mencatat surat ini. Susun dan tanda tangani surat di luar portal (mis. Word + tanda tangan basah), cantumkan nomor di surat, lalu unggah hasil pindaiannya di sini.</p>
+      <ol className="list-decimal space-y-1 pl-5 text-ink-soft">
+        <li className={d.status === "DRAFT" || d.status === "RETURNED" ? "font-medium text-ink" : ""}>Isi perihal & penandatangan di panel kiri, lalu ajukan.</li>
+        <li className={d.status === "IN_REVIEW" ? "font-medium text-ink" : ""}>Penandatangan menyetujui → nomor diterbitkan.</li>
+        <li className={d.status === "ISSUED" && !d.hasPdf ? "font-medium text-ink" : ""}>Cetak dengan nomor tersebut, tanda tangani, pindai, unggah PDF.</li>
+      </ol>
+      {d.number && <p className="rounded-md bg-emerald-50 p-3 text-emerald-900">Nomor surat: <b className="font-mono">{d.number}</b></p>}
+      {d.can.uploadArchive && (
+        <label className="block"><span className="mb-1 block font-medium text-ink">Unggah PDF pindaian (sekali pasang)</span>
+          <input type="file" accept="application/pdf" aria-label="Unggah PDF pindaian" disabled={busy} onChange={(e) => void upload(e.target.files?.[0])} className="block w-full text-sm file:mr-3 file:rounded-md file:border file:border-line file:bg-white file:px-3 file:py-1.5" /></label>
+      )}
+      {d.status === "ISSUED" && d.hasPdf && <a href={`/api/letters/${d.id}/pdf`} download className="inline-flex h-9 items-center rounded-md border border-line bg-white px-3 font-medium shadow-sm hover:bg-canvas">Unduh PDF pindaian</a>}
     </div>
   );
 }

@@ -46,6 +46,20 @@ Seluruh 24 jenis katalog master disemai idempoten (penandatangan awal: Direktur 
   hanya dapat dibuka pemilik & Direktur. **Cap** (satu, diunggah Direktur) dipakai pada semua surat, internal maupun eksternal.
 - Nomor urut **dipisah per seri** (EKS/INT), bukan global seperti Excel.
 
+## Tahap 2b: lampiran & mode arsip-saja
+
+**Lampiran** (maks. 10 per surat; hanya pembuat, saat Draf/Dikembalikan; terkunci sejak diajukan oleh trigger):
+- *Dari editor*: halaman lampiran berjudul di PDF surat (variabel `{{nomor}}`/`{{tanggal}}` ikut diganti).
+- *PDF buatan luar sistem* (diunggah; harus PDF biasa tanpa sandi, ≤ 200 halaman, ≤ `MAX_DOCUMENT_UPLOAD_MB`):
+  - **Digabung**: halamannya ditempel di belakang PDF surat (pdf-lib) sehingga **satu hash** mencakup surat + lampiran.
+  - **Terpisah**: berkas disimpan sendiri dengan **SHA-256 sendiri**; halaman verifikasi mencantumkan judul, nama berkas, jumlah halaman, dan hash, serta pengunjung dapat mencocokkan PDF lampirannya (di peramban, tanpa unggah).
+- Berkas lampiran (`LETTER_ATTACHMENT`) hanya dapat dibuka pihak yang berhak melihat surat. Bila "Lampiran" di atas surat dikosongkan, jumlah berkas lampiran dihitung otomatis.
+
+**Arsip-saja** (centang saat membuat surat; untuk surat yang disusun & ditandatangani basah di luar portal, mis. MoU/PKS):
+1. Pembuat mengisi perihal + penandatangan, mengajukan; penandatangan menyetujui → **nomor resmi terbit** (urutan seri yang sama, tanpa lubang), tanpa PDF dari portal.
+2. Nomor dicantumkan di surat fisik; setelah ditandatangani, pembuat/penandatangan/Direktur **mengunggah PDF pindaian sekali** → hash tercatat dan terkunci (koreksi = batalkan lalu daftarkan ulang).
+3. Halaman verifikasi menampilkan nomor (sah) dan, setelah pindaian diunggah, hash-nya; sebelum itu "PDF pindaian belum diunggah".
+
 ## Dokumen & PDF terkunci
 
 - Isi disimpan sebagai **JSON** (ProseMirror, tervalidasi ketat `validateDoc`: hanya node/atribut/mark yang dikenal; tanpa HTML). Editor TipTap

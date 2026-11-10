@@ -34,9 +34,25 @@ export default async function VerifyPage({ params }: { params: Promise<{ token: 
               {v.subject && <Row k="Perihal" v={v.subject} />}
               <Row k="Tanggal terbit" v={v.issueDateText} />
               <Row k="Penandatangan" v={`${v.signerName}${v.signerTitle ? ` — ${v.signerTitle}` : ""}`} />
-              <Row k="Sidik jari berkas (SHA-256)" v={v.sha256} mono small />
+              {v.sha256 ? <Row k={v.attachments.some((a) => a.mode === "MERGED") ? "Sidik jari berkas surat + lampiran gabungan (SHA-256)" : "Sidik jari berkas (SHA-256)"} v={v.sha256} mono small /> : <Row k="Berkas arsip" v="Nomor terdaftar; PDF pindaian belum diunggah." />}
             </dl>
-            <HashCheck expected={v.sha256} />
+            {v.archiveOnly && <p className="mt-3 rounded-md bg-sky-50 p-2.5 text-xs text-sky-900">Surat ini dibuat dan ditandatangani di luar portal; yang terdaftar di sini adalah nomornya{v.sha256 ? " dan sidik jari PDF pindaiannya" : ""}.</p>}
+            {v.sha256 && <HashCheck expected={v.sha256} label="Cocokkan berkas surat Anda" />}
+            {v.attachments.length > 0 && (
+              <section className="mt-5" aria-label="Lampiran">
+                <h2 className="text-sm font-semibold text-ink">Lampiran ({v.attachments.length})</h2>
+                <ul className="mt-2 space-y-2">
+                  {v.attachments.map((a, i) => (
+                    <li key={i} className="rounded-lg border border-line p-3 text-sm">
+                      <p className="font-medium text-ink">{a.title} <span className="ml-1 rounded bg-canvas px-1.5 py-0.5 text-[11px] font-normal text-ink-soft">{a.mode === "MERGED" ? "digabung ke PDF surat" : "berkas terpisah"}</span></p>
+                      <p className="mt-0.5 text-xs text-muted">{a.fileName}{a.pages ? ` · ${a.pages} hlm` : ""}</p>
+                      <p className="mt-1 break-all font-mono text-[11px] text-ink-soft">{a.sha256}</p>
+                      {a.mode === "SEPARATE" && <HashCheck expected={a.sha256} label={`Cocokkan berkas lampiran: ${a.title}`} compact />}
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            )}
             <p className="mt-4 text-xs text-muted">Halaman ini hanya menampilkan data pengenal. Isi surat tidak ditampilkan; mintalah salinan resmi kepada pihak yang menerbitkan.</p>
           </section>
         )}

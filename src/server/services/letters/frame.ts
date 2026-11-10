@@ -6,6 +6,8 @@ import { getSettings } from "../settings";
 import { readFileBytes } from "../files";
 import { personFacts } from "./access";
 import { resolveVariables, type PmDoc } from "@/lib/documents/content";
+import { renderDocumentPdf } from "../../pdf/document-render";
+import { mergePdfs } from "./attachments";
 import { attachmentText, longDate } from "@/lib/documents/text";
 import { verifyPath } from "@/lib/documents/policy";
 import type { DocFrame, DocImage, DocSignatory } from "@/lib/documents/frame";
@@ -48,17 +50,22 @@ export async function buildFrame(
     const row = c.userId ? await prisma.letterSigner.findUnique({ where: { userId: c.userId } }) : null;
     coSigs.push({ orgName: company.name.toUpperCase(), title: cf?.title ?? "", name: cf?.name ?? "—", signature: c.signedAt || !o.draft ? await img(row?.signatureFileId) : null, stamp: null });
   }
+  // Lampiran editor → halaman lampiran di PDF (variabel diganti sama seperti isi surat); lampiran PDF unggahan ditangani saat penggabungan.
+  const atts = await prisma.letterAttachment.findMany({ where: { documentId: d.id }, orderBy: { position: "asc" } });
+  const vars = { ...varsOf(d), ...builtinVars(o.number, o.date) };
+  const editorAtts = atts.filter((a) => a.kind === "EDITOR").map((a) => ({ title: a.title, body: resolveVariables(a.body as unknown as PmDoc, vars).doc }));
+  const attMissing = atts.filter((a) => a.kind === "EDITOR").flatMap((a) => resolveVariables(a.body as unknown as PmDoc, vars).missing);
   const isSk = d.type.kind === "SK";
   const contact = [company.email ? `Email: ${company.email}` : null, company.phone ? `${company.phone} (Hotline)` : null, company.website].filter(Boolean).join(" | ");
   const frame: DocFrame = {
     kind: isSk ? "SK" : "SURAT", number: o.number, date: o.date, place: ls.place,
-    attachmentText: !isSk && d.attachmentCount ? attachmentText(d.attachmentCount, (d.attachmentUnit as "halaman" | "berkas" | "lembar" | null) ?? "halaman") : null,
+    attachmentText: isSk ? null : d.attachmentCount ? attachmentText(d.attachmentCount, (d.attachmentUnit as "halaman" | "berkas" | "lembar" | null) ?? "halaman") : atts.length ? attachmentText(atts.length, "berkas") : null,
     subject: isSk ? null : d.subject,
     recipient: isSk || d.recipientLines.length === 0 ? null : {
       prefix: "Kepada Yth.", lines: d.recipientLines.map((text, i) => ({ text, bold: i < 2 })), cityPrefix: "Di", place: d.recipientPlace ?? "Tempat",
     },
     salutation: isSk ? null : d.salutation, body: resolved.doc, closing: isSk ? null : d.closing,
-    signatories: [sign, ...coSigs], cc: d.cc, attachments: [],
+    signatories: [sign, ...coSigs], cc: d.cc, attachments: editorAtts,
     letterhead: {
       logo: await img(company.logoFileId), tagline: company.tagline ?? "", name: company.name.toUpperCase(),
       addressLines: company.address ? [company.address] : [], contactLine: contact, idLine: ls.idLine,
@@ -66,5 +73,18 @@ export async function buildFrame(
     verify: o.draft ? null : { url: `${env().APP_URL.replace(/\/$/, "")}${verifyPath(d.verifyToken)}`, caption: "Dokumen ini sah secara elektronik. Pindai kode QR untuk verifikasi." },
     footerText: ls.footerText, draft: o.draft,
   };
-  return { frame, missing: resolved.missing, signer: { name: signerName, title: signerTitle } };
+  return { frame, missing: [...resolved.missing, ...attMissing], signer: { name: signerName, title: signerTitle } };
+}
+
+/** Render PDF lengkap: halaman surat + lampiran editor (react-pdf) lalu lampiran PDF "digabung" (pdf-lib). Dipakai pratinjau & penerbitan agar identik. */
+export async function renderLetterPdf(
+  d: LetterDocument & { type: { kind: string } },
+  o: { number: string | null; date: string; signerUserId: string; draft: boolean },
+): Promise<{ bytes: Buffer; missing: string[]; signer: { name: string; title: string }; body: PmDoc }> {
+  const { frame, missing, signer } = await buildFrame(d, o);
+  const main = await renderDocumentPdf(frame);
+  const merged = await prisma.letterAttachment.findMany({ where: { documentId: d.id, kind: "UPLOAD_MERGED" }, orderBy: { position: "asc" } });
+  const parts: Uint8Array[] = [];
+  for (const m of merged) { const fb = await readFileBytes(m.fileId); if (fb) parts.push(fb.data); }
+  return { bytes: await mergePdfs(main, parts), missing, signer, body: frame.body };
 }

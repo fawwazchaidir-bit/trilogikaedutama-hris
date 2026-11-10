@@ -5,6 +5,7 @@
  */
 import { expect, request as pwRequest, test, type APIRequestContext, type Page } from "@playwright/test";
 import { E2E_PASSWORD, USERS, login } from "./helpers";
+import { PDFDocument } from "pdf-lib";
 import { demoLogo, demoSignature, demoStamp } from "../fixtures/documents/assets";
 
 test.describe.configure({ mode: "serial" });
@@ -154,5 +155,88 @@ test("galeri editor: templat narasumber (blok rincian), SK (diktum), dan tabel",
   await page.keyboard.press("Tab"); await page.keyboard.type("Pelatihan Juru Masak SPPG");
   await page.keyboard.press("Tab"); await page.keyboard.type("Rp 25.000.000");
   await shot(page, "13-tabel-di-editor");
+  await ctx.close();
+});
+
+const pdfBuf = async (pages: number) => { const d = await PDFDocument.create(); for (let i = 0; i < pages; i++) d.addPage([595, 842]); return Buffer.from(await d.save()); };
+
+test("lampiran: editor + PDF digabung + PDF terpisah; verifikasi publik mencantumkan hash lampiran terpisah", async ({ browser }) => {
+  const ctx = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
+  const page = await ctx.newPage();
+  await login(page, USERS.ayu);
+  await page.goto("/persuratan");
+  await page.getByRole("button", { name: "Buat surat" }).click();
+  await page.getByRole("button", { name: /Penawaran B2B/ }).click();
+  await page.waitForURL(/\/persuratan\/[0-9a-f-]{36}$/);
+  const id = page.url().split("/").pop()!;
+  await page.getByLabel("Penandatangan").selectOption({ index: 1 });
+  await page.getByLabel("Perihal").fill("Penawaran In-House Training");
+  await page.getByLabel(/^Penerima/).fill("Bapak Contoh\nPT Contoh Boga");
+  const ed = page.getByRole("textbox", { name: "Isi surat", exact: true });
+  await ed.click(); await page.keyboard.press("ControlOrMeta+A"); await page.keyboard.type("Terlampir penawaran program pelatihan kami.");
+  // lampiran editor
+  await page.getByLabel("Judul lampiran").fill("Rincian Investasi");
+  await page.getByRole("button", { name: "Lampiran dari editor" }).click();
+  await expect(page.getByRole("tab", { name: /Rincian Investasi/ })).toBeVisible();
+  const att = page.getByRole("textbox", { name: /Isi lampiran Rincian Investasi/ });
+  await att.click(); await page.keyboard.type("Paket Food Production: Rp 45.000.000");
+  await expect(page.getByText("Lampiran tersimpan")).toBeVisible({ timeout: 8000 });
+  // PDF digabung & terpisah
+  await page.getByLabel("Judul lampiran").fill("Proposal Lengkap");
+  await page.getByLabel("Unggah lampiran PDF").setInputFiles({ name: "proposal.pdf", mimeType: "application/pdf", buffer: await pdfBuf(2) });
+  await expect(page.getByText("PDF digabung ke surat")).toBeVisible();
+  await page.getByLabel("Mode lampiran PDF").selectOption("SEPARATE");
+  await page.getByLabel("Judul lampiran").fill("Profil Lembaga");
+  await page.getByLabel("Unggah lampiran PDF").setInputFiles({ name: "profil.pdf", mimeType: "application/pdf", buffer: await pdfBuf(1) });
+  await expect(page.getByText("PDF terpisah")).toBeVisible();
+  await shot(page, "14-lampiran");
+  await page.getByRole("button", { name: "Ajukan ke penandatangan" }).click();
+  await expect(page.getByText("Menunggu penandatangan").first()).toBeVisible();
+  await ctx.close();
+  const r = await dir.post(`/api/letters/${id}/approve`, { headers: { origin: base } });
+  expect(r.status()).toBe(200);
+  const d = (await r.json()).data as { number: string; verifyToken: string; attachments: { title: string }[] };
+  expect(d.attachments).toHaveLength(3);
+  const c2 = await browser.newContext({ viewport: { width: 900, height: 1000 } });
+  const pub = await c2.newPage();
+  await pub.goto(`/verifikasi/${d.verifyToken}`);
+  await expect(pub.getByRole("heading", { name: "Lampiran (2)" })).toBeVisible();
+  await expect(pub.getByText("berkas terpisah")).toBeVisible();
+  await expect(pub.getByText("digabung ke PDF surat")).toBeVisible();
+  await shot(pub, "15-verifikasi-lampiran");
+  await c2.close();
+});
+
+test("arsip saja: Staf minta nomor, Direktur menyetujui, Staf unggah PDF pindaian; verifikasi menampilkan hash", async ({ browser }) => {
+  const ctx = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
+  const page = await ctx.newPage();
+  await login(page, USERS.ayu);
+  await page.goto("/persuratan");
+  await page.getByRole("button", { name: "Buat surat" }).click();
+  await page.getByLabel(/Surat dibuat di luar portal/).check();
+  await page.getByRole("button", { name: /Perjanjian \(MoU\/PKS\)/ }).click();
+  await page.waitForURL(/\/persuratan\/[0-9a-f-]{36}$/);
+  const id = page.url().split("/").pop()!;
+  await expect(page.getByText("Surat dibuat di luar portal (arsip saja)").first()).toBeVisible();
+  await page.getByLabel("Penandatangan").selectOption({ index: 1 });
+  await page.getByLabel("Perihal").fill("MoU dengan Mitra Contoh");
+  await shot(page, "16-arsip-draf");
+  await expect(page.getByText("Tersimpan otomatis")).toBeVisible({ timeout: 8000 });
+  await page.getByRole("button", { name: "Ajukan ke penandatangan" }).click();
+  await expect(page.getByText("Menunggu penandatangan").first()).toBeVisible();
+  const r = await dir.post(`/api/letters/${id}/approve`, { headers: { origin: base } });
+  expect(r.status()).toBe(200);
+  const d = (await r.json()).data as { number: string; verifyToken: string };
+  expect(d.number).toMatch(/\/TE-EKS\/012\//);
+  await page.reload();
+  await expect(page.getByText(d.number).first()).toBeVisible();
+  await page.getByLabel("Unggah PDF pindaian").setInputFiles({ name: "scan.pdf", mimeType: "application/pdf", buffer: await pdfBuf(2) });
+  await expect(page.getByText("PDF pindaian terpasang dan terkunci.")).toBeVisible();
+  await shot(page, "17-arsip-terbit");
+  const pub = await (await browser.newContext()).newPage();
+  await pub.goto(`/verifikasi/${d.verifyToken}`);
+  await expect(pub.getByText("dibuat dan ditandatangani di luar portal")).toBeVisible();
+  await expect(pub.getByText("Sidik jari berkas (SHA-256)")).toBeVisible();
+  await shot(pub, "18-verifikasi-arsip");
   await ctx.close();
 });
