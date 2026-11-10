@@ -39,6 +39,8 @@ export interface DraftLine {
    * Satu sumber hanya boleh menjadi SATU baris dalam satu penyelesaian (dijaga juga oleh indeks unik di database). Baris manual murni tidak punya kunci.
    */
   sourceKey?: string | null;
+  /** Hanya uang harian: penerima surat tugas yang uangnya dimuat baris ini (dasar rekonsiliasi dengan Bukti Penerimaan). */
+  assigneeId?: string | null;
 }
 
 const rp = (n: bigint) => formatRupiah(n, "PLAIN");

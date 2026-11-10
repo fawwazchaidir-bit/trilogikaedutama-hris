@@ -34,7 +34,7 @@ Di bawah tiap butir sistem menampilkan petunjuk dari data yang ada, mis. *"Belum
 | Berhenti: serah terima | tugas Training aktif, keanggotaan proyek aktif, bawahan langsung, jabatan di Rumus Indikator |
 | Berhenti: akun | status akun (menonaktifkan karyawan menonaktifkan akun dan mengakhiri sesinya) |
 | Berhenti: aset | aset yang masih dipegang / sudah kembali (modul Aset) |
-| Berhenti: hak & kewajiban | sisa cuti, uang harian belum diterbitkan bukti penerimaannya, kasbon aktif, status penyelesaian akhir |
+| Berhenti: hak & kewajiban | sisa cuti, uang harian belum diterbitkan bukti penerimaannya (yang sudah masuk penyelesaian akhir tidak dihitung), kasbon aktif, status penyelesaian akhir |
 
 Butir **Pengembalian aset** memakai sinyal dari modul **Aset** (lihat `ASET.md`): aset yang belum dikembalikan ditampilkan sebagai peringatan; HR tetap yang menandai butir.
 

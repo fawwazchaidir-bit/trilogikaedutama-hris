@@ -43,6 +43,22 @@ Baris lama tidak punya identitas sumber, jadi sistem **tidak bisa memastikan** m
 - **Audit baca-saja** untuk pimpinan (`payroll:approve`): `GET /api/final-settlements/audit-duplicates` mendaftar penyelesaian yang belum dibatalkan (termasuk yang sudah *Disetujui*/*Dibayar*) dengan pola tersebut, beserta baris dan total per kategori. Daftar ini **terduga**, bukan pasti — baris manual murni yang sah juga tercantum; periksa nominalnya. Audit tidak mengubah data apa pun.
 - Penyelesaian *Draf* yang terduga ganda: hapus salah satu baris yang kembar (baris sistem yang dihapus kini dikecualikan permanen). Yang sudah *Disetujui* terkunci; koreksinya lewat pembatalan oleh pimpinan (bila belum dibayar) lalu disiapkan ulang, atau penyesuaian di luar aplikasi bila sudah dibayar.
 
+## Uang harian & Bukti Penerimaan (tidak dibayar dua kali)
+
+Uang harian dinas bisa dibayar lewat **dua jalur**: Bukti Penerimaan Uang Harian per perjalanan (modul Surat Tugas) atau sebagai baris penyelesaian akhir. Supaya satu uang tidak dibayar/dicatat dua kali, baris uang harian **ditautkan ke penerima surat tugas** (`assigneeId`) dan kedua jalur saling mengunci:
+
+| Keadaan | Perilaku |
+|---|---|
+| Uang harian **sudah masuk** penyelesaian akhir yang berlaku (Draf, Menunggu, Disetujui, Dibayar) | **Bukti Penerimaan terpisah ditolak** (pesan menyebut statusnya). Dijaga juga oleh trigger database |
+| Bukti Penerimaan aktif **sudah ada** | tidak diusulkan, dan baris untuk penerima itu tidak dapat dimasukkan (trigger database) |
+| Bukti terbit **setelah** draf dibuat (keadaan berubah) | muncul peringatan "Uang harian bermasalah" di editor; **diajukan, disetujui, dan dicatat dibayar diperiksa ulang** dan ditolak sampai barisnya dihapus (kembalikan ke Draf bila perlu) atau bukti yang keliru dibatalkan |
+| Surat tugas dibatalkan setelah barisnya masuk | ditolak saat diajukan/disetujui/dibayar; hitung ulang membuangnya. Pembatalan surat tugas **ditolak** bila uangnya sudah di penyelesaian yang Disetujui/Dibayar |
+| Penyelesaian **Dibatalkan** | penanda dilepas — penerima kembali "menunggu bukti" dan bukti boleh diterbitkan |
+
+Di **Persuratan → Surat Tugas & Uang Harian**, penerima yang uangnya masuk penyelesaian akhir ditandai *Termasuk penyelesaian akhir · \<status\>* (atau *Dibayar lewat penyelesaian akhir · \<tanggal\>*) dengan tautan ke penyelesaiannya; tombol Terbitkan bukti tidak muncul. Penerima itu **tidak dihitung** pada lencana/filter "menunggu bukti penerimaan" maupun sinyal checklist berhenti. **Tidak ada Bukti Penerimaan yang dibuat otomatis** — pembayaran dicatat di penyelesaian akhir.
+
+**Audit data lama** (baca-saja, pimpinan `payroll:approve`): `GET /api/final-settlements/audit-allowance` mendaftar uang harian yang **sudah terlanjur tercatat dua kali** (ada di penyelesaian yang belum dibatalkan *dan* punya Bukti Penerimaan aktif). Migrasi menautkan baris lama bila kecocokannya tunggal (karyawan sama, nominal sama, nomor surat tugas ada pada rumus baris); yang meragukan atau sudah diubah manual dibiarkan dan tidak muncul di audit. Koreksi dilakukan secara sah: batalkan bukti (Super Admin) atau kembalikan/batalkan penyelesaian akhir.
+
 ## Peringatan (dihitung langsung dari data terkini)
 
 Ditampilkan di atas editor selama Draf/Menunggu persetujuan: periode gaji yang **sudah memuat karyawan** pada bulan terakhir (agar gaji tidak terhitung ganda), kasbon/pinjaman aktif (sisa saldo tidak dilacak), aset belum dikembalikan atau dikembalikan rusak/hilang, tanggal berhenti pada data karyawan berbeda dengan tanggal di sini, komponen yang berubah di tengah bulan, sisa cuti yang belum dihitung. **Aset hilang/rusak tidak otomatis memotong gaji** — potongan upah dibatasi aturan dan butuh dasar yang bisa dipertanggungjawabkan.

@@ -16,6 +16,7 @@ import { formatDateRange, formatDateLong } from "@/lib/format";
 import { formatRupiah } from "@/lib/money";
 import { isoDate, optionalText, requiredText, rupiah, uuid } from "@/lib/validation/common";
 import type { Paged } from "@/lib/types";
+import { SETTLEMENT_STATUS_LABEL, type SettlementStatusValue } from "@/lib/final-settlement";
 
 export type AssignmentStatus = "ISSUED" | "CANCELLED";
 export type AllowanceMethod = "CASH" | "TRANSFER";
@@ -103,7 +104,15 @@ export interface AssigneeDto {
   total: number;
   /** Bukti penerimaan AKTIF (null = belum diterbitkan). */
   receipt: ReceiptDto | null;
+  /**
+   * Penyelesaian akhir yang masih berlaku (bukan Dibatalkan) yang memuat uang harian penerima ini; null = tidak ada. Selama ada, Bukti Penerimaan terpisah
+   * TIDAK boleh diterbitkan (agar tidak dibayar dua kali) dan penerima ini tidak dihitung "menunggu bukti".
+   */
+  settlement: { id: string; status: SettlementStatusValue; paidOn: string | null } | null;
 }
+
+/** Filter Prisma: penerima yang uang harinya BELUM selesai — tanpa bukti aktif dan tidak termasuk penyelesaian akhir yang masih berlaku. */
+const awaitingReceipt = { receipts: { none: { status: "ACTIVE" as const } }, settlementLines: { none: { settlement: { status: { not: "CANCELLED" as const } } } } };
 
 export interface AssignmentDto {
   id: string;
@@ -149,6 +158,11 @@ function receiptDto(r: ReceiptRow, names: Map<string, string>, emp: { fullName: 
 
 async function toDtos(rows: LetterRow[]): Promise<AssignmentDto[]> {
   const names = await userNames(rows.flatMap((r) => [r.issuedById, ...r.receipts.map((x) => x.issuedById)]));
+  const assigneeIds = rows.flatMap((r) => r.assignees.map((a) => a.id));
+  const inSettlement = assigneeIds.length
+    ? await prisma.finalSettlementLine.findMany({ where: { assigneeId: { in: assigneeIds }, settlement: { status: { not: "CANCELLED" } } }, select: { assigneeId: true, settlement: { select: { id: true, status: true, paidOn: true } } } })
+    : [];
+  const settlementOf = new Map(inSettlement.map((l) => [l.assigneeId!, { id: l.settlement.id, status: l.settlement.status, paidOn: l.settlement.paidOn ? dateToIso(l.settlement.paidOn) : null }]));
   return rows.map((r) => ({
     id: r.id, number: r.number, status: r.status, purpose: r.purpose, destination: r.destination, startDate: dateToIso(r.startDate), endDate: dateToIso(r.endDate),
     tripDays: tripDays(dateToIso(r.startDate), dateToIso(r.endDate)), details: r.details, issueDate: dateToIso(r.issueDate), issuedBy: names.get(r.issuedById) ?? "—",
@@ -160,6 +174,7 @@ async function toDtos(rows: LetterRow[]): Promise<AssignmentDto[]> {
         id: a.id, employeeId: a.employeeId, employeeName: a.employee.fullName, employeeNo: a.employee.employeeNo, position: a.employee.position,
         days: a.days, dailyRate: Number(a.dailyRate), total: Number(a.total),
         receipt: active ? receiptDto(active, names, a.employee, r.number) : null,
+        settlement: settlementOf.get(a.id) ?? null,
       };
     }),
   }));
@@ -298,6 +313,8 @@ export async function cancelAssignmentIn(tx: Prisma.TransactionClient, actor: Ac
   if (letter.receipts.some((r) => r.status === "ACTIVE")) {
     throw Errors.conflict("Masih ada Bukti Penerimaan Uang Harian yang aktif. Batalkan buktinya terlebih dahulu (hanya Super Admin), lalu batalkan surat tugas.");
   }
+  const paidOut = await tx.finalSettlementLine.findFirst({ where: { assignee: { letterId: id }, settlement: { status: { in: ["APPROVED", "PAID"] } } }, select: { settlement: { select: { id: true, status: true } } } });
+  if (paidOut) throw Errors.conflict(`Uang harian pada surat tugas ini sudah termasuk penyelesaian akhir yang ${SETTLEMENT_STATUS_LABEL[paidOut.settlement.status].toLowerCase()}. Batalkan atau koreksi penyelesaian akhirnya terlebih dahulu, baru surat tugas dapat dibatalkan.`, { settlementId: paidOut.settlement.id });
   await tx.assignmentLetter.update({ where: { id }, data: { status: "CANCELLED", cancelledAt: new Date(), cancelledById: actor.userId, cancelReason: reason } });
   await writeAudit(tx, actor, { action: "assignment.cancel", entityType: "AssignmentLetter", entityId: id, summary: `Surat Tugas ${letter.number} dibatalkan`, before: { status: "ISSUED" }, after: { status: "CANCELLED" }, reason });
   const owners = await tx.employee.findMany({ where: { id: { in: letter.assignees.map((a) => a.employeeId) } }, select: { userId: true } });
@@ -331,7 +348,7 @@ export async function listAssignments(actor: Actor, raw: unknown = {}): Promise<
   const where: Prisma.AssignmentLetterWhereInput = {
     ...(f.status ? { status: f.status } : {}),
     ...(f.employeeId ? { assignees: { some: { employeeId: f.employeeId } } } : {}),
-    ...(f.pending ? { status: "ISSUED", assignees: { some: { receipts: { none: { status: "ACTIVE" } } } } } : {}),
+    ...(f.pending ? { status: "ISSUED", assignees: { some: awaitingReceipt } } : {}),
     ...(f.q ? { OR: [
       { number: { contains: f.q, mode: "insensitive" } }, { purpose: { contains: f.q, mode: "insensitive" } }, { destination: { contains: f.q, mode: "insensitive" } },
       { assignees: { some: { employee: { OR: [{ fullName: { contains: f.q, mode: "insensitive" } }, { employeeNo: { contains: f.q, mode: "insensitive" } }] } } } },
@@ -426,6 +443,9 @@ export async function issueReceipt(actor: Actor, raw: unknown): Promise<ReceiptD
     if (paidDate > today) throw Errors.validation("Tanggal penyerahan tidak boleh di masa depan — bukti penerimaan dibuat setelah uang diserahkan.", { paidDate: "Tanggal di masa depan" });
     const existing = await tx.dailyAllowanceReceipt.findFirst({ where: { assigneeId: a.id, status: "ACTIVE" }, select: { number: true } });
     if (existing) throw Errors.conflict(`Bukti penerimaan untuk ${a.employee.fullName} sudah diterbitkan (${existing.number}). Batalkan dulu bila perlu menerbitkan ulang.`);
+    // Uang harian yang sudah masuk penyelesaian akhir (belum dibatalkan) dibayar lewat penyelesaian itu — bukti terpisah akan membuatnya terbayar dua kali.
+    const settled = await tx.finalSettlementLine.findFirst({ where: { assigneeId: a.id, settlement: { status: { not: "CANCELLED" } } }, select: { settlement: { select: { id: true, status: true } } } });
+    if (settled) throw Errors.conflict(`Uang harian ${a.employee.fullName} untuk surat tugas ${letter.number} sudah termasuk penyelesaian akhir (${SETTLEMENT_STATUS_LABEL[settled.settlement.status].toLowerCase()}), sehingga bukti penerimaan terpisah tidak dapat diterbitkan agar tidak dibayar dua kali. Bila perlu dibayar lewat bukti penerimaan, hapus barisnya dari penyelesaian akhir (Draf) atau batalkan penyelesaian akhirnya terlebih dahulu.`, { settlementId: settled.settlement.id });
 
     const year = Number(paidDate.slice(0, 4));
     const seqNo = await nextSeq(tx, "receipt", year);
@@ -487,5 +507,5 @@ export async function getReceiptForPdf(actor: Actor, id: string): Promise<{ numb
 
 /** Jumlah surat tugas terbit yang masih punya penerima tanpa bukti penerimaan (lencana menu). */
 export async function pendingAllowanceCount(): Promise<number> {
-  return prisma.assignmentLetter.count({ where: { status: "ISSUED", assignees: { some: { receipts: { none: { status: "ACTIVE" } } } } } });
+  return prisma.assignmentLetter.count({ where: { status: "ISSUED", assignees: { some: awaitingReceipt } } });
 }

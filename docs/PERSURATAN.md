@@ -87,6 +87,7 @@ Seluruh 24 jenis katalog master disemai idempoten (penandatangan awal: Direktur 
 - **Pembatalan** dilakukan dari dokumen surat dan berantai membatalkan surat tugasnya; **diblok selama masih ada Bukti Penerimaan Uang Harian aktif** (Direktur membatalkan buktinya dulu).
 - **Uang Harian & Bukti Penerimaan**: HR dan Direktur, di halaman **Persuratan → Surat Tugas & Uang Harian** (`/persuratan/surat-tugas`; juga memuat surat tugas lama). Penomoran bukti tidak berubah (`…/BPUH/…`).
   Surat tugas lama tetap utuh dengan nomor lamanya (arsip); pembatalannya masih lewat tombol di halaman itu.
+  **Uang harian yang sudah masuk Penyelesaian Akhir** ditandai di halaman ini dan **tidak dapat dibuatkan Bukti Penerimaan terpisah** (agar tidak dibayar dua kali); lihat [PENYELESAIAN-AKHIR.md](PENYELESAIAN-AKHIR.md#uang-harian--bukti-penerimaan-tidak-dibayar-dua-kali).
 - Data penugasan ikut dibekukan sejak terbit (trigger database).
 
 ## Divisi penandatangan & ambil alih

@@ -14,6 +14,7 @@ import { api, ApiClientError, errorMessage } from "@/lib/api-client";
 import { formatDateLong, formatDateRange } from "@/lib/format";
 import { formatRupiah } from "@/lib/money";
 import { needsMaterai } from "@/lib/assignment";
+import { SETTLEMENT_STATUS_LABEL } from "@/lib/final-settlement";
 import type { AssignmentDto, AssigneeDto, MyAssignmentDto, ReceiptDto } from "@/server/services/assignments";
 import { DiscussButton } from "@/components/chat/discuss-button";
 
@@ -22,7 +23,7 @@ const btn = "inline-flex h-8 items-center gap-1.5 rounded-md border border-line 
 
 type Dlg = { kind: "ISSUE"; letter: AssignmentDto; a: AssigneeDto } | { kind: "CANCEL"; letter: AssignmentDto } | { kind: "VOID"; letter: AssignmentDto; r: ReceiptDto };
 
-export function AssignmentList({ items, today, canManage, canRevoke, selfEmployeeId, isSuper }: { items: AssignmentDto[]; today: string; canManage: boolean; canRevoke: boolean; selfEmployeeId: string | null; isSuper: boolean }) {
+export function AssignmentList({ items, today, canManage, canRevoke, selfEmployeeId, isSuper, canViewSettlement = false }: { items: AssignmentDto[]; today: string; canManage: boolean; canRevoke: boolean; selfEmployeeId: string | null; isSuper: boolean; canViewSettlement?: boolean }) {
   const router = useRouter();
   const toast = useToast();
   const [dlg, setDlg] = useState<Dlg | null>(null);
@@ -91,6 +92,15 @@ export function AssignmentList({ items, today, canManage, canRevoke, selfEmploye
                             <a href={`/api/allowance-receipts/${a.receipt.id}/pdf`} className={btn}><Download className="size-4" />PDF</a>
                             {canRevoke && <Button size="sm" variant="danger" onClick={() => setDlg({ kind: "VOID", letter: l, r: a.receipt! })}>Batalkan</Button>}
                           </div>
+                        </div>
+                      ) : a.settlement ? (
+                        // Uang ini dibayar lewat penyelesaian akhir — bukti terpisah sengaja tidak tersedia (agar tidak dibayar dua kali).
+                        <div className="flex flex-col items-start gap-1">
+                          <Badge tone={a.settlement.status === "PAID" ? "green" : "amber"}>
+                            {a.settlement.status === "PAID" ? `Dibayar lewat penyelesaian akhir${a.settlement.paidOn ? ` · ${formatDateLong(a.settlement.paidOn)}` : ""}` : `Termasuk penyelesaian akhir · ${SETTLEMENT_STATUS_LABEL[a.settlement.status]}`}
+                          </Badge>
+                          {canViewSettlement && <Link href={`/penyelesaian-akhir/${a.settlement.id}`} className="text-xs text-brand-700 hover:underline">Buka penyelesaian akhir</Link>}
+                          <span className="text-xs text-muted">Bukti penerimaan terpisah tidak diterbitkan.</span>
                         </div>
                       ) : l.status === "ISSUED" && canManage ? (
                         own ? <span className="text-xs text-muted">Diterbitkan Super Admin</span>

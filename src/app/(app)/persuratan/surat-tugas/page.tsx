@@ -36,7 +36,7 @@ export default async function AssignmentsPage({ searchParams }: { searchParams: 
         <FilterField label="Cari"><input type="search" name="q" defaultValue={sp.q} placeholder="No. surat / tujuan / nama" className={`${filterInput} w-56`} /></FilterField>
         <FilterField label="Bukti"><select name="pending" defaultValue={sp.pending ?? ""} className={filterInput}><option value="">Semua</option><option value="1">Belum lengkap</option></select></FilterField>
       </FilterBar>
-      <AssignmentList items={res.items} today={today} canManage={manage} canRevoke={actorCan(user, "assignment:revoke")} selfEmployeeId={user.employeeId} isSuper={user.role === "SUPER_ADMIN"} />
+      <AssignmentList items={res.items} today={today} canManage={manage} canRevoke={actorCan(user, "assignment:revoke")} selfEmployeeId={user.employeeId} isSuper={user.role === "SUPER_ADMIN"} canViewSettlement={actorCan(user, "payroll:view")} />
       <div className="mt-4 rounded-lg border border-line bg-surface"><Pagination page={res.page} pageCount={res.pageCount} total={res.total} hrefFor={(p) => `/persuratan/surat-tugas${buildQuery({ ...filters, page: p })}`} /></div>
     </div>
   );

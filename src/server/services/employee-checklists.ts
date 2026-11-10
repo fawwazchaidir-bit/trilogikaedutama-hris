@@ -110,7 +110,7 @@ export async function signalsFor(db: Db, kind: ChecklistKind, employeeId: string
   const year = Number(today().slice(0, 4));
   const [bal, allowances, loans, settlement] = await Promise.all([
     balanceOf(db, employeeId, year),
-    db.assignmentAssignee.count({ where: { employeeId, letter: { status: "ISSUED" }, receipts: { none: { status: "ACTIVE" } } } }),
+    db.assignmentAssignee.count({ where: { employeeId, letter: { status: "ISSUED" }, receipts: { none: { status: "ACTIVE" } }, settlementLines: { none: { settlement: { status: { not: "CANCELLED" } } } } } }),
     db.salaryComponent.count({ where: { employeeId, isActive: true, category: "LOAN" } }),
     settlementSignalData(db, employeeId),
   ]);

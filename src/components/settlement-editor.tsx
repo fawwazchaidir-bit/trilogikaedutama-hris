@@ -89,6 +89,7 @@ export function SettlementEditor({ s, canPrepare, canApprove, canRevoke, isSelf 
         Sistem hanya mengusulkan yang dapat dihitung dari data: <strong>gaji prorata bulan terakhir</strong>, <strong>uang cuti</strong> (bila pembagi diisi), dan <strong>uang harian yang belum dibayar</strong>.
         {" "}{NOT_COMPUTED_BY_SYSTEM.join(", ")} <strong>tidak dihitung sistem</strong> — tidak ada tarif yang ditanam. Isi sebagai baris manual sesuai perjanjian/ketentuan yang berlaku dan hasil hitung yang sah (mis. konsultan pajak).
       </Notice>
+      {s.lines.some((l) => l.assigneeId) && <Notice tone="info">Uang harian pada penyelesaian ini dibayar <strong>lewat penyelesaian akhir</strong>. Bukti Penerimaan terpisah untuk perjalanan yang sama tidak dapat diterbitkan (agar tidak dibayar dua kali); bila berubah pikiran, hapus barisnya di sini lebih dulu.</Notice>}
       {s.warnings.length > 0 && (
         <Card><div className="space-y-1 px-5 py-4 text-sm">
           <p className="flex items-center gap-2 font-medium text-amber-800"><AlertTriangle className="size-4" aria-hidden />Periksa sebelum mengajukan</p>

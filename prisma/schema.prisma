@@ -1602,9 +1602,11 @@ model AssignmentAssignee {
   total      BigInt
   createdAt  DateTime @default(now())
 
-  letter   AssignmentLetter        @relation(fields: [letterId], references: [id], onDelete: Restrict)
-  employee Employee                @relation(fields: [employeeId], references: [id], onDelete: Restrict)
-  receipts DailyAllowanceReceipt[]
+  letter          AssignmentLetter        @relation(fields: [letterId], references: [id], onDelete: Restrict)
+  employee        Employee                @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  receipts        DailyAllowanceReceipt[]
+  /// Baris penyelesaian akhir yang memuat uang harian penerima ini.
+  settlementLines FinalSettlementLine[]
 
   @@unique([letterId, employeeId])
   @@index([employeeId])
@@ -2619,13 +2621,18 @@ model FinalSettlementLine {
   /// Identitas SUMBER usulan sistem (mis. `PRORATA:<id komponen gaji>`, `LEAVE_PAYOUT`, `ALLOWANCE:<id penerima tugas>`). Tetap menempel saat baris dikoreksi HR (jadi MANUAL)
   /// agar hitung ulang tahu usulan itu sudah diganti. Indeks unik parsial (settlementId, sourceKey) menjamin SATU sumber hanya SATU baris.
   sourceKey    String?
+  /// Penerima surat tugas yang uang hariannya dimuat baris ini (hanya baris uang harian). Dasar rekonsiliasi dengan Bukti Penerimaan Uang Harian: uang yang sudah masuk
+  /// penyelesaian akhir yang masih berlaku TIDAK boleh dibuatkan bukti terpisah (trigger + service), dan sebaliknya.
+  assigneeId   String?                @db.Uuid
   note         String?
   sortOrder    Int
   createdAt    DateTime               @default(now())
 
-  settlement FinalSettlement @relation(fields: [settlementId], references: [id], onDelete: Restrict)
+  settlement FinalSettlement     @relation(fields: [settlementId], references: [id], onDelete: Restrict)
+  assignee   AssignmentAssignee? @relation(fields: [assigneeId], references: [id], onDelete: Restrict)
 
   @@index([settlementId, sortOrder])
+  @@index([assigneeId])
   @@map("final_settlement_lines")
 }
 

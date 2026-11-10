@@ -10,10 +10,12 @@ import { isoToDate } from "@/server/json";
 import { addComponent, makeUser, resetDb } from "../helpers/db";
 import { makeLetter, seedTraining, type TrainingFixtures } from "../helpers/training";
 import {
-  addLine, approveSettlement, auditSettlementDuplicates, cancelSettlement, createSettlement, deleteLine, getSettlement, listSettlements, markSettlementPaid, recomputeSettlement,
+  addLine, approveSettlement, auditAllowanceOverlaps, auditSettlementDuplicates, cancelSettlement, createSettlement, deleteLine, getSettlement, listSettlements, markSettlementPaid, recomputeSettlement,
   returnSettlement, settlementOfEmployee, submitSettlement, updateLine, updateSettlement,
 } from "@/server/services/final-settlements";
 import { assignAsset, createAsset } from "@/server/services/assets";
+import { cancelAssignment, issueReceipt, listAssignments, pendingAllowanceCount } from "@/server/services/assignments";
+import { readFileSync } from "node:fs";
 import { listEmployeeChecklists, startChecklist } from "@/server/services/employee-checklists";
 
 let fx: TrainingFixtures;
@@ -329,6 +331,235 @@ describe("data lama (sebelum ada identitas sumber)", () => {
     await updateLine(fx.hr, s0.lines[0]!.id, { category: "PRORATED_SALARY", name: "Gaji pokok (prorata, koreksi)", amount: 3_000_000 });
     await recomputeSettlement(fx.hr, s0.id);
     expect(await auditSettlementDuplicates(fx.superAdmin)).toEqual([]);
+  });
+});
+
+describe("uang harian: penyelesaian akhir vs Bukti Penerimaan (tidak dibayar dua kali)", () => {
+  const TRG = "daily_allowance_receipts_settlement_guard";
+  const mkAssignee = async (seq = 1) => {
+    const l = await makeLetter(fx.hr.userId, seq);
+    return prisma.assignmentAssignee.create({ data: { letterId: l.id, employeeId: emp(), days: 5, dailyRate: 150_000n, total: 750_000n } });
+  };
+  const allow = <L extends { category: string }>(s: { lines: L[] }) => s.lines.filter((l) => l.category === "UNPAID_ALLOWANCE");
+  /** Bukti disisipkan LANGSUNG ke database dengan penjaga dimatikan — meniru data lama/balapan yang lolos dari pemeriksaan service. */
+  async function rawReceipt(a: { id: string; letterId: string; employeeId: string }, seqNo = 90) {
+    await prisma.$executeRawUnsafe(`ALTER TABLE daily_allowance_receipts DISABLE TRIGGER ${TRG}`);
+    try {
+      return await prisma.dailyAllowanceReceipt.create({ data: { seqYear: 2026, seqNo, number: `${seqNo}/BPUH/XI/2026`, letterId: a.letterId, assigneeId: a.id, employeeId: a.employeeId, days: 5, dailyRate: 150_000n, total: 750_000n, paidDate: isoToDate("2026-11-03"), method: "CASH", snapshot: {}, issuedById: fx.hr.userId } });
+    } finally { await prisma.$executeRawUnsafe(`ALTER TABLE daily_allowance_receipts ENABLE TRIGGER ${TRG}`); }
+  }
+
+  it("baris uang harian tertaut ke penerima tugas (assigneeId + kunci ALLOWANCE)", async () => {
+    await salary();
+    const a = await mkAssignee();
+    const s = await mk();
+    expect(allow(s)).toMatchObject([{ assigneeId: a.id, sourceKey: `ALLOWANCE:${a.id}`, amount: 750_000 }]);
+    // baris lain tidak bertaut
+    expect(s.lines.filter((l) => l.category !== "UNPAID_ALLOWANCE").every((l) => l.assigneeId === null)).toBe(true);
+  });
+
+  it("Bukti Penerimaan terpisah DITOLAK selama penyelesaian berlaku — Draf, Menunggu, Disetujui, Dibayar — dan tidak ada bukti yang tercipta", async () => {
+    await salary();
+    const a = await mkAssignee();
+    const s = await mk();
+    const tryIssue = async () => fail(issueReceipt(fx.hr, { assigneeId: a.id, method: "CASH" }));
+    let e = await tryIssue();
+    expect(e?.code).toBe("CONFLICT");
+    expect(e?.message).toMatch(/sudah termasuk penyelesaian akhir \(draf\)[^]*tidak dibayar dua kali/);
+    expect(e?.extra).toMatchObject({ settlementId: s.id });
+    await submitSettlement(fx.hr, s.id);
+    expect((await tryIssue())?.message).toMatch(/\(menunggu persetujuan\)/);
+    await approveSettlement(fx.superAdmin, s.id, {});
+    expect((await tryIssue())?.message).toMatch(/\(disetujui\)/);
+    await markSettlementPaid(fx.hr, s.id, {});
+    e = await tryIssue();
+    expect(e?.message).toMatch(/\(dibayar\)/);
+    expect(await prisma.dailyAllowanceReceipt.count()).toBe(0);
+  });
+
+  it("jalur sah tetap ada: setelah baris dihapus (Draf) atau penyelesaian dibatalkan, bukti boleh diterbitkan", async () => {
+    await salary();
+    const a1 = await mkAssignee(1);
+    const s = await mk();
+    // (1) hapus barisnya dari Draf → bukti boleh, dan usulan tidak bangkit lagi (bukti aktif + dikecualikan)
+    await deleteLine(fx.hr, allow(s)[0]!.id);
+    expect((await issueReceipt(fx.hr, { assigneeId: a1.id, method: "TRANSFER" })).total).toBe(750_000);
+    expect(allow(await recomputeSettlement(fx.hr, s.id))).toHaveLength(0);
+    // (2) penyelesaian dibatalkan → uang harian lain yang sebelumnya tercakup kembali boleh dibuatkan bukti
+    const a2 = await mkAssignee(2);
+    const re = await recomputeSettlement(fx.hr, s.id);
+    expect(allow(re).map((l) => l.assigneeId)).toEqual([a2.id]);
+    expect((await fail(issueReceipt(fx.hr, { assigneeId: a2.id, method: "CASH" })))?.code).toBe("CONFLICT");
+    await cancelSettlement(fx.hr, s.id, { reason: "Salah tanggal terakhir bekerja" });
+    expect((await issueReceipt(fx.hr, { assigneeId: a2.id, method: "CASH" })).total).toBe(750_000);
+  });
+
+  it("Surat Tugas menandai penerima yang uangnya masuk penyelesaian akhir; lencana & filter 'menunggu bukti' tidak menghitungnya; kembali dihitung setelah dibatalkan", async () => {
+    await salary();
+    const a = await mkAssignee();
+    const items = async (pending = false) => (await listAssignments(fx.hr, pending ? { pending: "1" } : {})).items;
+    expect(await pendingAllowanceCount()).toBe(1);
+    const s = await mk();
+    expect((await items())[0]!.assignees[0]!.settlement).toEqual({ id: s.id, status: "DRAFT", paidOn: null });
+    expect(await pendingAllowanceCount()).toBe(0);
+    expect(await items(true)).toHaveLength(0);
+    await submitSettlement(fx.hr, s.id); await approveSettlement(fx.superAdmin, s.id, {}); await markSettlementPaid(fx.hr, s.id, { paidOn: "2026-11-09" });
+    expect((await items())[0]!.assignees[0]!.settlement).toMatchObject({ status: "PAID", paidOn: "2026-11-09" });
+    expect(await pendingAllowanceCount()).toBe(0); // dibayar lewat penyelesaian akhir → bukan lagi "menunggu bukti"
+    expect(a.id).toBeTruthy();
+  });
+
+  it("penyelesaian yang dibatalkan melepas penanda: penerima kembali 'menunggu bukti'", async () => {
+    await salary();
+    await mkAssignee();
+    const s = await mk();
+    expect(await pendingAllowanceCount()).toBe(0);
+    await cancelSettlement(fx.hr, s.id, { reason: "Dibuat ulang nanti" });
+    expect(await pendingAllowanceCount()).toBe(1);
+    expect((await listAssignments(fx.hr)).items[0]!.assignees[0]!.settlement).toBeNull();
+  });
+
+  it("penjaga database: bukti aktif ditolak untuk uang yang sudah di penyelesaian berlaku; baris ditolak untuk uang yang sudah punya bukti aktif", async () => {
+    await salary();
+    const a = await mkAssignee(1);
+    const s = await mk();
+    const data = { seqYear: 2026, seqNo: 7, number: "007/BPUH/XI/2026", letterId: a.letterId, assigneeId: a.id, employeeId: a.employeeId, days: 5, dailyRate: 150_000n, total: 750_000n, paidDate: isoToDate("2026-11-03"), method: "CASH" as const, snapshot: {}, issuedById: fx.hr.userId };
+    await expect(prisma.dailyAllowanceReceipt.create({ data })).rejects.toThrow(/HRIS-GUARD[^]*sudah termasuk penyelesaian akhir/);
+    // bukti VOIDED tidak dihalangi (arsip), tetapi bukti aktif untuk penerima lain sah
+    const b = await mkAssignee(2);
+    await prisma.dailyAllowanceReceipt.create({ data: { ...data, seqNo: 8, number: "008/BPUH/XI/2026", letterId: b.letterId, assigneeId: b.id } });
+    await expect(prisma.finalSettlementLine.create({ data: { settlementId: s.id, kind: "EARNING", category: "UNPAID_ALLOWANCE", name: "Uang harian: tidak boleh", amount: 750_000n, source: "MANUAL", assigneeId: b.id, sortOrder: 99 } })).rejects.toThrow(/HRIS-GUARD[^]*Bukti Penerimaan aktif/);
+  });
+
+  it("cek ulang saat DIAJUKAN: bukti yang lolos ke database ditolak jelas, peringatan muncul di layar, dan jalan keluarnya hapus baris", async () => {
+    await salary();
+    const a = await mkAssignee();
+    const s = await mk();
+    await rawReceipt(a);
+    expect((await getSettlement(fx.hr, s.id)).warnings.join(" | ")).toMatch(/Uang harian bermasalah: "Uang harian: Bandung" sudah punya Bukti Penerimaan 90\/BPUH/);
+    const e = await fail(submitSettlement(fx.hr, s.id));
+    expect(e?.code).toBe("CONFLICT");
+    expect(e?.message).toMatch(/Uang harian tidak boleh dibayar lewat penyelesaian akhir[^]*sudah punya Bukti Penerimaan 90\/BPUH[^]*tidak dibayar dua kali/);
+    expect((await prisma.finalSettlement.findUniqueOrThrow({ where: { id: s.id } })).status).toBe("DRAFT");
+    await deleteLine(fx.hr, allow(s)[0]!.id);
+    expect((await submitSettlement(fx.hr, s.id)).status).toBe("PENDING_APPROVAL");
+  });
+
+  it("cek ulang saat DISETUJUI: status tidak berubah bila bukti muncul setelah diajukan; jalan keluar: kembalikan, hapus baris, ajukan lagi", async () => {
+    await salary();
+    const a = await mkAssignee();
+    const s = await mk();
+    await submitSettlement(fx.hr, s.id);
+    await rawReceipt(a);
+    const e1 = await fail(approveSettlement(fx.superAdmin, s.id, {}));
+    expect(e1?.code).toBe("CONFLICT");
+    expect(e1?.message).toMatch(/Bukti Penerimaan 90\/BPUH/);
+    expect((await prisma.finalSettlement.findUniqueOrThrow({ where: { id: s.id } })).status).toBe("PENDING_APPROVAL");
+    // dikembalikan ke Draf → baris dihapus → disetujui
+    await returnSettlement(fx.superAdmin, s.id, { note: "Uang harian sudah dibayar lewat bukti" });
+    await deleteLine(fx.hr, allow(await getSettlement(fx.hr, s.id))[0]!.id);
+    await submitSettlement(fx.hr, s.id);
+    expect((await approveSettlement(fx.superAdmin, s.id, {})).status).toBe("APPROVED");
+  });
+
+  it("cek ulang saat DICATAT DIBAYAR menolak bila bukti muncul setelah disetujui", async () => {
+    await salary();
+    const a = await mkAssignee();
+    const s = await mk();
+    await submitSettlement(fx.hr, s.id);
+    await approveSettlement(fx.superAdmin, s.id, {});
+    await rawReceipt(a);
+    const e = await fail(markSettlementPaid(fx.hr, s.id, {}));
+    expect(e?.code).toBe("CONFLICT");
+    expect(e?.message).toMatch(/Bukti Penerimaan 90\/BPUH/);
+    expect((await prisma.finalSettlement.findUniqueOrThrow({ where: { id: s.id } })).status).toBe("APPROVED");
+  });
+
+  it("surat tugas yang dibatalkan: baris uang harian ditolak saat diajukan; hitung ulang membuangnya; pembatalan surat DITOLAK bila penyelesaian sudah disetujui/dibayar", async () => {
+    await salary();
+    const a = await mkAssignee();
+    const s = await mk();
+    await cancelAssignment(fx.hr, a.letterId, { reason: "Perjalanan dibatalkan klien" }); // masih Draf → boleh
+    expect((await fail(submitSettlement(fx.hr, s.id)))?.message).toMatch(/surat tugas 001\/ST\/XI\/2026 sudah dibatalkan/);
+    expect(allow(await recomputeSettlement(fx.hr, s.id))).toHaveLength(0);
+    // pembanding: pembatalan surat DITOLAK bila uangnya sudah di penyelesaian yang disetujui
+    const b = await mkAssignee(2);
+    const s2 = (await recomputeSettlement(fx.hr, s.id));
+    expect(allow(s2).map((l) => l.assigneeId)).toEqual([b.id]);
+    await submitSettlement(fx.hr, s.id); await approveSettlement(fx.superAdmin, s.id, {});
+    const e = await fail(cancelAssignment(fx.hr, b.letterId, { reason: "Dibatalkan setelah disetujui" }));
+    expect(e?.code).toBe("CONFLICT");
+    expect(e?.message).toMatch(/sudah termasuk penyelesaian akhir yang disetujui/);
+    expect((await prisma.assignmentLetter.findUniqueOrThrow({ where: { id: b.letterId } })).status).toBe("ISSUED");
+    // dibatalkan oleh pimpinan → pembatalan surat tugas boleh
+    await cancelSettlement(fx.superAdmin, s.id, { reason: "Dikoreksi" });
+    expect((await cancelAssignment(fx.hr, b.letterId, { reason: "Dibatalkan setelah koreksi" })).status).toBe("CANCELLED");
+  });
+
+  it("sinyal checklist berhenti tidak lagi menghitung uang harian yang sudah masuk penyelesaian akhir sebagai 'belum diterbitkan bukti'", async () => {
+    await salary();
+    await mkAssignee();
+    const c = await startChecklist(fx.hr, emp(), { kind: "OFFBOARDING" });
+    const sig = async () => (await listEmployeeChecklists(fx.hr, emp())).find((x) => x.id === c.id)!.items.find((i) => i.key === "obligations")!;
+    expect((await sig()).signal?.text).toMatch(/1 uang harian belum diterbitkan bukti penerimaannya/);
+    await mk();
+    expect((await sig()).signal?.text).not.toMatch(/uang harian belum diterbitkan/);
+  });
+
+  it("audit baca-saja untuk pimpinan: mendaftar uang harian yang tercatat dua kali; kosong bila bersih; penyelesaian batal diabaikan; HR ditolak", async () => {
+    await salary();
+    const a = await mkAssignee();
+    const s = await mk();
+    expect(await auditAllowanceOverlaps(fx.superAdmin)).toEqual([]);
+    await rawReceipt(a);
+    const rows = await auditAllowanceOverlaps(fx.superAdmin);
+    expect(rows).toEqual([expect.objectContaining({ settlementId: s.id, settlementStatus: "DRAFT", employeeName: "Ayu Lestari", lineAmount: 750_000, receiptTotal: 750_000, letterNumber: "001/ST/XI/2026", receiptNumber: "90/BPUH/XI/2026" })]);
+    expect((await fail(auditAllowanceOverlaps(fx.hr)))?.code).toBe("FORBIDDEN");
+    await cancelSettlement(fx.hr, s.id, { reason: "Dibuat ulang" });
+    expect(await auditAllowanceOverlaps(fx.superAdmin)).toEqual([]);
+  });
+});
+
+describe("migrasi: menautkan baris uang harian lama", () => {
+  const sql = readFileSync("prisma/migrations/20261110170000_settlement_allowance_link/migration.sql", "utf8");
+  const backfill = sql.slice(sql.indexOf("-- BACKFILL:START"), sql.indexOf("-- BACKFILL:END"))
+    .split("\n").filter((l) => !l.trim().startsWith("--")).join("\n").split(";").map((x) => x.trim()).filter(Boolean);
+  const runBackfill = async () => { for (const st of backfill) await prisma.$executeRawUnsafe(st); };
+
+  it("baris SISTEM lama tanpa kunci ditautkan bila kecocokannya tunggal; yang meragukan/manual dibiarkan; penjaga 'hanya Draf' menyala kembali; nominal tidak berubah", async () => {
+    await salary();
+    const l1 = await makeLetter(fx.hr.userId, 1);
+    const l2 = await makeLetter(fx.hr.userId, 2);
+    const l3 = await makeLetter(fx.hr.userId, 3);
+    const mkA = (letterId: string, total: bigint) => prisma.assignmentAssignee.create({ data: { letterId, employeeId: emp(), days: 5, dailyRate: total / 5n, total } });
+    const a1 = await mkA(l1.id, 750_000n), a2 = await mkA(l2.id, 500_000n), a3 = await mkA(l3.id, 300_000n);
+    const s = await mk();
+    // tiru data LAMA: kunci & tautan hilang; baris 3 diubah HR (MANUAL) sehingga tidak bisa dicocokkan; baris 2 rumusnya tidak memuat nomor surat
+    await prisma.finalSettlementLine.updateMany({ where: { settlementId: s.id }, data: { sourceKey: null, assigneeId: null } });
+    const lines = await prisma.finalSettlementLine.findMany({ where: { settlementId: s.id, category: "UNPAID_ALLOWANCE" } });
+    const of = (total: bigint) => lines.find((l) => l.amount === total)!;
+    await prisma.finalSettlementLine.update({ where: { id: of(500_000n).id }, data: { formula: "ditulis ulang HR tanpa nomor" } });
+    await prisma.finalSettlementLine.update({ where: { id: of(300_000n).id }, data: { source: "MANUAL", name: "Uang harian (diubah HR)" } });
+    await submitSettlement(fx.hr, s.id); await approveSettlement(fx.superAdmin, s.id, {}); // SEKARANG terkunci (non-Draf)
+    const before = await prisma.finalSettlementLine.findMany({ where: { settlementId: s.id }, orderBy: { sortOrder: "asc" } });
+
+    await runBackfill();
+
+    const after = await prisma.finalSettlementLine.findMany({ where: { settlementId: s.id }, orderBy: { sortOrder: "asc" } });
+    const get = (total: bigint) => after.find((l) => l.category === "UNPAID_ALLOWANCE" && l.amount === total)!;
+    expect(get(750_000n)).toMatchObject({ assigneeId: a1.id, sourceKey: `ALLOWANCE:${a1.id}` }); // tertaut
+    expect(get(500_000n)).toMatchObject({ assigneeId: null, sourceKey: null });                   // rumus tak memuat nomor surat → dibiarkan
+    expect(get(300_000n)).toMatchObject({ assigneeId: null, sourceKey: null });                   // baris MANUAL → dibiarkan
+    expect(a2.id).not.toBe(a3.id);
+    // hanya kolom penanda yang berubah
+    expect(after.map((l) => [l.id, l.amount, l.name, l.formula, l.source])).toEqual(before.map((l) => [l.id, l.amount, l.name, l.formula, l.source]));
+    // penjaga "hanya Draf" menyala lagi
+    await expect(prisma.finalSettlementLine.update({ where: { id: get(750_000n).id }, data: { name: "ubah" } })).rejects.toThrow(/HRIS-GUARD/);
+    // sesudah tertaut, bukti terpisah untuk penerima itu ditolak
+    expect((await fail(issueReceipt(fx.hr, { assigneeId: a1.id, method: "CASH" })))?.code).toBe("CONFLICT");
+    // idempoten
+    await runBackfill();
+    expect((await prisma.finalSettlementLine.findMany({ where: { settlementId: s.id, assigneeId: { not: null } } })).length).toBe(1);
   });
 });
 
