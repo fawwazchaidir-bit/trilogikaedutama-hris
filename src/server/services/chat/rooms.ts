@@ -1,7 +1,7 @@
 import "server-only";
 import { z } from "zod";
 import { Prisma, type ChatRoom } from "@prisma/client";
-import { prisma } from "../../db";
+import { prisma, transaction } from "../../db";
 import { Errors } from "../../errors";
 import { parseInput } from "../../validate";
 import type { Actor } from "../../actor";
@@ -130,7 +130,24 @@ async function takeNewDirectToken(userId: string): Promise<void> {
   await recordFailure(key, { max: CHAT_LIMITS.newDirectPerMinute, windowMs: 60_000, blockMs: 60_000 });
 }
 
-/** Dapatkan atau buat japri dengan `userId`. Aman terhadap dua orang yang saling memulai bersamaan (kunci unik pasangan). */
+/**
+ * Baris anggota ruang bersama disisipkan dalam urutan TETAP (userId menaik). Dua pemanggil bersamaan yang menyisipkan baris yang sama dalam urutan
+ * berlawanan ([A, B] vs [B, A]) saling menunggu baris yang belum di-commit → deadlock Postgres (40P01). Urutan tetap + kunci ruang di pemanggilnya
+ * (lihat `lockRoom`) menutup keduanya: yang kedua menunggu yang pertama selesai, tidak pernah saling menunggu.
+ */
+async function addRoomMembers(db: Db, room: Pick<ChatRoom, "id" | "lastSeq" | "kind">, userIds: Iterable<string>): Promise<void> {
+  const ids = [...new Set(userIds)].sort();
+  if (!ids.length) return;
+  await db.chatMember.createMany({ data: ids.map((userId) => ({ roomId: room.id, userId, lastReadSeq: room.lastSeq, notifyMode: defaultNotifyMode(room.kind) })), skipDuplicates: true });
+}
+
+/** Kunci penasihat (advisory) selama transaksi: menyerialkan pembuatan satu ruang yang sama (japri per pasangan, utas per penugasan). Lepas otomatis saat commit/rollback. */
+const lockRoom = (tx: Db, key: string) => tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${key}))`;
+
+/**
+ * Dapatkan atau buat japri dengan `userId`. Aman terhadap dua orang yang saling memulai bersamaan: pembuatan ruang + baris anggota diserialkan per pasangan
+ * (kunci penasihat pada kunci pasangan), jadi tepat satu ruang, tepat satu `created`, dan tanpa deadlock / pelanggaran unik di tengah transaksi.
+ */
 export async function getOrCreateDirect(actor: Actor, raw: unknown): Promise<{ id: string; created: boolean }> {
   assertChatEnabled();
   const input = parseInput(z.object({ userId: uuid }), raw);
@@ -138,15 +155,16 @@ export async function getOrCreateDirect(actor: Actor, raw: unknown): Promise<{ i
   const other = await prisma.user.findFirst({ where: { id: input.userId, isActive: true }, select: { id: true } });
   if (!other) throw Errors.notFound("Pengguna");
   const key = directKey(actor.userId, other.id);
-  let room = await prisma.chatRoom.findUnique({ where: { directKey: key } });
-  let created = false;
-  if (!room) {
-    await takeNewDirectToken(actor.userId);
-    try { room = await prisma.chatRoom.create({ data: { kind: "DIRECT", directKey: key, createdById: actor.userId } }); created = true; }
-    catch (e) { if (!isUniqueViolation(e)) throw e; room = await prisma.chatRoom.findUniqueOrThrow({ where: { directKey: key } }); }
-  }
-  await prisma.chatMember.createMany({ data: [actor.userId, other.id].map((userId) => ({ roomId: room!.id, userId, lastReadSeq: room!.lastSeq, notifyMode: defaultNotifyMode("DIRECT") })), skipDuplicates: true });
-  return { id: room.id, created };
+  // Batas percakapan baru hanya berlaku bila ruangnya belum ada (membuka japri lama tidak menghabiskan jatah).
+  if (!(await prisma.chatRoom.findUnique({ where: { directKey: key }, select: { id: true } }))) await takeNewDirectToken(actor.userId);
+  return transaction(async (tx) => {
+    await lockRoom(tx, `chat:direct:${key}`);
+    let room = await tx.chatRoom.findUnique({ where: { directKey: key } });
+    let created = false;
+    if (!room) { room = await tx.chatRoom.create({ data: { kind: "DIRECT", directKey: key, createdById: actor.userId } }); created = true; }
+    await addRoomMembers(tx, room, [actor.userId, other.id]);
+    return { id: room.id, created };
+  });
 }
 
 const subjectSchema = z.object({ type: z.enum(CHAT_SUBJECT_TYPES, { error: "Jenis penugasan tidak valid" }), id: uuid });
@@ -169,22 +187,23 @@ async function subjectParticipants(db: Db, type: z.infer<typeof subjectSchema>["
   return [...extra, ...m.map((x) => x.employee.userId).filter((u): u is string => !!u)];
 }
 
-/** Dapatkan atau buat utas untuk satu penugasan, setelah lolos gerbang subjek (tanpa hak lihat → 404). */
+/** Dapatkan atau buat utas untuk satu penugasan, setelah lolos gerbang subjek (tanpa hak lihat → 404). Pembuatan diserialkan per penugasan (lihat `lockRoom`). */
 export async function getOrCreateSubjectRoom(actor: Actor, raw: unknown): Promise<{ id: string; created: boolean }> {
   assertChatEnabled();
   const input = parseInput(subjectSchema, raw);
   const acc = await subjectAccess(prisma, actor, input.type, input.id);
   if (!acc.canView) throw Errors.notFound("Penugasan");
-  let room = await prisma.chatRoom.findUnique({ where: { subjectType_subjectId: { subjectType: input.type, subjectId: input.id } } });
-  let created = false;
-  if (!room) {
-    try { room = await prisma.chatRoom.create({ data: { kind: "SUBJECT", subjectType: input.type, subjectId: input.id, createdById: actor.userId } }); created = true; }
-    catch (e) { if (!isUniqueViolation(e)) throw e; room = await prisma.chatRoom.findUniqueOrThrow({ where: { subjectType_subjectId: { subjectType: input.type, subjectId: input.id } } }); }
-  }
-  const users = [...new Set([actor.userId, ...(await subjectParticipants(prisma, input.type, input.id))])];
-  const active = await prisma.user.findMany({ where: { id: { in: users }, isActive: true }, select: { id: true } });
-  await prisma.chatMember.createMany({ data: active.map((u) => ({ roomId: room!.id, userId: u.id, lastReadSeq: room!.lastSeq, notifyMode: defaultNotifyMode("SUBJECT") })), skipDuplicates: true });
-  return { id: room.id, created };
+  return transaction(async (tx) => {
+    await lockRoom(tx, `chat:subject:${input.type}:${input.id}`);
+    const where = { subjectType_subjectId: { subjectType: input.type, subjectId: input.id } };
+    let room = await tx.chatRoom.findUnique({ where });
+    let created = false;
+    if (!room) { room = await tx.chatRoom.create({ data: { kind: "SUBJECT", subjectType: input.type, subjectId: input.id, createdById: actor.userId } }); created = true; }
+    const users = [...new Set([actor.userId, ...(await subjectParticipants(tx, input.type, input.id))])];
+    const active = await tx.user.findMany({ where: { id: { in: users }, isActive: true }, select: { id: true } });
+    await addRoomMembers(tx, room, active.map((u) => u.id));
+    return { id: room.id, created };
+  });
 }
 
 /** Direktori ringkas: nama, jabatan, divisi — tanpa email/telepon/NIK. Hanya akun aktif; pelaku sendiri tidak ikut. */

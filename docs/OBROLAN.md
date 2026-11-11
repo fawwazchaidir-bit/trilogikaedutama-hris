@@ -17,7 +17,7 @@ Rancangan dan pertimbangannya ada di dokumen rancangan teknis (PDF) yang disetuj
 
 | Jenis | Membaca | Menulis | Catatan |
 |---|---|---|---|
-| **Japri** | dua orang itu; Direktur (baca-saja, tercatat) | keduanya, selama keduanya aktif | satu japri per pasangan (kunci unik) |
+| **Japri** | dua orang itu; Direktur (baca-saja, tercatat) | keduanya, selama keduanya aktif | satu japri per pasangan (kunci unik; pembuatan diserialkan, lihat bawah) |
 | **Kanal publik** | semua akun aktif | semua akun aktif (kecuali kanal diarsipkan) | kanal "Umum" dibuat otomatis; HR/Direktur dapat membuat kanal lain |
 | **Utas penugasan** | siapa pun yang lolos gerbang subjek | penerima tugas / anggota proyek / pemegang kelola; Pemantau baca-saja; surat dibatalkan atau proyek final = baca-saja | dibuka dari tombol **Diskusi** |
 
@@ -51,6 +51,8 @@ Izin baru: `chat:moderate` (HR, Direktur) dan `chat:audit_access` (hanya Direktu
 ## Data dan penjaga basis data
 
 Tabel `chat_rooms`, `chat_members`, `chat_messages`, `chat_mentions`, `chat_message_revisions` (migrasi `20261109130000_obrolan_internal`, `20261109130100_obrolan_rev_retensi`; aditif). Penjaga (`HRIS-GUARD`): bentuk ruang (japri ⇔ `directKey`, kanal ⇔ slug+nama, utas ⇔ jenis+ID subjek), panjang pesan ≤ 4000; **pesan tidak pernah di-`DELETE`**, identitas terkunci, isi hanya berubah lewat sunting atau retensi, pesan yang sudah dibersihkan tak dapat dipulihkan; riwayat sunting tambah-saja (boleh dihapus hanya setelah induknya dibersihkan retensi). `npm run db:verify` ikut memeriksa trigger, japri tepat dua anggota, dan konsistensi nomor urut.
+
+**Membuka japri/utas bersamaan.** Pembuatan ruang + baris anggotanya (`getOrCreateDirect`, `getOrCreateSubjectRoom`) berjalan dalam satu transaksi di bawah kunci penasihat per pasangan/penugasan (`pg_advisory_xact_lock(hashtext('chat:direct:<kunci>'))`), dan baris anggota disisipkan dalam urutan `userId` menaik. Tanpa itu, dua orang yang saling memulai japri pada saat yang sama menyisipkan baris `(ruang, A)` dan `(ruang, B)` dalam urutan berlawanan lalu saling menunggu → deadlock Postgres 40P01 (jarang, tetapi terlihat sebagai galat 500 bagi salah satu pihak). Sekarang pihak kedua menunggu yang pertama selesai, lalu memakai ruang yang sama (`created=false`). Batas "percakapan baru per menit" hanya dipakai bila ruangnya belum ada. Dicakup `tests/integration/chat-direct-concurrency.test.ts` (penyisipan anggota sengaja diperlambat dengan trigger uji agar deadlock muncul setiap kali bila perbaikan dilepas).
 
 ## Konfigurasi
 
