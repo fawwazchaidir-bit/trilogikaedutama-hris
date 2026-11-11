@@ -7,6 +7,7 @@ import { ConfirmDialog, Dialog } from "@/components/ui/dialog";
 import { EmptyState, Notice } from "@/components/ui/card";
 import { SelectField, TextField } from "@/components/ui/field";
 import { Table, TableWrap, Td, Th } from "@/components/ui/table";
+import { useToast } from "@/components/ui/toast";
 import { api } from "@/lib/api-client";
 import { formatDateShort } from "@/lib/format";
 import { PROJECT_ROLES, PROJECT_ROLE_LABEL, type ProjectRole } from "@/lib/training/types";
@@ -18,6 +19,7 @@ export function TeamPanel({ projectId, members, directory, canManageTeam, canMan
   projectId: string; members: MemberDto[]; directory: DirectoryEmployee[] | null; canManageTeam: boolean; canManagePic: boolean; editable: boolean;
 }) {
   const { busy, error, run, reset } = useRunner();
+  const toast = useToast();
   const [add, setAdd] = useState<{ employeeId: string; role: ProjectRole; note: string } | null>(null);
   const [edit, setEdit] = useState<{ id: string; name: string; role: ProjectRole; note: string; wasPic: boolean } | null>(null);
   const [end, setEnd] = useState<MemberDto | null>(null);
@@ -80,8 +82,10 @@ export function TeamPanel({ projectId, members, directory, canManageTeam, canMan
       </Dialog>
 
       <ConfirmDialog open={end !== null} onClose={() => setEnd(null)} loading={busy} tone="danger" title={`Akhiri penugasan ${end?.name ?? ""}?`} confirmLabel="Ya, akhiri"
-        description="Ia langsung kehilangan akses ke proyek ini. Tugas yang masih dipegangnya tidak berubah dan akan ditandai agar dialihkan."
-        onConfirm={() => end && void run(() => api<{ openTasks: number }>(`/api/training/projects/${projectId}/members/${end.id}`, { method: "DELETE" }), "Penugasan diakhiri.", () => setEnd(null))}>
+        description="Sejak diakhiri ia bukan anggota lagi: tidak dapat mengubah status tugas atau checklist atas namanya dan tugasnya tidak muncul di Tugas Saya. Akses lihat sebagai Pemantau/tingkat Manajer (bila ada) tidak berubah. Tugas yang masih dipegangnya tidak dialihkan otomatis — tetap atas namanya dan ditandai agar dialihkan."
+        onConfirm={() => end && void run(() => api<{ openTasks: number; openChecklist: number }>(`/api/training/projects/${projectId}/members/${end.id}`, { method: "DELETE" }), "Penugasan diakhiri.",
+          (r) => { setEnd(null); if (r.openTasks > 0 || r.openChecklist > 0) toast.error(`Perhatian: masih ada ${r.openTasks} tugas terbuka dan ${r.openChecklist} item checklist atas nama ${end.name} — segera alihkan.`); })}>
+        {end && (end.openTasks > 0 || end.openChecklist > 0) && <Notice tone="warn">Masih memegang <strong>{end.openTasks} tugas terbuka</strong> dan <strong>{end.openChecklist} item checklist</strong>. Alihkan dulu (tab Tugas &amp; Checklist) atau segera alihkan setelah ini; mengakhiri tetap dapat dilanjutkan.</Notice>}
         {error && <Notice tone="danger">{error}</Notice>}
       </ConfirmDialog>
     </div>

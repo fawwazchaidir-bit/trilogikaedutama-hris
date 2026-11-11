@@ -513,7 +513,12 @@ export async function updateMember(actor: Actor, projectId: string, memberId: st
   });
 }
 
-export async function endMember(actor: Actor, projectId: string, memberId: string): Promise<{ openTasks: number }> {
+/**
+ * Akhiri keanggotaan. TIDAK menolak bila anggota masih memegang tugas/checklist — hanya MEMPERINGATKAN (hasil `openTasks`/`openChecklist` ditampilkan ke PIC) dan
+ * mencatatnya. Sejak berakhir ia tidak lagi menjadi "pemilik" tugas/checklist itu (tidak dapat mengubah statusnya; tidak masuk "Tugas Saya"); tugasnya tetap
+ * tercatat atas namanya dan ditandai "perlu dialihkan" sampai PIC mengalihkannya.
+ */
+export async function endMember(actor: Actor, projectId: string, memberId: string): Promise<{ openTasks: number; openChecklist: number }> {
   const access = await loadProjectAccess(actor, projectId);
   assertEditable(access.project);
   assertUuid(memberId, "Anggota");
@@ -526,8 +531,10 @@ export async function endMember(actor: Actor, projectId: string, memberId: strin
     const endedAt = new Date(Math.max(Date.now(), m.startedAt.getTime()));
     await tx.trainingProjectMember.update({ where: { id: memberId }, data: { endedAt, endedById: actor.userId } });
     const openTasks = await tx.trainingTask.count({ where: { projectId, assigneeId: m.employeeId, status: { in: ["TODO", "IN_PROGRESS", "IN_REVIEW"] } } });
-    await auditProject(tx, actor, projectId, { action: "training.member.end", summary: `Penugasan ${m.employee.fullName} di ${access.project.code} diakhiri${openTasks ? ` (masih memegang ${openTasks} tugas terbuka)` : ""}`, before: { role: m.role }, after: { ended: true } });
-    return { openTasks };
+    const openChecklist = await tx.trainingProjectChecklistItem.count({ where: { projectId, assigneeId: m.employeeId, isDone: false } });
+    const holding = [openTasks && `${openTasks} tugas terbuka`, openChecklist && `${openChecklist} item checklist`].filter(Boolean).join(" dan ");
+    await auditProject(tx, actor, projectId, { action: "training.member.end", summary: `Penugasan ${m.employee.fullName} di ${access.project.code} diakhiri${holding ? ` (masih memegang ${holding}; perlu dialihkan)` : ""}`, before: { role: m.role }, after: { ended: true } });
+    return { openTasks, openChecklist };
   });
 }
 

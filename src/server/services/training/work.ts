@@ -78,9 +78,10 @@ async function toTaskDtos(rows: TaskRow[], ctx: TaskCtx): Promise<TaskDto[]> {
   return rows.map((r) => {
     const abilities = projectAbilities(ctx.subject, ctx.roles.get(r.projectId) ?? null);
     const canManage = abilities.has("manage_tasks");
-    const isAssignee = !!ctx.actor.employeeId && r.assigneeId === ctx.actor.employeeId;
+    // Hak pemilik hanya untuk anggota AKTIF; identitas pelaksana (untuk pemisahan pemeriksa) tidak bergantung pada keanggotaan.
+    const isAssignee = !!ctx.actor.employeeId && r.assigneeId === ctx.actor.employeeId && ctx.roles.has(r.projectId);
     const isSubmitter = !!r.submittedById && r.submittedById === ctx.actor.userId;
-    const isExecutor = !!ctx.actor.employeeId && r.assigneeAtSubmitId === ctx.actor.employeeId;
+    const isExecutor = !!ctx.actor.employeeId && (r.assigneeAtSubmitId === ctx.actor.employeeId || r.assigneeId === ctx.actor.employeeId);
     const due = r.dueDate ? dateToIso(r.dueDate) : null;
     return {
       id: r.id, projectId: r.projectId, projectCode: r.project.code, projectName: r.project.name, title: r.title, description: r.description,
@@ -90,7 +91,7 @@ async function toTaskDtos(rows: TaskRow[], ctx: TaskCtx): Promise<TaskDto[]> {
       createdByName: uname.get(r.createdById) ?? null, createdAt: r.createdAt.toISOString(),
       executorName: r.assigneeAtSubmitId ? ename.get(r.assigneeAtSubmitId) ?? null : null,
       submittedByName: r.submittedById ? uname.get(r.submittedById) ?? null : null, submittedAt: iso(r.submittedAt),
-      reviewedByName: r.reviewedById ? uname.get(r.reviewedById) ?? null : null, reviewedAt: iso(r.reviewedAt), viewerIsExecutor: isAssignee || isExecutor,
+      reviewedByName: r.reviewedById ? uname.get(r.reviewedById) ?? null : null, reviewedAt: iso(r.reviewedAt), viewerIsExecutor: isExecutor,
       overdue: isTaskOverdue({ status: r.status, dueDate: due }, t), commentCount: r._count.comments,
       allowedNext: abilities.has("view") ? allowedTaskTransitions({ status: r.status, requiresReview: r.requiresReview, isAssignee, canManage, isSubmitter, isExecutor }) : [],
       canEdit: canManage,
@@ -134,7 +135,7 @@ export async function listMyTasks(actor: Actor, raw: unknown = {}): Promise<Task
   const f = parseInput(myTasksSchema, raw);
   if (!actor.employeeId) return [];
   const rows = await prisma.trainingTask.findMany({
-    where: { assigneeId: actor.employeeId, ...(f.projectId ? { projectId: f.projectId } : {}), project: accessibleProjectWhere(actor, mod) },
+    where: { assigneeId: actor.employeeId, ...(f.projectId ? { projectId: f.projectId } : {}), project: { AND: [accessibleProjectWhere(actor, mod), activeMemberOf(actor.employeeId)] } },
     include: taskInclude,
   });
   const dtos = await toTaskDtos(rows, await buildTaskCtx(actor, rows));
@@ -159,9 +160,23 @@ export async function countMyOverdueTasks(actor: Actor): Promise<number> {
   if (!actor.employeeId) return 0;
   const mod = await getModuleContext(actor);
   return prisma.trainingTask.count({
-    where: { assigneeId: actor.employeeId, status: { in: ["TODO", "IN_PROGRESS", "IN_REVIEW"] }, dueDate: { lt: isoToDate(today()) }, project: accessibleProjectWhere(actor, mod) },
+    where: { assigneeId: actor.employeeId, status: { in: ["TODO", "IN_PROGRESS", "IN_REVIEW"] }, dueDate: { lt: isoToDate(today()) }, project: { AND: [accessibleProjectWhere(actor, mod), activeMemberOf(actor.employeeId)] } },
   });
 }
+
+/** Filter proyek: pelaku masih ANGGOTA AKTIF proyek itu ("Tugas Saya", lencana, dan checklist saya hanya memuat proyek tempat ia masih anggota). */
+const activeMemberOf = (employeeId: string): Prisma.TrainingProjectWhereInput => ({ members: { some: { employeeId, endedAt: null } } });
+
+/**
+ * Hak "pemilik" (penanggung jawab) atas tugas/checklist HANYA berlaku bila pelaku masih anggota aktif proyek: nama di kolom penanggung jawab saja tidak cukup
+ * (anggota yang sudah dikeluarkan tetapi masih Pemantau/Manajer tetap boleh MELIHAT proyek, bukan mengubah tugas lamanya). Dibaca ulang di dalam transaksi dengan
+ * kunci baris bersama (FOR SHARE): mengakhiri keanggotaan yang berbarengan menunggu transaksi ini selesai, sehingga tidak ada celah balapan.
+ */
+async function assertStillActiveMember(tx: Tx, projectId: string, employeeId: string): Promise<void> {
+  const rows = await tx.$queryRaw<{ id: string }[]>`SELECT "id" FROM "training_project_members" WHERE "projectId" = ${projectId}::uuid AND "employeeId" = ${employeeId}::uuid AND "endedAt" IS NULL FOR SHARE`;
+  if (rows.length === 0) throw Errors.forbidden(NOT_MEMBER_MESSAGE);
+}
+const NOT_MEMBER_MESSAGE = "Anda sudah tidak menjadi anggota aktif proyek ini, sehingga tidak dapat mengubah tugas atau checklist yang tercatat atas nama Anda. Minta PIC mengalihkannya atau menambahkan Anda kembali ke tim.";
 
 /** Penanggung jawab tugas harus anggota AKTIF proyek itu — tugas tidak dapat diberikan ke orang di luar tim. */
 async function assertAssigneeInTeam(tx: Tx | typeof prisma, projectId: string, employeeId: string | null | undefined): Promise<void> {
@@ -252,12 +267,16 @@ export async function changeTaskStatus(actor: Actor, taskId: string, raw: unknow
   const { task, access } = await loadTask(actor, taskId);
   assertEditable(access.project);
   const input = parseInput(taskStatusSchema, raw);
-  const isAssignee = !!actor.employeeId && task.assigneeId === actor.employeeId;
+  const named = !!actor.employeeId && task.assigneeId === actor.employeeId;
+  const isAssignee = named && access.memberRole !== null;       // pemilik SAH: tercatat sebagai penanggung jawab DAN masih anggota aktif proyek
   const canManage = access.abilities.has("manage_tasks");
-  if (!isAssignee && !canManage) throw Errors.forbidden("Hanya penanggung jawab tugas atau pengelola proyek yang dapat mengubah status tugas.");
-  // Tiga identitas pemeriksaan: pengirim hasil (akun), pelaksana saat dikirim (karyawan), dan pemeriksa — pemeriksa harus berbeda dari keduanya.
+  if (!isAssignee && !canManage) {
+    if (named) throw Errors.forbidden(NOT_MEMBER_MESSAGE);
+    throw Errors.forbidden("Hanya penanggung jawab tugas atau pengelola proyek yang dapat mengubah status tugas.");
+  }
+  // Tiga identitas pemeriksaan: pengirim hasil (akun), pelaksana (karyawan; saat dikirim atau penanggung jawab saat ini) — pemeriksa harus berbeda dari keduanya.
   const isSubmitter = !!task.submittedById && task.submittedById === actor.userId;
-  const isExecutor = !!actor.employeeId && task.assigneeAtSubmitId === actor.employeeId;
+  const isExecutor = !!actor.employeeId && (task.assigneeAtSubmitId === actor.employeeId || named);
   const allowed = allowedTaskTransitions({ status: task.status, requiresReview: task.requiresReview, isAssignee, canManage, isSubmitter, isExecutor });
   if (!allowed.includes(input.status)) {
     if (task.status === "IN_REVIEW" && input.status === "DONE") {
@@ -269,6 +288,7 @@ export async function changeTaskStatus(actor: Actor, taskId: string, raw: unknow
     throw Errors.conflict(`Status tugas tidak dapat diubah dari "${TASK_STATUS_LABEL[task.status]}" ke "${TASK_STATUS_LABEL[input.status]}".`);
   }
   await transaction(async (tx) => {
+    if (isAssignee && !canManage) await assertStillActiveMember(tx, task.projectId, actor.employeeId!);   // hak lahir dari keanggotaan: baca ulang bersama kunci
     const done = input.status === "DONE";
     const now = new Date();
     const data: Prisma.TrainingTaskUncheckedUpdateManyInput = { status: input.status, completedAt: done ? now : null, completedById: done ? actor.userId : null };
@@ -340,7 +360,7 @@ export async function listChecklist(actor: Actor, projectId: string): Promise<Ch
   const items = rows.map((r): ChecklistItemDto => ({
     id: r.id, projectId: r.projectId, phase: r.phase, title: r.title, isRequired: r.isRequired, sortOrder: r.sortOrder, assigneeId: r.assigneeId, assigneeName: r.assignee?.fullName ?? null,
     isDone: r.isDone, doneAt: iso(r.doneAt), doneByName: r.doneById ? dn.get(r.doneById) ?? null : null, note: r.note, sourceTemplateName: r.sourceTemplateName,
-    canToggle: canManage || (!!actor.employeeId && r.assigneeId === actor.employeeId),
+    canToggle: canManage || (!!actor.employeeId && r.assigneeId === actor.employeeId && access.memberRole !== null),
   }));
   return { items, progress: checklistProgress(items), requiredOutstanding: requiredOutstanding(items).length, canManage };
 }
@@ -390,11 +410,13 @@ export async function updateChecklistItem(actor: Actor, itemId: string, raw: unk
   assertEditable(access.project);
   const input = parseInput(checklistItemUpdateSchema, raw);
   const canManage = access.abilities.has("manage_checklist");
-  const isOwner = !!actor.employeeId && item.assigneeId === actor.employeeId;
+  const named = !!actor.employeeId && item.assigneeId === actor.employeeId;
+  const isOwner = named && access.memberRole !== null;           // pemilik SAH: penanggung jawab DAN masih anggota aktif proyek
   const structural = ["phase", "title", "isRequired", "assigneeId", "note"].some((k) => k in input);
   if (structural && !canManage) throw Errors.forbidden("Hanya pengelola checklist yang dapat mengubah isi item.");
-  if ("isDone" in input && !canManage && !isOwner) throw Errors.forbidden("Hanya penanggung jawab item atau pengelola checklist yang dapat menandai selesai.");
+  if ("isDone" in input && !canManage && !isOwner) throw Errors.forbidden(named ? NOT_MEMBER_MESSAGE : "Hanya penanggung jawab item atau pengelola checklist yang dapat menandai selesai.");
   await transaction(async (tx) => {
+    if ("isDone" in input && !canManage && isOwner) await assertStillActiveMember(tx, item.projectId, actor.employeeId!);
     if ("assigneeId" in input) await assertAssigneeInTeam(tx, item.projectId, input.assigneeId);
     const data: Prisma.TrainingProjectChecklistItemUncheckedUpdateInput = {};
     for (const k of ["phase", "title", "isRequired", "assigneeId", "note"] as const) if (k in input) (data as Record<string, unknown>)[k] = input[k];
@@ -430,7 +452,7 @@ export async function listMyChecklistItems(actor: Actor): Promise<MyChecklistIte
   const mod = await requireModule(actor);
   if (!actor.employeeId) return [];
   const rows = await prisma.trainingProjectChecklistItem.findMany({
-    where: { assigneeId: actor.employeeId, isDone: false, project: { AND: [accessibleProjectWhere(actor, mod), { status: { in: ["PREPARATION", "RUNNING"] } }] } },
+    where: { assigneeId: actor.employeeId, isDone: false, project: { AND: [accessibleProjectWhere(actor, mod), activeMemberOf(actor.employeeId), { status: { in: ["PREPARATION", "RUNNING"] } }] } },
     orderBy: [{ project: { startDate: "asc" } }, { phase: "asc" }, { sortOrder: "asc" }], include: { project: { select: { code: true, name: true } } },
   });
   return rows.map((r) => ({ id: r.id, projectId: r.projectId, projectCode: r.project.code, projectName: r.project.name, phase: r.phase, title: r.title, isRequired: r.isRequired }));

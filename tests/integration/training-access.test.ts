@@ -239,7 +239,7 @@ describe("tim proyek", () => {
     await createTask(fx.emp1, id, { title: "Siapkan materi", assigneeId: fx.empIds[1] });
     const m = (await listMembers(fx.mgr, id)).find((x) => x.employeeId === fx.empIds[1])!;
     expect(m.openTasks).toBe(1);
-    expect(await endMember(fx.mgr, id, m.id)).toEqual({ openTasks: 1 });
+    expect(await endMember(fx.mgr, id, m.id)).toEqual({ openTasks: 1, openChecklist: 0 });   // peringatan memuat tugas DAN item checklist yang masih dipegang
     const t = (await listProjectTasks(fx.mgr, id))[0]!;
     expect(t).toMatchObject({ assigneeId: fx.empIds[1], assigneeInactive: true, status: "TODO" });
   });

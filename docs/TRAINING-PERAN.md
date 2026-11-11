@@ -38,6 +38,14 @@ Akibat yang Anda rasakan:
 - **Pergantian orang = satu klik** (akhiri penugasan, tambahkan penggantinya). Tidak ada kode yang berubah.
 - **Offboarding otomatis.** Menonaktifkan karyawan di HRIS sudah menonaktifkan akun dan mencabut sesinya, sehingga akses
   Training ikut hilang. Tugas yang ia tinggalkan ditandai **"sudah tidak di tim — alihkan"** dan dihitung di dashboard risiko.
+- **Hak "pemilik" tugas/checklist = penanggung jawab DAN anggota aktif.** Nama di kolom penanggung jawab saja tidak cukup. Anggota yang sudah
+  dikeluarkan dari tim tetapi masih punya akses lihat (Pemantau, termasuk otomatis untuk tingkat Manajer) **dapat melihat** proyek dan tugas lamanya,
+  tetapi **tidak dapat mengubah status tugas atau menandai checklist** atas namanya (pesan: *"Anda sudah tidak menjadi anggota aktif proyek ini …"*); tombolnya
+  tidak ditawarkan, dan tugasnya tidak muncul di *Tugas Saya*, lencana terlambat, maupun daftar checklist saya. Pemeriksaan keanggotaan dibaca ulang di
+  dalam transaksi dengan kunci baris (tidak ada celah balapan). Pengelola proyek (PIC/Koordinator/Direktur) tetap dapat bertindak atas nama; ditambahkan
+  kembali ke tim memulihkan hak itu. Pemantau yang **masih anggota aktif** dan diberi tugas bekerja seperti biasa.
+- **Mengakhiri anggota hanya memperingatkan** (tidak menolak): dialog menampilkan jumlah tugas & item checklist yang masih dipegang, hasilnya dilaporkan
+  dan dicatat di audit ("perlu dialihkan"). Tugas tidak dialihkan otomatis — itu keputusan PIC.
 - **Tidak ada akses tambahan ke data sensitif.** Level modul dan peran proyek *tidak* memberi akses slip gaji, presensi, cuti,
   atau data HR lain. Direktori karyawan di modul ini hanya memuat nama, no. induk, jabatan, dan divisi.
 - **Admin/HR bukan otomatis Admin Program.** Admin HRIS tanpa level/keanggotaan tidak melihat modul ini sama sekali (404).
