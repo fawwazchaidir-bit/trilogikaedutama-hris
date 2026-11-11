@@ -45,7 +45,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     <AppShell
       initialNav={navPref} hasEmployee={!!user.employeeId} canSearchProjects={trainingVisible} version={pkg.version}
       user={{ name: user.name, email: user.email, role: user.role, isDemo: user.isDemo }}
-      nav={nav} company={brand} unread={unread} pendingBadges={[{ href: "/pengajuan", count: pending }, { href: "/lembur", count: pendingOt }, { href: "/lokasi", count: openLoc }, { href: "/dokumen", count: docAttention }, { href: "/persuratan", count: pendingAllowance + pendingLetters }, { href: "/training/tugas-saya", count: overdueTasks }, { href: "/persetujuan-tim", count: teamPending }, { href: "/masuk-berhenti", count: openLifecycle }, { href: "/checklist-saya", count: myChecklist }]}
+      nav={nav} company={brand} unread={unread} pendingBadges={[{ href: "/pengajuan", count: pending }, { href: "/lembur", count: pendingOt }, { href: "/lokasi", count: openLoc }, { href: "/dokumen", count: docAttention }, { href: "/persuratan", count: pendingAllowance + pendingLetters }, { href: "/persuratan/surat-tugas", count: lettersEnabled() ? 0 : pendingAllowance }, { href: "/training/tugas-saya", count: overdueTasks }, { href: "/persetujuan-tim", count: teamPending }, { href: "/masuk-berhenti", count: openLifecycle }, { href: "/checklist-saya", count: myChecklist }]}
     >
       {children}
     </AppShell>

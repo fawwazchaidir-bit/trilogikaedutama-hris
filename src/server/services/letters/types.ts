@@ -57,7 +57,7 @@ export async function ensureDefaultTypes(): Promise<void> {
 
 /** Jenis yang boleh dipakai pelaku untuk membuat surat (Magang hanya yang diizinkan; Direktur melihat juga yang nonaktif). */
 export async function listTypes(actor: Actor): Promise<LetterTypeDto[]> {
-  requireLetters();
+  requireLetters(actor);
   await ensureDefaultTypes();
   const facts = await personFacts(actor.userId);
   if (!facts) throw Errors.forbidden();
@@ -68,7 +68,7 @@ export async function listTypes(actor: Actor): Promise<LetterTypeDto[]> {
 
 /** Akun yang boleh dipilih sebagai penandatangan untuk jenis tertentu (bukan diri sendiri kecuali Direktur). */
 export async function listSigners(actor: Actor, typeId: string): Promise<{ userId: string; name: string; title: string | null; division: string | null }[]> {
-  requireLetters();
+  requireLetters(actor);
   const t = await prisma.letterType.findUnique({ where: { id: typeId } });
   if (!t) throw Errors.notFound("Jenis surat");
   const users = await prisma.user.findMany({ where: { isActive: true, ...(isDirector(actor) ? {} : { id: { not: actor.userId } }) }, select: { id: true } });
@@ -91,7 +91,7 @@ const policySchema = z.object({
 
 /** Direktur mengatur kebijakan jenis surat (siapa boleh menandatangani, Magang, aktif). */
 export async function updateTypePolicy(actor: Actor, id: string, raw: unknown): Promise<LetterTypeDto> {
-  requireLetters();
+  requireLetters(actor);
   if (!isDirector(actor)) throw Errors.forbidden("Hanya Direktur yang dapat mengatur kebijakan jenis surat.");
   assertCan(actor, "settings:manage");
   const input = parseInput(policySchema, raw);
@@ -111,7 +111,7 @@ export async function updateTypePolicy(actor: Actor, id: string, raw: unknown): 
 
 /** Karyawan aktif (bukan magang) bertaut akun — kandidat penandatangan tambahan berita acara. */
 export async function listCoSignerCandidates(actor: Actor): Promise<{ userId: string; name: string; title: string | null }[]> {
-  requireLetters();
+  requireLetters(actor);
   const rows = await prisma.employee.findMany({ where: { isActive: true, employmentStatus: { not: "INTERN" }, user: { isActive: true } }, select: { userId: true, fullName: true, position: true }, orderBy: { fullName: "asc" } });
   return rows.filter((r): r is typeof r & { userId: string } => !!r.userId && r.userId !== actor.userId).map((r) => ({ userId: r.userId, name: r.fullName, title: r.position }));
 }
@@ -121,7 +121,7 @@ export interface SignerPerson { userId: string; name: string; title: string | nu
 
 /** Bagan hak tanda tangan: siapa SAAT INI berwenang menandatangani tiap jenis (dihitung dari kebijakan + tingkat jabatan/role akun). Hanya Direktur. */
 export async function signerMatrix(actor: Actor): Promise<{ rows: SignerMatrixRow[]; people: SignerPerson[] }> {
-  requireLetters();
+  requireLetters(actor);
   if (!isDirector(actor)) throw Errors.forbidden("Hanya Direktur yang dapat melihat bagan penandatangan.");
   await ensureDefaultTypes();
   const [types, users, sigs] = await Promise.all([
@@ -154,7 +154,7 @@ export async function signerMatrix(actor: Actor): Promise<{ rows: SignerMatrixRo
  * Mengembalikan ringkasan agar Direktur dapat memeriksa; jenis tanpa divisi yang cocok dilewati (tidak diubah).
  */
 export async function applyDivisionSuggestions(actor: Actor): Promise<{ applied: { type: string; divisions: string[] }[]; skipped: { type: string; reason: string }[] }> {
-  requireLetters();
+  requireLetters(actor);
   if (!isDirector(actor)) throw Errors.forbidden("Hanya Direktur yang dapat mengatur kebijakan jenis surat.");
   assertCan(actor, "settings:manage");
   await ensureDefaultTypes();

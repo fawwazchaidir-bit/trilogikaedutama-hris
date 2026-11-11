@@ -4,10 +4,19 @@ import { prisma } from "../../db";
 import { lettersEnabled } from "../../env";
 import { Errors } from "../../errors";
 import type { Actor } from "../../actor";
+import { can } from "@/lib/permissions";
 import type { PersonFacts } from "@/lib/documents/policy";
 
-export function requireLetters(): void {
-  if (!lettersEnabled()) throw Errors.notFound("Halaman");
+/**
+ * Modul Persuratan harus menyala. Bila MATI: pengguna yang berwenang membuat surat tugas (HR/Direktur) mendapat PENJELASAN yang bisa ditindaklanjuti — pembuatan
+ * surat tugas hanya lewat Persuratan, jadi "tidak ditemukan" saja menyesatkan; selain mereka tetap 404 (modul tidak membocorkan keberadaannya).
+ */
+export function requireLetters(actor?: Pick<Actor, "role">): void {
+  if (lettersEnabled()) return;
+  if (actor && (actor.role === "SUPER_ADMIN" || can(actor.role, "assignment:manage"))) {
+    throw Errors.conflict("Persuratan belum diaktifkan di instalasi ini (LETTERS_MODULE_ENABLED=false), sehingga surat tugas baru belum dapat dibuat. Minta administrator sistem mengaktifkannya setelah pemeriksaan kesiapan (npm run check:config) lulus.", { code: "LETTERS_DISABLED" });
+  }
+  throw Errors.notFound("Halaman");
 }
 
 export const isDirector = (actor: Pick<Actor, "role">): boolean => actor.role === "SUPER_ADMIN";
@@ -45,7 +54,7 @@ export async function canSeeAsync(actor: Actor, d: LetterWithType): Promise<bool
   return canSee(actor, d) || (await canSeeFunnel(actor, d));
 }
 export async function loadVisible(actor: Actor, id: string): Promise<LetterWithType> {
-  requireLetters();
+  requireLetters(actor);
   const d = await prisma.letterDocument.findUnique({ where: { id }, include: LETTER_INCLUDE });
   if (!d || !(await canSeeAsync(actor, d))) throw Errors.notFound("Surat");
   return d;

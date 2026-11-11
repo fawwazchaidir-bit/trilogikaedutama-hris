@@ -11,7 +11,7 @@ import { canHoldSignature } from "@/lib/documents/policy";
 import { optionalText, uuid } from "@/lib/validation/common";
 
 function assertDirector(actor: Actor): void {
-  requireLetters();
+  requireLetters(actor);
   if (!isDirector(actor)) throw Errors.forbidden("Hanya Direktur yang dapat mengubah pengaturan persuratan.");
   assertCan(actor, "settings:manage");
 }
@@ -64,7 +64,7 @@ async function assertSignatureFile(tx: Tx, fileId: string | null, kind: "SIGNATU
 
 /** Gambar tanda tangan: Direktur untuk siapa saja, atau pemilik akun sendiri bila ia calon penandatangan (Direktur, Supervisor/Manajer, HR). */
 export async function assertCanSetSignature(actor: Actor, userId: string): Promise<void> {
-  requireLetters();
+  requireLetters(actor);
   if (isDirector(actor)) return;
   if (userId !== actor.userId) throw Errors.forbidden("Hanya Direktur yang dapat mengatur tanda tangan orang lain.");
   const f = await personFacts(actor.userId);

@@ -1,7 +1,7 @@
 import "server-only";
 import type { Actor } from "./actor";
 import { chatEnabled, lettersEnabled, trainingEnabled } from "./env";
-import { visibleNav, type NavItem, type Role } from "@/lib/permissions";
+import { can, visibleNav, type NavItem, type Role } from "@/lib/permissions";
 import { trainingNav } from "@/lib/training/nav";
 import { getModuleContext } from "./services/training/access";
 import { reviewableMap } from "./services/org";
@@ -20,6 +20,8 @@ export async function loadNav(user: Actor & { role: Role }): Promise<{ nav: Pick
     nav = [...nav.slice(0, at + 1), { href: "/persetujuan-tim", label: "Persetujuan Tim", group: "saya" as const }, ...nav.slice(at + 1)];
   }
   if (lettersEnabled()) nav = [...nav, { href: "/persuratan", label: "Persuratan", group: "saya" as const }];
+  // Persuratan MATI: jalan ke daftar Surat Tugas & Uang Harian tetap ada (bukti penerimaan, pembatalan) — halaman itu menjelaskan bahwa pembuatan surat tugas baru memerlukan Persuratan.
+  else if (can(user.role, "assignment:view_all")) nav = [...nav, { href: "/persuratan/surat-tugas", label: "Surat Tugas & Uang Harian", group: "sdm" as const }];
   if (chatEnabled()) nav = [...nav, { href: "/obrolan", label: "Obrolan", group: "saya" as const }];
   if (trainingEnabled()) {
     const tmod = await getModuleContext(user);

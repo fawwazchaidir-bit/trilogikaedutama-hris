@@ -30,6 +30,21 @@
 
 Rahasia hanya dari environment — tidak ada kredensial di kode. `.env` tidak di-commit (`.gitignore`).
 
+## Prasyarat peluncuran: Persuratan & surat tugas
+
+Pembuatan **surat tugas baru hanya lewat Persuratan** (jalur lama dihapus). Karena bawaan `LETTERS_MODULE_ENABLED=false`, instalasi yang diperbarui **tidak dapat membuat surat tugas baru**
+sampai modul diaktifkan *dan* disiapkan. Jalankan sebelum deploy (hanya membaca; kode keluar 1 bila ada masalah yang menghalangi, `--strict` juga menggagalkan peringatan):
+
+```bash
+npm run check:config -- --strict
+```
+
+Yang diperiksa: bendera modul · jenis Surat Tugas (INT-002) aktif · ada akun HR/Direktur yang dapat membuat (HR harus **tertaut ke data karyawan**) · ada penandatangan yang berhak ·
+kop surat (alamat/telepon/email) · cap lembaga · tanda tangan Direktur · penanda tangan Bukti Penerimaan Uang Harian (sama dengan slip gaji) · `APP_URL` publik `https://` (dipakai QR) ·
+pekerja pengingat · **uji mesin PDF & QR**. Hasil yang sama tampil di **Pengaturan → Kesiapan Persuratan** (Super Admin) dan peringatannya dicatat di log saat aplikasi mulai.
+Saat modul MATI: halaman *Surat Tugas & Uang Harian* menjelaskan situasinya (tanpa tombol yang gagal) dan tetap terjangkau dari menu; HR/Direktur yang mencoba membuat mendapat pesan yang
+menunjuk ke pemeriksaan ini, bukan "tidak ditemukan". Menguji kedua keadaan bendera: `npm run test:letters-flags`.
+
 ## Langkah pertama (server tanpa Docker)
 
 ```bash

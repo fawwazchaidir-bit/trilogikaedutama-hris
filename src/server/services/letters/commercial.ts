@@ -135,7 +135,7 @@ export async function uploadDealEvidence(actor: Actor, id: string, input: { name
 
 /** Buat proyek Training in-house dari penawaran Deal dan tautkan (rujukan saja; nilai/harga tidak disalin). */
 export async function createProjectFromLetter(actor: Actor, id: string, raw: unknown): Promise<CommercialDto> {
-  requireLetters();
+  requireLetters(actor);
   if (!trainingEnabled()) throw Errors.notFound("Modul Training");
   const input = parseInput(z.object({ name: z.string().trim().min(3).max(160).optional(), existingProjectId: uuid.optional() }).strict(), raw ?? {});
   const d = await loadVisible(actor, id);

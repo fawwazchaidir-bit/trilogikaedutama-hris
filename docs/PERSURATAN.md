@@ -5,6 +5,22 @@ Modul pembuatan surat dengan editor visual, nomor resmi otomatis, PDF ber-QR, da
 (`/verifikasi/[token]`) tetap berfungsi agar QR pada surat yang sudah beredar tidak mati. Tahap 1 (dokumen ini) = inti; tahap 2–6
 (24 jenis, multi-penandatangan, lampiran, register, Surat Tugas, impor arsip, SK→data karyawan) menyusul.
 
+## Kesiapan & bendera (surat tugas)
+
+Surat tugas baru **hanya** dibuat lewat modul ini; jalur lama dihapus. Maka bendera `LETTERS_MODULE_ENABLED` (bawaan mati) menentukan apakah surat tugas baru dapat dibuat. Panduan peluncuran: [DEPLOYMENT.md](DEPLOYMENT.md#prasyarat-peluncuran-persuratan--surat-tugas).
+
+| Operasi | Bendera **menyala** | Bendera **mati** |
+|---|---|---|
+| Membuat surat tugas | HR (tertaut ke data karyawan) & Direktur: draf | HR/Direktur: penjelasan *"Persuratan belum diaktifkan … `npm run check:config`"* (409); staf: 404 |
+| Persetujuan | ajukan → penandatangan menyetujui → terbit (nomor Persuratan, surat tugas terbentuk) | dokumen yang sudah ada **dijeda** (penjelasan bagi yang berwenang); tidak ada yang dihapus |
+| Pembatalan | dari dokumen, berantai ke surat tugasnya | surat tugas yang sudah terbit dibatalkan lewat layanan penugasan (`POST /assignments/:id/cancel`) |
+| Uang harian (Bukti Penerimaan) | berfungsi | berfungsi — tidak bergantung bendera |
+| Surat Tugas Saya, verifikasi QR | berfungsi | berfungsi |
+| Menu | *Persuratan* | *Surat Tugas & Uang Harian* (jalan pintas) dengan pemberitahuan di halamannya |
+
+`checkLettersReadiness()` (`server/services/letters/readiness.ts`) membaca konfigurasi dan dipakai tiga tempat: `npm run check:config`, log awal, dan kartu **Pengaturan → Kesiapan Persuratan**.
+Matriks di atas diuji dengan satu berkas (`tests/integration/letters-flag-matrix.test.ts`) yang dijalankan dua kali (`npm run test:letters-flags`), ditambah e2e `05t-letters-flag` (server kedua dengan bendera mati).
+
 ## Format nomor (master)
 
 `001/TE-EKS/003/I/2026` = **nomor urut** / **TE-{EKS|INT}** (eksternal/internal) / **kode tipe 3 digit** (glosarium Excel; 003 = permohonan

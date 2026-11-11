@@ -18,7 +18,7 @@ import { getLetterSettings } from "./frame";
  * selain itu tidak ada akses (karyawan melihat suratnya sendiri di daftar Persuratan).
  */
 async function scopeWhere(actor: Actor): Promise<Prisma.LetterDocumentWhereInput> {
-  requireLetters();
+  requireLetters(actor);
   if (isDirector(actor)) return {};
   const f = await personFacts(actor.userId);
   if (f && f.jobLevel === "MANAGER" && f.isActive && !f.isIntern) return { type: { funnel: true, confidential: false } };

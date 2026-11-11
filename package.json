@@ -26,6 +26,8 @@
     "db:restore": "bash scripts/restore.sh",
     "user:create": "tsx --conditions=react-server scripts/create-user.ts",
     "db:verify": "tsx scripts/verify-db.ts",
+    "check:config": "tsx --conditions=react-server scripts/check-config.mts",
+    "test:letters-flags": "LETTERS_MODULE_ENABLED=true vitest run --project integration tests/integration/letters-flag-matrix.test.ts && LETTERS_MODULE_ENABLED=false vitest run --project integration tests/integration/letters-flag-matrix.test.ts",
     "push:keys": "tsx scripts/generate-push-keys.ts"
   },
   "dependencies": {

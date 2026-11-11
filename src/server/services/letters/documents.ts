@@ -101,7 +101,7 @@ const event = (tx: Prisma.TransactionClient, documentId: string, actor: Actor, a
 // ───────────────────────── Buat & sunting ─────────────────────────
 
 export async function createLetter(actor: Actor, raw: unknown): Promise<LetterDetailDto> {
-  requireLetters();
+  requireLetters(actor);
   const { typeId, archiveOnly } = parseInput(z.object({ typeId: uuid, archiveOnly: z.boolean().optional() }), raw);
   await ensureDefaultTypes();
   const facts = await personFacts(actor.userId);
@@ -219,7 +219,7 @@ export async function updateLetter(actor: Actor, id: string, raw: unknown): Prom
 // ───────────────────────── Daftar & baca ─────────────────────────
 
 export async function listLetters(actor: Actor, q: { scope?: "mine" | "review" | "all"; status?: string; q?: string; page?: number; pageSize?: number }): Promise<Paged<LetterDto>> {
-  requireLetters();
+  requireLetters(actor);
   const pageSize = Math.min(Math.max(q.pageSize ?? 20, 1), 100); const page = Math.max(q.page ?? 1, 1);
   const scope = q.scope === "all" && (isDirector(actor) || actor.role === "HR_ADMIN") ? "all" : q.scope === "review" ? "review" : "mine";
   const where: Prisma.LetterDocumentWhereInput = {

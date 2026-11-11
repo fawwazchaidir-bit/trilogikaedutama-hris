@@ -15,4 +15,12 @@ export async function register(): Promise<void> {
   startLettersWorker();
   const { startChatWorker } = await import("./server/chat-worker");
   startChatWorker();
+  // Kesiapan Persuratan dicatat di log (tidak menghentikan aplikasi): pembuatan surat tugas hanya lewat Persuratan, jadi konfigurasi yang kurang harus terlihat jelas.
+  void import("./server/services/letters/readiness")
+    .then(async ({ checkLettersReadiness }) => {
+      const { formatReport } = await import("./lib/letters-readiness");
+      const r = await checkLettersReadiness();
+      if (r.errors > 0 || r.warnings > 0 || !r.canCreateAssignments) console.warn(`[surat] Kesiapan Persuratan:\n${formatReport({ ...r, checks: r.checks.filter((c) => c.severity !== "OK") })}`);
+    })
+    .catch((e) => console.error("[surat] pemeriksaan kesiapan gagal:", e instanceof Error ? e.message : e));
 }

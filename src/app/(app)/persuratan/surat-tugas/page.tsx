@@ -1,9 +1,9 @@
 import type { Metadata } from "next";
 import { requirePagePermission } from "@/server/auth/current";
 import { actorCan } from "@/server/actor";
-import { env } from "@/server/env";
+import { env, lettersEnabled } from "@/server/env";
 import { listAssignments, pendingAllowanceCount } from "@/server/services/assignments";
-import { PageHeader } from "@/components/ui/card";
+import { Notice, PageHeader } from "@/components/ui/card";
 import { Pagination } from "@/components/ui/pagination";
 import { Tile } from "@/components/ui/stat";
 import { FilterBar, FilterField, filterInput } from "@/components/filter-bar";
@@ -26,7 +26,14 @@ export default async function AssignmentsPage({ searchParams }: { searchParams: 
     <div>
       <PageHeader title="Surat Tugas & Uang Harian"
         description="Surat Tugas dibuat dan diterbitkan lewat Persuratan (jenis INT-002) dan menjadi dasar Uang Harian. Di sini HR/Direktur menerbitkan Bukti Penerimaan Uang Harian per perjalanan — berdiri sendiri, di luar slip gaji."
-        actions={manage ? <NewAssignmentButton /> : undefined} />
+        actions={manage && lettersEnabled() ? <NewAssignmentButton /> : undefined} />
+      {manage && !lettersEnabled() && (
+        <div className="mb-4"><Notice tone="warn">
+          <strong>Surat tugas baru belum dapat dibuat:</strong> pembuatannya hanya lewat modul Persuratan, yang belum diaktifkan di instalasi ini (<code>LETTERS_MODULE_ENABLED=false</code>).
+          Minta administrator sistem menjalankan <code>npm run check:config</code>, memperbaiki yang ditandai, lalu mengaktifkannya. Surat tugas yang sudah terbit, uang harian, dan Bukti Penerimaan tetap dapat dikelola di sini.
+          {actorCan(user, "settings:manage") && <> Hasil pemeriksaan kesiapan ada di <a href="/pengaturan" className="font-medium underline">Pengaturan → Kesiapan Persuratan</a>.</>}
+        </Notice></div>
+      )}
       <div className="mb-5 grid gap-3 sm:grid-cols-3">
         <Tile label="Menunggu bukti penerimaan" value={pending} tone={pending ? "amber" : undefined} href="/persuratan/surat-tugas?pending=1" hint="surat tugas terbit yang masih ada penerima tanpa bukti" />
         <Tile label="Surat tugas ditampilkan" value={res.total} />

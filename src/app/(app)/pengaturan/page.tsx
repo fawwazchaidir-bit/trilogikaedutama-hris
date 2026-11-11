@@ -4,6 +4,8 @@ import { actorCan } from "@/server/actor";
 import { getSettingsDto } from "@/server/services/settings";
 import { Notice, PageHeader } from "@/components/ui/card";
 import { getDeliveryStats } from "@/server/services/delivery-admin";
+import { checkLettersReadiness } from "@/server/services/letters/readiness";
+import { LettersReadinessCard } from "@/components/letters-readiness-card";
 import { CompanyForm, DeliveriesCard, LogoCard, PayrollRulesForm, PolicyForm, SecurityForm, SignatureCard, StatutoryForm } from "@/components/settings-forms";
 
 export const metadata: Metadata = { title: "Pengaturan" };
@@ -14,10 +16,12 @@ export default async function SettingsPage() {
   const s = await getSettingsDto(user);
   const sa = actorCan(user, "settings:manage");
   const deliveries = sa ? await getDeliveryStats(user) : null;
+  const lettersReadiness = sa ? await checkLettersReadiness() : null;
   return (
     <div className="space-y-4">
       <PageHeader title="Pengaturan" description="Identitas lembaga, kebijakan absensi & cuti, dan aturan penggajian. Nilai yang ditandai perlu dikonfirmasi masih memakai pengaturan awal." />
       {!sa && <Notice tone="info">Anda dapat melihat pengaturan. Perubahan hanya dapat dilakukan Super Admin/Pimpinan.</Notice>}
+      {lettersReadiness && <LettersReadinessCard report={lettersReadiness} />}
       <CompanyForm s={s} canEdit={sa} />
       <LogoCard logoUrl={s.company.logoUrl} canEdit={sa} />
       <SignatureCard signatureUrl={s.slip.signer.signatureUrl} signerName={s.slip.signer.name} canEdit={sa} />
