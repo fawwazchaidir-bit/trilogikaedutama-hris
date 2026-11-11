@@ -1920,22 +1920,33 @@ model TrainingProjectMember {
 }
 
 model TrainingTask {
-  id             String               @id @default(uuid()) @db.Uuid
-  projectId      String               @db.Uuid
-  title          String
-  description    String?
-  assigneeId     String?              @db.Uuid
+  id                 String               @id @default(uuid()) @db.Uuid
+  projectId          String               @db.Uuid
+  title              String
+  description        String?
+  assigneeId         String?              @db.Uuid
   /// Tanggal jatuh tempo (tanggal kalender WIB). Terlambat = belum selesai dan jatuh tempo < hari ini (WIB).
-  dueDate        DateTime?            @db.Date
-  priority       TrainingTaskPriority @default(NORMAL)
-  status         TrainingTaskStatus   @default(TODO)
+  dueDate            DateTime?            @db.Date
+  priority           TrainingTaskPriority @default(NORMAL)
+  status             TrainingTaskStatus   @default(TODO)
   /// true: penanggung jawab hanya dapat mengirim ke "Menunggu pemeriksaan"; orang berwenang lain yang menyelesaikan.
-  requiresReview Boolean              @default(false)
-  completedAt    DateTime?
-  completedById  String?              @db.Uuid
-  createdById    String               @db.Uuid
-  createdAt      DateTime             @default(now())
-  updatedAt      DateTime             @updatedAt
+  requiresReview     Boolean              @default(false)
+  completedAt        DateTime?
+  completedById      String?              @db.Uuid
+  /// Pemisahan peran pada tugas wajib periksa — TIGA identitas disimpan terpisah:
+  ///   pelaksana  = `assigneeAtSubmitId` (penanggung jawab saat hasil dikirim; salinan, tidak ikut berubah bila penanggung jawab dialihkan/dikosongkan),
+  ///   pengirim   = `submittedById` (akun yang menekan "Kirim ke pemeriksaan") + `submittedAt`,
+  ///   pemeriksa  = `reviewedById` (akun yang menyetujui/menyelesaikan) + `reviewedAt`.
+  /// Pemeriksa tidak boleh sama dengan pengirim, pelaksana saat dikirim, maupun penanggung jawab saat ini (service + trigger database).
+  /// Siklus pemeriksaan dikosongkan saat tugas ditarik/dikembalikan/dibuka kembali; riwayatnya ada di audit.
+  submittedById      String?              @db.Uuid
+  submittedAt        DateTime?
+  assigneeAtSubmitId String?              @db.Uuid
+  reviewedById       String?              @db.Uuid
+  reviewedAt         DateTime?
+  createdById        String               @db.Uuid
+  createdAt          DateTime             @default(now())
+  updatedAt          DateTime             @updatedAt
 
   project  TrainingProject       @relation(fields: [projectId], references: [id], onDelete: Restrict)
   assignee Employee?             @relation(fields: [assigneeId], references: [id], onDelete: Restrict)

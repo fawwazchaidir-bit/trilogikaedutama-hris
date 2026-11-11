@@ -44,6 +44,20 @@ export interface TaskTransitionInput {
   isAssignee: boolean;
   /** Pelaku berwenang mengelola tugas proyek (ability manage_tasks). */
   canManage: boolean;
+  /** Pelaku adalah AKUN yang mengirim hasil tugas ini ke pemeriksaan (pengirim hasil). */
+  isSubmitter?: boolean;
+  /** Pelaku adalah PELAKSANA saat hasil dikirim (penanggung jawab ketika dikirim — tetap berlaku walau penanggung jawab kemudian dialihkan/dikosongkan). */
+  isExecutor?: boolean;
+}
+
+/**
+ * Mengapa pelaku TIDAK boleh memeriksa (menyelesaikan) tugas yang menunggu pemeriksaan; null = boleh.
+ * Pemeriksa harus berbeda dari pengirim hasil, pelaksana saat dikirim, dan penanggung jawab saat ini.
+ */
+export function reviewBlockReason(i: Pick<TaskTransitionInput, "isAssignee" | "isSubmitter" | "isExecutor">): "SUBMITTER" | "EXECUTOR" | null {
+  if (i.isSubmitter) return "SUBMITTER";
+  if (i.isAssignee || i.isExecutor) return "EXECUTOR";
+  return null;
 }
 
 /**
@@ -52,7 +66,7 @@ export interface TaskTransitionInput {
  *  - Penanggung jawab: Belum dikerjakan ↔ Dalam proses; menyelesaikan langsung (Selesai) bila tugas tidak perlu diperiksa,
  *    atau mengirim ke "Menunggu pemeriksaan" bila perlu. Dari "Menunggu pemeriksaan" ia hanya boleh menarik kembali.
  *  - Pengelola tugas: dapat memindahkan ke mana saja, termasuk Dibatalkan dan membuka kembali yang Selesai/Dibatalkan,
- *    KECUALI memeriksa hasil tugasnya sendiri (pemeriksa ≠ penanggung jawab).
+ *    KECUALI memeriksa hasil yang ia kirim sendiri atau tugas yang ia/dulu ia kerjakan (pemeriksa ≠ pengirim hasil, ≠ pelaksana, ≠ penanggung jawab).
  *  - Tugas yang perlu diperiksa hanya dapat menjadi Selesai dari "Menunggu pemeriksaan".
  */
 export function allowedTaskTransitions(i: TaskTransitionInput): TaskStatus[] {
@@ -68,7 +82,7 @@ export function allowedTaskTransitions(i: TaskTransitionInput): TaskStatus[] {
   if (i.canManage) {
     if (status === "TODO") { out.add("IN_PROGRESS"); out.add("CANCELLED"); if (requiresReview) out.add("IN_REVIEW"); else out.add("DONE"); }
     if (status === "IN_PROGRESS") { out.add("TODO"); out.add("CANCELLED"); if (requiresReview) out.add("IN_REVIEW"); else out.add("DONE"); }
-    if (status === "IN_REVIEW") { out.add("IN_PROGRESS"); out.add("CANCELLED"); if (!i.isAssignee) out.add("DONE"); }
+    if (status === "IN_REVIEW") { out.add("IN_PROGRESS"); out.add("CANCELLED"); if (reviewBlockReason(i) === null) out.add("DONE"); }
     if (status === "DONE") { out.add("IN_PROGRESS"); }
     if (status === "CANCELLED") { out.add("TODO"); }
   }

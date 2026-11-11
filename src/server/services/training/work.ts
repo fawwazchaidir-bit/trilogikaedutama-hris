@@ -8,7 +8,7 @@ import { writeAudit, diffFields } from "../../audit";
 import { dateToIso, isoToDate } from "../../json";
 import { notifyUsers } from "../notifications";
 import { projectAbilities } from "@/lib/training/access";
-import { allowedTaskTransitions } from "@/lib/training/status";
+import { allowedTaskTransitions, reviewBlockReason } from "@/lib/training/status";
 import { checklistProgress, isTaskDueSoon, isTaskDueToday, isTaskOverdue, requiredOutstanding, type ChecklistProgress } from "@/lib/training/indicators";
 import { DEFAULT_TEMPLATE_ITEMS, DEFAULT_TEMPLATE_NAME } from "@/lib/training/misc";
 import {
@@ -32,6 +32,10 @@ export interface TaskDto {
   assigneeInactive: boolean;
   dueDate: string | null; priority: TaskPriority; status: TaskStatus; requiresReview: boolean;
   completedAt: string | null; createdByName: string | null; createdAt: string;
+  /** Tiga peran pemeriksaan (tugas wajib periksa), disimpan terpisah: pelaksana saat dikirim · pengirim hasil · pemeriksa. */
+  executorName: string | null; submittedByName: string | null; submittedAt: string | null; reviewedByName: string | null; reviewedAt: string | null;
+  /** Pelaku adalah pelaksana tugas ini (penanggung jawab saat ini atau saat hasil dikirim) — tidak boleh mematikan kewajiban pemeriksaannya sendiri. */
+  viewerIsExecutor: boolean;
   overdue: boolean; commentCount: number;
   /** Status tujuan yang boleh dipilih pelaku saat ini (untuk menampilkan tombol; penegakan di server). */
   allowedNext: TaskStatus[];
@@ -64,14 +68,19 @@ async function buildTaskCtx(actor: Actor, rows: TaskRow[]): Promise<TaskCtx> {
 }
 
 async function toTaskDtos(rows: TaskRow[], ctx: TaskCtx): Promise<TaskDto[]> {
-  const userIds = [...new Set(rows.map((r) => r.createdById))];
+  const userIds = [...new Set(rows.flatMap((r) => [r.createdById, r.submittedById, r.reviewedById]).filter((x): x is string => !!x))];
   const users = userIds.length ? await prisma.user.findMany({ where: { id: { in: userIds } }, select: { id: true, name: true } }) : [];
   const uname = new Map(users.map((u) => [u.id, u.name]));
+  const execIds = [...new Set(rows.map((r) => r.assigneeAtSubmitId).filter((x): x is string => !!x))];
+  const execs = execIds.length ? await prisma.employee.findMany({ where: { id: { in: execIds } }, select: { id: true, fullName: true } }) : [];
+  const ename = new Map(execs.map((e) => [e.id, e.fullName]));
   const t = today();
   return rows.map((r) => {
     const abilities = projectAbilities(ctx.subject, ctx.roles.get(r.projectId) ?? null);
     const canManage = abilities.has("manage_tasks");
     const isAssignee = !!ctx.actor.employeeId && r.assigneeId === ctx.actor.employeeId;
+    const isSubmitter = !!r.submittedById && r.submittedById === ctx.actor.userId;
+    const isExecutor = !!ctx.actor.employeeId && r.assigneeAtSubmitId === ctx.actor.employeeId;
     const due = r.dueDate ? dateToIso(r.dueDate) : null;
     return {
       id: r.id, projectId: r.projectId, projectCode: r.project.code, projectName: r.project.name, title: r.title, description: r.description,
@@ -79,8 +88,11 @@ async function toTaskDtos(rows: TaskRow[], ctx: TaskCtx): Promise<TaskDto[]> {
       assigneeInactive: !!r.assigneeId && !ctx.activeAssignees.has(`${r.projectId}:${r.assigneeId}`),
       dueDate: due, priority: r.priority, status: r.status, requiresReview: r.requiresReview, completedAt: iso(r.completedAt),
       createdByName: uname.get(r.createdById) ?? null, createdAt: r.createdAt.toISOString(),
+      executorName: r.assigneeAtSubmitId ? ename.get(r.assigneeAtSubmitId) ?? null : null,
+      submittedByName: r.submittedById ? uname.get(r.submittedById) ?? null : null, submittedAt: iso(r.submittedAt),
+      reviewedByName: r.reviewedById ? uname.get(r.reviewedById) ?? null : null, reviewedAt: iso(r.reviewedAt), viewerIsExecutor: isAssignee || isExecutor,
       overdue: isTaskOverdue({ status: r.status, dueDate: due }, t), commentCount: r._count.comments,
-      allowedNext: abilities.has("view") ? allowedTaskTransitions({ status: r.status, requiresReview: r.requiresReview, isAssignee, canManage }) : [],
+      allowedNext: abilities.has("view") ? allowedTaskTransitions({ status: r.status, requiresReview: r.requiresReview, isAssignee, canManage, isSubmitter, isExecutor }) : [],
       canEdit: canManage,
     };
   });
@@ -185,19 +197,46 @@ export async function updateTask(actor: Actor, taskId: string, raw: unknown): Pr
   requireAbility(access, "manage_tasks");
   assertEditable(access.project);
   const input = parseInput(taskUpdateSchema, raw);
+  const reason = input.reason?.trim() || null;
   await transaction(async (tx) => {
     if ("assigneeId" in input) await assertAssigneeInTeam(tx, task.projectId, input.assigneeId);
     const data: Prisma.TrainingTaskUncheckedUpdateInput = {};
     for (const k of ["title", "description", "assigneeId", "priority", "requiresReview"] as const) if (k in input) (data as Record<string, unknown>)[k] = input[k];
     if ("dueDate" in input) data.dueDate = input.dueDate ? isoToDate(input.dueDate) : null;
+
+    // Pemisahan pelaksana–pemeriksa: perubahan yang menyentuh syarat pemeriksaan harus transparan dan tidak boleh dilakukan pelaksananya sendiri.
+    const assigneeChanged = "assigneeId" in input && (input.assigneeId ?? null) !== task.assigneeId;
+    const reviewChanged = input.requiresReview !== undefined && input.requiresReview !== task.requiresReview;
+    const turningOff = reviewChanged && input.requiresReview === false;
+    const isExecutor = !!actor.employeeId && (task.assigneeId === actor.employeeId || task.assigneeAtSubmitId === actor.employeeId);
+    if (turningOff && isExecutor) throw Errors.forbidden("Pelaksana tidak dapat mematikan kewajiban pemeriksaan tugasnya sendiri. Minta pengelola proyek lain (mis. Koordinator Program atau Direktur) yang mengubahnya.");
+    const started = task.status === "IN_PROGRESS" || task.status === "IN_REVIEW" || task.status === "DONE";
+    if (started && (assigneeChanged || reviewChanged) && !reason) {
+      throw Errors.validation("Mengubah penanggung jawab atau kewajiban pemeriksaan setelah pekerjaan dimulai wajib disertai alasan.", { reason: "Alasan wajib diisi" });
+    }
     // Mengubah "perlu diperiksa" saat tugas sedang menunggu pemeriksaan akan membuat statusnya tidak konsisten.
     if (input.requiresReview === false && task.status === "IN_REVIEW") throw Errors.conflict("Tugas sedang menunggu pemeriksaan. Putuskan hasil pemeriksaan dulu sebelum mematikan syarat pemeriksaan.");
+
     const before = { title: task.title, description: task.description, assigneeId: task.assigneeId, priority: task.priority, requiresReview: task.requiresReview, dueDate: task.dueDate ? dateToIso(task.dueDate) : null };
     const after = { ...before, ...Object.fromEntries(Object.entries(data).map(([k, v]) => [k, v instanceof Date ? dateToIso(v) : v])) };
     const d = diffFields(before, after);
     if (d.changed.length === 0) return;
     await tx.trainingTask.update({ where: { id: taskId }, data });
-    await auditProject(tx, actor, task.projectId, { action: "training.task.update", summary: `Tugas "${task.title}" diubah (${d.changed.join(", ")})`, before: { taskId, ...d.before }, after: { taskId, ...d.after } });
+    await auditProject(tx, actor, task.projectId, {
+      action: "training.task.update", summary: `Tugas "${task.title}" diubah (${d.changed.join(", ")})${started && (assigneeChanged || reviewChanged) ? " setelah pekerjaan dimulai" : ""}`,
+      before: { taskId, ...d.before }, after: { taskId, ...d.after }, ...(reason ? { reason } : {}),
+    });
+    if (assigneeChanged || reviewChanged) {
+      // Terlihat oleh tim: catatan pada tugas (append-only) memuat apa yang berubah, siapa pelakunya (penulis), dan alasannya.
+      const ids = [task.assigneeId, (input.assigneeId ?? null)].filter((x): x is string => !!x);
+      const emps = ids.length ? await tx.employee.findMany({ where: { id: { in: ids } }, select: { id: true, fullName: true } }) : [];
+      const nm = (id: string | null) => (id ? emps.find((e) => e.id === id)?.fullName ?? "—" : "(kosong)");
+      const parts = [
+        assigneeChanged && `penanggung jawab ${nm(task.assigneeId)} → ${nm(input.assigneeId ?? null)}`,
+        reviewChanged && `kewajiban pemeriksaan ${task.requiresReview ? "aktif" : "tidak aktif"} → ${input.requiresReview ? "aktif" : "tidak aktif"}`,
+      ].filter(Boolean).join("; ");
+      await tx.trainingTaskComment.create({ data: { taskId, authorId: actor.userId, body: `[Perubahan syarat tugas] ${parts}${reason ? ` — alasan: ${reason}` : ""}` } });
+    }
     if (d.changed.includes("assigneeId")) {
       await notifyEmployee(tx, actor, input.assigneeId ?? null, { type: "training.task.assigned", title: "Tugas dialihkan kepada Anda", body: `${access.project.code} · ${task.title}`, href: "/training/tugas-saya" });
     }
@@ -216,18 +255,33 @@ export async function changeTaskStatus(actor: Actor, taskId: string, raw: unknow
   const isAssignee = !!actor.employeeId && task.assigneeId === actor.employeeId;
   const canManage = access.abilities.has("manage_tasks");
   if (!isAssignee && !canManage) throw Errors.forbidden("Hanya penanggung jawab tugas atau pengelola proyek yang dapat mengubah status tugas.");
-  const allowed = allowedTaskTransitions({ status: task.status, requiresReview: task.requiresReview, isAssignee, canManage });
+  // Tiga identitas pemeriksaan: pengirim hasil (akun), pelaksana saat dikirim (karyawan), dan pemeriksa — pemeriksa harus berbeda dari keduanya.
+  const isSubmitter = !!task.submittedById && task.submittedById === actor.userId;
+  const isExecutor = !!actor.employeeId && task.assigneeAtSubmitId === actor.employeeId;
+  const allowed = allowedTaskTransitions({ status: task.status, requiresReview: task.requiresReview, isAssignee, canManage, isSubmitter, isExecutor });
   if (!allowed.includes(input.status)) {
-    if (task.status === "IN_REVIEW" && input.status === "DONE" && isAssignee) throw Errors.forbidden("Anda tidak dapat memeriksa hasil tugas Anda sendiri. Minta Project Manager atau Koordinator Program memeriksanya.");
+    if (task.status === "IN_REVIEW" && input.status === "DONE") {
+      const why = reviewBlockReason({ isAssignee, isSubmitter, isExecutor });
+      if (why === "SUBMITTER") throw Errors.forbidden("Anda yang mengirim hasil ini ke pemeriksaan, sehingga tidak dapat memeriksanya sendiri. Minta pengelola proyek lain (mis. Koordinator Program atau Direktur) memeriksanya.");
+      if (why === "EXECUTOR") throw Errors.forbidden("Anda tidak dapat memeriksa hasil tugas Anda sendiri. Minta Project Manager atau Koordinator Program memeriksanya.");
+    }
     if (task.requiresReview && input.status === "DONE" && task.status !== "IN_REVIEW") throw Errors.conflict("Tugas ini perlu diperiksa: kirim dulu ke \"Menunggu pemeriksaan\".");
     throw Errors.conflict(`Status tugas tidak dapat diubah dari "${TASK_STATUS_LABEL[task.status]}" ke "${TASK_STATUS_LABEL[input.status]}".`);
   }
   await transaction(async (tx) => {
     const done = input.status === "DONE";
-    const r = await tx.trainingTask.updateMany({
-      where: { id: taskId, status: task.status },
-      data: { status: input.status, completedAt: done ? new Date() : null, completedById: done ? actor.userId : null },
-    });
+    const now = new Date();
+    const data: Prisma.TrainingTaskUncheckedUpdateManyInput = { status: input.status, completedAt: done ? now : null, completedById: done ? actor.userId : null };
+    if (input.status === "IN_REVIEW") {
+      // Hasil dikirim: catat pengirim, waktu, dan pelaksana SAAT ITU (salinan — tidak ikut berubah bila penanggung jawab dialihkan/dikosongkan).
+      Object.assign(data, { submittedById: actor.userId, submittedAt: now, assigneeAtSubmitId: task.assigneeId, reviewedById: null, reviewedAt: null });
+    } else if (done && task.status === "IN_REVIEW") {
+      Object.assign(data, { reviewedById: actor.userId, reviewedAt: now });          // pengirim & pelaksana tetap tercatat
+    } else {
+      // Siklus pemeriksaan berakhir (ditarik/dikembalikan/dibuka kembali/langsung selesai tanpa periksa): kosongkan; riwayat ada di audit.
+      Object.assign(data, { submittedById: null, submittedAt: null, assigneeAtSubmitId: null, reviewedById: null, reviewedAt: null });
+    }
+    const r = await tx.trainingTask.updateMany({ where: { id: taskId, status: task.status }, data });
     if (r.count === 0) throw Errors.conflict("Status tugas baru saja diubah pengguna lain. Muat ulang halaman.");
     await auditProject(tx, actor, task.projectId, {
       action: "training.task.status", summary: `Tugas "${task.title}": ${TASK_STATUS_LABEL[task.status]} → ${TASK_STATUS_LABEL[input.status]}`,

@@ -124,7 +124,8 @@ export const taskCreateSchema = z.object({
   priority: oneOf(TASK_PRIORITIES, "Prioritas").default("NORMAL"),
   requiresReview: bool.default(false),
 });
-export const taskUpdateSchema = patchOf(taskCreateSchema);
+/** `reason`: alasan perubahan — WAJIB bila penanggung jawab atau kewajiban pemeriksaan diubah setelah pekerjaan dimulai (ditegakkan di service). */
+export const taskUpdateSchema = patchOf(taskCreateSchema).extend({ reason: optionalText(300, "Alasan perubahan").optional() });
 export const taskStatusSchema = z.object({ status: oneOf(TASK_STATUSES, "Status tugas"), note: optionalText(500, "Catatan") });
 export const taskCommentSchema = z.object({ body: requiredText(1, 2000, "Komentar") });
 export const myTasksSchema = z.object({

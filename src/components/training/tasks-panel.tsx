@@ -15,8 +15,17 @@ import Link from "next/link";
 import { PriorityBadge, TaskStatusBadge } from "./ui";
 import { useRunner } from "./use-runner";
 
-interface FormState { id?: string; title: string; description: string; assigneeId: string; dueDate: string; priority: TaskPriority; requiresReview: boolean }
-const BLANK: FormState = { title: "", description: "", assigneeId: "", dueDate: "", priority: "NORMAL", requiresReview: false };
+interface FormState {
+  id?: string; title: string; description: string; assigneeId: string; dueDate: string; priority: TaskPriority; requiresReview: boolean;
+  /** Alasan perubahan (wajib bila penanggung jawab/kewajiban periksa diubah setelah pekerjaan dimulai). */
+  reason: string;
+  /** Nilai awal & keadaan tugas saat dibuka — untuk menentukan apakah alasan diperlukan. */
+  orig?: { assigneeId: string; requiresReview: boolean; started: boolean; executor: boolean };
+}
+const BLANK: FormState = { title: "", description: "", assigneeId: "", dueDate: "", priority: "NORMAL", requiresReview: false, reason: "" };
+const STARTED: TaskStatus[] = ["IN_PROGRESS", "IN_REVIEW", "DONE"];
+/** Alasan diperlukan: tugas sudah dimulai dan penanggung jawab atau kewajiban pemeriksaan berubah. */
+const needsReason = (f: FormState) => !!f.orig && f.orig.started && (f.assigneeId !== f.orig.assigneeId || f.requiresReview !== f.orig.requiresReview);
 
 /** Daftar tugas (dipakai di tab proyek dan halaman "Tugas Saya"). Tombol hanya muncul sesuai `allowedNext`/`canEdit` dari server. */
 export function TasksPanel({ tasks, projectId, members = [], canCreate = false, editable = true, showProject = false }: {
@@ -31,8 +40,8 @@ export function TasksPanel({ tasks, projectId, members = [], canCreate = false, 
     reset(); setTalk({ task, items: [], body: "" });
     try { const items = await api<TaskCommentDto[]>(`/api/training/tasks/${task.id}/comments`); setTalk({ task, items, body: "" }); } catch { /* pesan ditampilkan oleh run berikutnya */ }
   }
-  const showForm = (t?: TaskDto) => { reset(); setForm(t ? { id: t.id, title: t.title, description: t.description ?? "", assigneeId: t.assigneeId ?? "", dueDate: t.dueDate ?? "", priority: t.priority, requiresReview: t.requiresReview } : BLANK); };
-  const body = (f: FormState) => ({ title: f.title, description: f.description, assigneeId: f.assigneeId || null, dueDate: f.dueDate || null, priority: f.priority, requiresReview: f.requiresReview });
+  const showForm = (t?: TaskDto) => { reset(); setForm(t ? { id: t.id, title: t.title, description: t.description ?? "", assigneeId: t.assigneeId ?? "", dueDate: t.dueDate ?? "", priority: t.priority, requiresReview: t.requiresReview, reason: "", orig: { assigneeId: t.assigneeId ?? "", requiresReview: t.requiresReview, started: STARTED.includes(t.status), executor: t.viewerIsExecutor } } : BLANK); };
+  const body = (f: FormState) => ({ title: f.title, description: f.description, assigneeId: f.assigneeId || null, dueDate: f.dueDate || null, priority: f.priority, requiresReview: f.requiresReview, ...(f.id ? { reason: f.reason } : {}) });
 
   return (
     <div className="space-y-3">
@@ -54,6 +63,13 @@ export function TasksPanel({ tasks, projectId, members = [], canCreate = false, 
                   {t.assigneeName ?? "Belum ada penanggung jawab"}{t.assigneeInactive && <span className="font-medium text-brand-700"> (sudah tidak di tim — alihkan)</span>}
                   {t.dueDate && <> · tenggat {formatDateShort(t.dueDate)}</>}
                 </p>
+                {t.requiresReview && (t.submittedByName || t.reviewedByName) && (
+                  <p className="mt-0.5 text-xs text-muted" data-testid="review-roles">
+                    Pelaksana: <span className="text-ink-soft">{t.executorName ?? "—"}</span>
+                    {t.submittedByName && <> · Dikirim oleh <span className="text-ink-soft">{t.submittedByName}</span>{t.submittedAt && <> ({formatDateShort(t.submittedAt.slice(0, 10))})</>}</>}
+                    {t.reviewedByName && <> · Diperiksa oleh <span className="text-ink-soft">{t.reviewedByName}</span>{t.reviewedAt && <> ({formatDateShort(t.reviewedAt.slice(0, 10))})</>}</>}
+                  </p>
+                )}
               </div>
               <div className="flex flex-wrap items-center gap-2">
                 <DiscussButton type="TRAINING_TASK" id={t.id} />
@@ -67,7 +83,7 @@ export function TasksPanel({ tasks, projectId, members = [], canCreate = false, 
       )}
 
       <Dialog open={form !== null} onClose={() => !busy && setForm(null)} title={form?.id ? "Ubah tugas" : "Tugas baru"} size="md"
-        footer={form && <><Button onClick={() => setForm(null)} disabled={busy}>Batal</Button><Button variant="primary" loading={busy} disabled={form.title.trim().length < 3}
+        footer={form && <><Button onClick={() => setForm(null)} disabled={busy}>Batal</Button><Button variant="primary" loading={busy} disabled={form.title.trim().length < 3 || (needsReason(form) && form.reason.trim().length < 5)}
           onClick={() => void run(() => form.id ? api(`/api/training/tasks/${form.id}`, { method: "PATCH", body: body(form) }) : api(`/api/training/projects/${projectId}/tasks`, { body: body(form) }), form.id ? "Tugas diperbarui." : "Tugas dibuat.", () => setForm(null))}>Simpan</Button></>}>
         {form && <div className="space-y-4">{error && <Notice tone="danger">{error}</Notice>}
           <TextField label="Judul tugas" required maxLength={200} value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} error={fieldErrors.title} />
@@ -81,7 +97,9 @@ export function TasksPanel({ tasks, projectId, members = [], canCreate = false, 
               {TASK_PRIORITIES.map((p) => <option key={p} value={p}>{TASK_PRIORITY_LABEL[p]}</option>)}
             </SelectField>
           </div>
-          <label className="flex items-start gap-2 text-sm"><input type="checkbox" className="mt-0.5 size-4" checked={form.requiresReview} onChange={(e) => setForm({ ...form, requiresReview: e.target.checked })} /><span><span className="font-medium text-ink-soft">Hasil perlu diperiksa</span><span className="block text-xs text-muted">Penanggung jawab hanya dapat mengirim ke &quot;Menunggu pemeriksaan&quot;; orang lain yang berwenang menyelesaikannya.</span></span></label>
+          <label className="flex items-start gap-2 text-sm"><input type="checkbox" className="mt-0.5 size-4" checked={form.requiresReview} disabled={!!form.id && form.requiresReview && !!form.orig?.executor} onChange={(e) => setForm({ ...form, requiresReview: e.target.checked })} /><span><span className="font-medium text-ink-soft">Hasil perlu diperiksa</span><span className="block text-xs text-muted">Penanggung jawab hanya dapat mengirim ke &quot;Menunggu pemeriksaan&quot;; orang lain yang berwenang menyelesaikannya.</span></span></label>
+          {form.id && form.requiresReview && form.orig?.executor && <p className="text-xs text-muted">Pelaksana tidak dapat mematikan kewajiban pemeriksaan tugasnya sendiri; minta pengelola proyek lain.</p>}
+          {needsReason(form) && <TextAreaField label="Alasan perubahan" required rows={2} maxLength={300} value={form.reason} onChange={(e) => setForm({ ...form, reason: e.target.value })} error={fieldErrors.reason} hint="Wajib: penanggung jawab atau kewajiban pemeriksaan diubah setelah pekerjaan dimulai. Dicatat di audit dan sebagai komentar tugas." />}
         </div>}
       </Dialog>
 
@@ -92,7 +110,7 @@ export function TasksPanel({ tasks, projectId, members = [], canCreate = false, 
             {status.task.allowedNext.map((s) => <option key={s} value={s}>{TASK_STATUS_LABEL[s]}</option>)}
           </SelectField>
           <TextAreaField label="Catatan (opsional)" rows={2} maxLength={500} value={status.note} onChange={(e) => setStatus({ ...status, note: e.target.value })} hint="Dicatat sebagai komentar pada tugas." />
-          {status.task.requiresReview && <p className="text-xs text-muted">Tugas ini perlu diperiksa: pemeriksa tidak boleh penanggung jawabnya sendiri.</p>}
+          {status.task.requiresReview && <p className="text-xs text-muted">Tugas ini perlu diperiksa: pemeriksa harus orang yang berbeda dari pengirim hasil dan dari pelaksananya.</p>}
         </div>}
       </Dialog>
 

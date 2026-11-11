@@ -41,8 +41,19 @@ Akibat yang Anda rasakan:
 - **Tidak ada akses tambahan ke data sensitif.** Level modul dan peran proyek *tidak* memberi akses slip gaji, presensi, cuti,
   atau data HR lain. Direktori karyawan di modul ini hanya memuat nama, no. induk, jabatan, dan divisi.
 - **Admin/HR bukan otomatis Admin Program.** Admin HRIS tanpa level/keanggotaan tidak melihat modul ini sama sekali (404).
-- **Pemeriksa ≠ pelaksana.** Tugas yang ditandai "perlu diperiksa" tidak dapat disetujui oleh penanggung jawabnya sendiri
-  (selaras dengan SOP ADK yang memisahkan Pembuat, Pemeriksa, dan Penyetuju).
+- **Pelaksana, pengirim hasil, dan pemeriksa dipisahkan — tanpa pengecualian.** Pada tugas "perlu diperiksa" tiga identitas disimpan terpisah:
+  **pelaksana** (penanggung jawab saat hasil dikirim; salinan yang tidak ikut berubah bila penanggung jawab dialihkan/dikosongkan),
+  **pengirim hasil** (akun yang menekan "Kirim ke pemeriksaan", dengan waktunya), dan **pemeriksa** (yang menyelesaikan, dengan waktunya).
+  Pemeriksa harus **berbeda** dari pengirim hasil, pelaksana saat dikirim, **dan** penanggung jawab saat ini (selaras dengan SOP ADK yang
+  memisahkan Pembuat, Pemeriksa, dan Penyetuju). Jadi PIC yang mengirim hasil atas nama staf tidak dapat memeriksanya sendiri — Koordinator
+  Program, Direktur, atau pengelola lain yang memeriksa. Ditegakkan di service **dan** trigger database (`training_tasks_review_guard`); tidak
+  ada jalur pengecualian. Tampil di kartu tugas: *Pelaksana · Dikirim oleh · Diperiksa oleh*. Siklus dikosongkan saat hasil ditarik/dikembalikan/dibuka
+  kembali (riwayat ada di audit).
+- **Mengubah syarat pemeriksaan setelah pekerjaan dimulai wajib beralasan.** Mengganti/mengosongkan penanggung jawab atau menyalakan/mematikan
+  "perlu diperiksa" pada tugas yang sudah Dalam proses/Menunggu pemeriksaan/Selesai membutuhkan **alasan** (≥ 5 karakter), dicatat di audit
+  (alasan, sebelum/sesudah) **dan** sebagai komentar tugas yang terlihat tim. Sebelum dimulai bebas. **Pelaksana tidak boleh mematikan kewajiban
+  pemeriksaan tugasnya sendiri** (kapan pun); saat Menunggu pemeriksaan kewajiban itu tidak dapat dimatikan sama sekali. Tugas lama yang sedang menunggu
+  pemeriksaan diisi pengirimnya dari audit saat migrasi.
 
 ## 2. Usulan pemetaan berdasarkan bagan organisasi
 

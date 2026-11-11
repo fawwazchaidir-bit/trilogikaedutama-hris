@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { PROJECT_FORWARD, PROJECT_TRANSITIONS, allowedTaskTransitions, canProjectTransition, checkReadyForPreparation } from "@/lib/training/status";
+import { PROJECT_FORWARD, PROJECT_TRANSITIONS, allowedTaskTransitions, canProjectTransition, checkReadyForPreparation, reviewBlockReason } from "@/lib/training/status";
 import { ATTENTION_WINDOW_DAYS, attentionReasons, checklistProgress, closureReadiness, isTaskDueSoon, isTaskDueToday, isTaskOverdue, requiredOutstanding } from "@/lib/training/indicators";
 import { DEFAULT_TEMPLATE_ITEMS, formatProjectCode, intervalsOverlap, normalizeRoom } from "@/lib/training/misc";
 import { PROJECT_STATUSES, TASK_STATUSES, isActiveProject, isFinalProject, isOpenTask, type ProjectStatus, type TaskStatus } from "@/lib/training/types";
@@ -157,5 +157,23 @@ describe("validasi input (Zod)", () => {
     expect(participantSchema.safeParse({ fullName: "Ani", email: "bukan-email" }).success).toBe(false);
     expect(projectCloseSchema.safeParse({ summary: "ok" }).success).toBe(false);
     expect(templateSaveSchema.safeParse({ name: "Template", items: [] }).success).toBe(false);
+  });
+});
+
+describe("pemisahan pelaksana / pengirim hasil / pemeriksa", () => {
+  const inReview = { status: "IN_REVIEW" as const, requiresReview: true, canManage: true };
+  it("pemeriksa harus berbeda dari pengirim hasil, pelaksana saat dikirim, dan penanggung jawab saat ini", () => {
+    expect(allowedTaskTransitions({ ...inReview, isAssignee: false })).toContain("DONE");                                   // orang lain
+    expect(allowedTaskTransitions({ ...inReview, isAssignee: true })).not.toContain("DONE");                                // penanggung jawab saat ini
+    expect(allowedTaskTransitions({ ...inReview, isAssignee: false, isSubmitter: true })).not.toContain("DONE");           // pengirim hasil (mis. PIC yang mengirim atas nama staf)
+    expect(allowedTaskTransitions({ ...inReview, isAssignee: false, isExecutor: true })).not.toContain("DONE");            // pelaksana saat dikirim (walau penanggung jawab sudah dialihkan/dikosongkan)
+    for (const f of [{ isSubmitter: true }, { isExecutor: true }, { isAssignee: true }]) expect(allowedTaskTransitions({ ...inReview, isAssignee: false, ...f })).toContain("IN_PROGRESS"); // tetap boleh mengembalikan
+  });
+  it("alasan penolakan: pengirim lebih dulu daripada pelaksana; null bila boleh", () => {
+    expect(reviewBlockReason({ isAssignee: false })).toBeNull();
+    expect(reviewBlockReason({ isAssignee: false, isSubmitter: true })).toBe("SUBMITTER");
+    expect(reviewBlockReason({ isAssignee: true, isSubmitter: true })).toBe("SUBMITTER");
+    expect(reviewBlockReason({ isAssignee: true })).toBe("EXECUTOR");
+    expect(reviewBlockReason({ isAssignee: false, isExecutor: true })).toBe("EXECUTOR");
   });
 });
