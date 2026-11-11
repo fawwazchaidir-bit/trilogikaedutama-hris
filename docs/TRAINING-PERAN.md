@@ -153,6 +153,8 @@ Aturan tambahan yang dijaga server:
 - Penanggung jawab tugas **harus anggota aktif proyek**.
 - Menautkan **surat tugas** juga butuh izin HRIS `assignment:view_all`. Modul ini hanya menampilkan nomor, tujuan, tanggal, dan status — **tidak** nominal uang harian atau daftar penerima.
 - Penutupan: semua **checklist wajib** harus selesai. Pengecualian hanya oleh Koordinator Program, dengan alasan tertulis; item yang dilewati tercatat di riwayat.
+- Penutupan juga menuntut **keputusan untuk setiap tugas terbuka** (jadikan tindak lanjut ber-PIC & tenggat, atau batalkan beralasan) dan **pengakuan** atas checklist wajib yang dilonggarkan. Tindak lanjut tetap dapat dikerjakan setelah proyek Selesai.
+- Menjadikan checklist wajib tidak wajib / menghapusnya: **alasan wajib**; setelah proyek Berjalan hanya Koordinator Program atau Direktur (PIC dan Admin Program meminta mereka). Rincian: `TRAINING-OPS.md` §Penutupan proyek.
 
 ### 3c. Akun berstatus Magang (SOP Rev. 0.5: tanpa wewenang persetujuan & akses data)
 

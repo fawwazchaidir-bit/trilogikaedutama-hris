@@ -1744,6 +1744,12 @@ enum TrainingChecklistPhase {
   CLOSING
 }
 
+/// Cara item checklist WAJIB dilonggarkan: dijadikan tidak wajib, atau dihapus.
+enum TrainingChecklistRelaxKind {
+  DEMOTED
+  DELETED
+}
+
 enum TrainingScheduleStatus {
   PLANNED
   CONFIRMED
@@ -1874,21 +1880,22 @@ model TrainingProject {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  program         TrainingProgram?                @relation(fields: [programId], references: [id], onDelete: Restrict)
-  members         TrainingProjectMember[]
-  tasks           TrainingTask[]
-  checklist       TrainingProjectChecklistItem[]
-  schedules       TrainingSchedule[]
-  participants    TrainingParticipant[]
-  instructors     TrainingProjectInstructor[]
-  documents       TrainingProjectDocument[]
-  externalRefs    TrainingExternalRef[]
-  assignmentLinks TrainingProjectAssignmentLink[]
-  milestones      TrainingMilestone[]
-  readinessItems  TrainingReadinessItem[]
-  workloadTasks   TrainingWorkloadTask[]
-  statusSnapshots TrainingStatusSnapshot[]
-  recoveryNotes   TrainingRecoveryNote[]
+  program              TrainingProgram?                @relation(fields: [programId], references: [id], onDelete: Restrict)
+  members              TrainingProjectMember[]
+  tasks                TrainingTask[]
+  checklist            TrainingProjectChecklistItem[]
+  checklistRelaxations TrainingChecklistRelaxation[]
+  schedules            TrainingSchedule[]
+  participants         TrainingParticipant[]
+  instructors          TrainingProjectInstructor[]
+  documents            TrainingProjectDocument[]
+  externalRefs         TrainingExternalRef[]
+  assignmentLinks      TrainingProjectAssignmentLink[]
+  milestones           TrainingMilestone[]
+  readinessItems       TrainingReadinessItem[]
+  workloadTasks        TrainingWorkloadTask[]
+  statusSnapshots      TrainingStatusSnapshot[]
+  recoveryNotes        TrainingRecoveryNote[]
 
   @@unique([seqYear, seqNo])
   @@index([status, startDate])
@@ -1931,6 +1938,10 @@ model TrainingTask {
   status             TrainingTaskStatus   @default(TODO)
   /// true: penanggung jawab hanya dapat mengirim ke "Menunggu pemeriksaan"; orang berwenang lain yang menyelesaikan.
   requiresReview     Boolean              @default(false)
+  /// true: tugas terbuka yang SENGAJA dilanjutkan setelah proyek ditutup (diputuskan Koordinator Program saat penutupan; punya penanggung jawab & tenggat).
+  /// Hanya bermakna selama proyek berstatus Selesai: tugas ini tetap dapat dikerjakan dan tetap terhitung di Tugas Saya/dasbor/pengingat, sedangkan
+  /// tugas lain pada proyek final dikunci dan tidak dihitung. Dikosongkan saat proyek dibuka kembali.
+  isFollowUp         Boolean              @default(false)
   completedAt        DateTime?
   completedById      String?              @db.Uuid
   /// Pemisahan peran pada tugas wajib periksa — TIGA identitas disimpan terpisah:
@@ -2025,6 +2036,27 @@ model TrainingProjectChecklistItem {
   @@index([projectId, phase, sortOrder])
   @@index([assigneeId, isDone])
   @@map("training_project_checklist_items")
+}
+
+/// Pelonggaran item checklist WAJIB (dijadikan tidak wajib / dihapus), lengkap dengan alasan. Tampil pada ringkasan penutupan dan harus DIAKUI Koordinator
+/// Program saat menutup proyek; satu baris per item (dihapus bila item dijadikan wajib lagi). `itemId` sengaja tanpa FK agar item yang dihapus tetap tercatat.
+model TrainingChecklistRelaxation {
+  id               String                     @id @default(uuid()) @db.Uuid
+  projectId        String                     @db.Uuid
+  itemId           String                     @unique @db.Uuid
+  itemTitle        String
+  phase            TrainingChecklistPhase
+  kind             TrainingChecklistRelaxKind
+  reason           String
+  actorId          String                     @db.Uuid
+  createdAt        DateTime                   @default(now())
+  acknowledgedAt   DateTime?
+  acknowledgedById String?                    @db.Uuid
+
+  project TrainingProject @relation(fields: [projectId], references: [id], onDelete: Restrict)
+
+  @@index([projectId])
+  @@map("training_checklist_relaxations")
 }
 
 /// Direktori instruktur/asesor/narasumber/fasilitator. Karyawan internal ditautkan lewat `employeeId` (tanpa akun baru);

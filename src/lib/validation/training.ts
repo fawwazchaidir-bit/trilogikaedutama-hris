@@ -86,6 +86,14 @@ export const projectCloseSchema = z.object({
   followUp: optionalText(2000, "Permasalahan & tindak lanjut"),
   /** Wajib bila masih ada checklist wajib yang belum selesai. */
   overrideReason: optionalText(500, "Alasan pengecualian"),
+  /** Keputusan untuk SETIAP tugas yang masih terbuka: jadikan tindak lanjut atau batalkan (lihat `lib/training/closure`). */
+  taskDecisions: z.array(z.object({
+    taskId: uuid,
+    action: z.enum(["FOLLOW_UP", "CANCEL"], { error: "Keputusan tugas tidak valid" }),
+    assigneeId: optUuid, dueDate: optDate, reason: optionalText(300, "Alasan pembatalan"),
+  })).max(500, "Terlalu banyak keputusan tugas").default([]),
+  /** Wajib true bila ada checklist wajib yang dilonggarkan (dijadikan tidak wajib/dihapus) dan belum diakui. */
+  acknowledgeRelaxed: bool.default(false),
 });
 export const projectReasonSchema = z.object({ reason: requiredText(5, 500, "Alasan") });
 
@@ -161,7 +169,11 @@ export const checklistItemUpdateSchema = z.object({
   assigneeId: optUuid.optional(),
   note: optionalText(300, "Catatan").optional(),
   isDone: bool.optional(),
+  /** Wajib saat item WAJIB dijadikan tidak wajib. */
+  reason: optionalText(300, "Alasan").optional(),
 });
+/** Hapus item: alasan wajib bila item itu WAJIB. */
+export const checklistItemDeleteSchema = z.object({ reason: optionalText(300, "Alasan").optional() });
 
 // ─────────────────────────── Jadwal, peserta, instruktur ───────────────────────────
 

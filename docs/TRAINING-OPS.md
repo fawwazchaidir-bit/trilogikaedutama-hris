@@ -101,6 +101,23 @@ Draf ──▶ Persiapan ──▶ Berjalan ──▶ Selesai ──(buka kembal
 ```
 Persiapan membutuhkan tanggal lengkap + PIC. Selesai hanya lewat alur penutupan (checklist wajib selesai, atau pengecualian beralasan).
 
+### Penutupan proyek (`closeProject`, `lib/training/closure.ts`)
+
+Tab **Penutupan** menampilkan SATU ringkasan sebelum menutup: tugas terbuka (daftar, bukan hanya hitungan), milestone kritis yang belum selesai (informasi), dokumen, checklist wajib, dan pelonggaran checklist wajib. Syarat menutup (hanya Koordinator Program/Direktur):
+
+1. **Checklist wajib selesai** — atau alasan pengecualian tertulis (item yang dilewati tercatat di audit). Tidak berubah.
+2. **Setiap tugas terbuka diputuskan**, satu per satu. Tugas terbuka *tidak menghalangi* penutupan, tetapi tidak boleh menggantung:
+   - **Jadikan tindak lanjut** — wajib punya penanggung jawab (anggota aktif, karyawan aktif) dan tenggat yang belum lewat; mengganti penanggung jawab tugas yang sudah dimulai wajib beralasan (sama dengan aturan ubah tugas). Tugas ditandai `isFollowUp`, **tetap dapat dikerjakan setelah proyek Selesai** (status, komentar, ubah), tetap terhitung di Tugas Saya/lencana/dasbor/beranda, diingatkan H-1/hari-H, dan ikut serah terima karyawan berhenti.
+   - **Batalkan** — wajib beralasan; status tugas menjadi Dibatalkan, alasan tercatat di komentar tugas, penanggung jawab diberi tahu.
+   - "Selesai" **sengaja bukan pilihan**: tugas diselesaikan lewat alurnya sendiri (termasuk pemeriksaan bila wajib periksa), supaya penutupan tidak menjadi jalan pintas melewati pemisahan pelaksana–pemeriksa.
+3. **Pelonggaran checklist wajib diakui** (lihat bawah) bila ada yang belum diakui.
+
+Seluruhnya satu transaksi: satu keputusan tidak sah menggagalkan semuanya. Audit penutupan memuat tindak lanjut, tugas yang dibatalkan beserta alasannya, dan pelonggaran yang diakui. **Membuka kembali** proyek mengembalikan tindak lanjut menjadi tugas biasa; penutupan berikutnya meminta keputusan lagi untuk semua tugas yang terbuka.
+
+**Tugas "hidup"** (`liveTaskWhere`, satu definisi): proyek belum final, *atau* proyek Selesai dan tugas itu tindak lanjut. Tugas terbuka lain pada proyek Selesai/Dibatalkan terkunci dan **tidak dihitung** (Tugas Saya, lencana, dasbor, beranda, ringkasan proyek, pengingat, serah terima, rujukan obrolan). Riwayat Selesai/Dibatalkan tetap tampil di Tugas Saya (terkunci).
+
+**Melonggarkan checklist wajib** (dijadikan tidak wajib, atau dihapus): **alasan wajib**; setelah proyek **Berjalan** hanya pemegang hak menutup (Koordinator Program/Direktur) — itulah persetujuannya, PIC dan Admin Program meminta mereka; sebelum itu (Draf/Persiapan) PIC/Admin Program boleh dengan alasan. Setiap pelonggaran tercatat di `training_checklist_relaxations` (satu baris per item; dicabut bila item dijadikan wajib lagi), tampil di ringkasan penutupan dan Riwayat ("…dijadikan TIDAK WAJIB (pelonggaran)", alasan di kolom alasan), dan **harus diakui** Koordinator Program (kotak pengakuan) saat menutup. Yang sudah diakui tidak diminta lagi saat penutupan ulang; yang baru perlu diakui. Menurunkan item yang *sudah selesai* pun beralasan — menutup celah "turunkan lalu buka kembali". Migrasi: `20261111200000_closure_followup_relaxation` (aditif).
+
 ### Definisi indikator dashboard (`src/lib/training/indicators.ts`)
 
 | Indikator | Definisi |
@@ -263,6 +280,7 @@ Mengaktifkan flag tidak memberi siapa pun akses otomatis: Super Admin harus memb
 | Unit (logika murni: akses, status, indikator dashboard, validasi, usulan level) | `tests/unit/training-access.test.ts`, `training-rules.test.ts` | 32 |
 | Integrasi — gerbang akses, IDOR, tim, penjaga DB, aturan akses untuk pekerja latar belakang | `tests/integration/training-access.test.ts` | 27 |
 | Integrasi — alur bisnis (proyek→penutupan, dashboard, jadwal, peserta, dokumen, referensi) | `tests/integration/training-flow.test.ts` | 35 |
+| Unit + integrasi — penutupan: keputusan tugas terbuka, tindak lanjut hidup, tugas yatim tidak dihitung, pelonggaran checklist wajib & pengakuan | `tests/unit/training-closure.test.ts`, `tests/integration/training-closure.test.ts` | 13 + 20 |
 | Integrasi — modul dimatikan | `tests/integration/training-flag.test.ts` | 3 |
 | Unit — mesin indikator, konfigurasi, skema PATCH, eskalasi & deret hari kerja, waktu relatif | `tests/unit/training-indicators.test.ts`, `training-validation.test.ts`, `training-escalation.test.ts`, `nav-pref.test.ts`, `format-timeago.test.ts` | 60 |
 | Integrasi — indikator, konfigurasi berversi, template, hak akses, beban/KP | `tests/integration/training-indicators.test.ts` | 45 |
@@ -293,7 +311,7 @@ PW_CHROMIUM_PATH=/opt/pw-browsers/chromium npm run test:e2e   # di sandbox; di m
    - Jadwal dengan ruangan/instruktur bentrok memunculkan peringatan; kalender per bulan benar dalam WIB.
    - PJ Peserta mengelola peserta; staf tidak melihat kontak; dokumen peserta tak terlihat staf/pemantau.
    - Unggah PDF/PNG/JPEG; berkas palsu (ekstensi .pdf isi lain) ditolak; unduh hanya oleh yang berhak.
-   - Penutupan: checklist wajib menghalangi; pengecualian beralasan tercatat; proyek jadi baca-saja; Manajer dapat membuka kembali.
+   - Penutupan: checklist wajib menghalangi; pengecualian beralasan tercatat; proyek jadi baca-saja; Manajer dapat membuka kembali; tugas terbuka diputuskan (tindak lanjut/batal) dan tindak lanjut tetap dapat dikerjakan; pelonggaran checklist wajib beralasan & diakui (`05u-closure.spec.ts`).
    - Tautan surat tugas hanya oleh yang punya izin HRIS surat tugas; nominal uang harian tidak tampil; referensi sistem lain bertanda "dicatat manual".
    - Karyawan dinonaktifkan di HRIS → tidak dapat masuk; tugasnya ditandai perlu dialihkan.
    - **Indikator**: Direktur mengubah ambang di Rumus Indikator → versi baru + audit; program baru mendapat 16/18 milestone otomatis; contoh dokumen §7 menghasilkan Merah; milestone tanpa bukti ditolak;

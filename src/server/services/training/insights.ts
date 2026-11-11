@@ -7,8 +7,8 @@ import type { ReportTable } from "../../export";
 import { parseInput } from "../../validate";
 import { dateToIso, isoToDate } from "../../json";
 import { addDays } from "@/lib/time";
-import { isOpenTask, PROJECT_STATUSES, type ActivityKind, type DocCategory, type ProjectStatus, PROJECT_STATUS_LABEL, ACTIVITY_KIND_LABEL } from "@/lib/training/types";
-import { assigneeUnavailableReason } from "@/lib/training/availability";
+import { isOpenTask, PROJECT_STATUSES, type ActivityKind, type DocCategory, type ProjectStatus, type TaskStatus, PROJECT_STATUS_LABEL, ACTIVITY_KIND_LABEL } from "@/lib/training/types";
+import { assigneeUnavailableReason, type AssigneeUnavailable } from "@/lib/training/availability";
 import { ATTENTION_LABEL, ATTENTION_WINDOW_DAYS, closureReadiness, type AttentionCode, type ChecklistProgress } from "@/lib/training/indicators";
 import { isoDate, uuid } from "@/lib/validation/common";
 import type { Paged } from "@/lib/types";
@@ -16,7 +16,8 @@ import { accessibleProjectWhere, loadProjectAccess, requireModule } from "./acce
 import { listProjects, type ProjectListItemDto } from "./projects";
 import { listMyChecklistItems, listMyTasks, type MyChecklistItemDto, type TaskDto } from "./work";
 import { listCalendar, type ScheduleDto } from "./operations";
-import { auditVisibilityWhere, today } from "./shared";
+import { listMilestones } from "./indicator-data";
+import { auditVisibilityWhere, liveTaskWhere, today } from "./shared";
 
 // ═════════════════════════════ Dashboard ═════════════════════════════
 
@@ -57,7 +58,7 @@ export async function getTrainingDashboard(actor: Actor): Promise<DashboardDto> 
   const activeScope: Prisma.TrainingProjectWhereInput = { AND: [scope, { status: { in: ["PREPARATION", "RUNNING"] } }] };
   // Dashboard Staf menghitung tugas & checklist MILIKNYA sendiri (bukan seluruh pekerjaan di proyek yang ia ikuti).
   const own = variant === "staff" ? { assigneeId: actor.employeeId ?? "00000000-0000-0000-0000-000000000000" } : {};
-  const taskScope = (extra: Prisma.TrainingTaskWhereInput = {}): Prisma.TrainingTaskWhereInput => ({ project: inScope, ...own, ...extra });
+  const taskScope = (extra: Prisma.TrainingTaskWhereInput = {}): Prisma.TrainingTaskWhereInput => ({ AND: [liveTaskWhere, { project: inScope, ...own, ...extra }] });
 
   const [byStatus, openTasks, overdue, dueToday, dueSoon, openChecklist, activeNoDocs, projectsPage, attentionPage, myTasks, myChecklist, upcoming] = await Promise.all([
     prisma.trainingProject.groupBy({ by: ["status"], where: inScope, _count: { _all: true } }),
@@ -147,6 +148,17 @@ export interface ClosurePreviewDto {
   /** Dokumen yang DIANJURKAN ada sebelum ditutup (informasi; tidak memblokir penutupan). */
   missingRecommendedDocuments: DocCategory[];
   canCloseClean: boolean;
+  /** Tugas yang masih terbuka: SETIAP tugas harus diputuskan saat menutup (tindak lanjut atau batal). */
+  openTasks: { id: string; title: string; status: TaskStatus; assigneeId: string | null; assigneeName: string | null; assigneeUnavailable: AssigneeUnavailable | null; dueDate: string | null; overdue: boolean; requiresReview: boolean }[];
+  /** Tugas tindak lanjut (dibuat saat penutupan) — tampil pada proyek yang sudah Selesai. */
+  followUps: { id: string; title: string; status: TaskStatus; assigneeName: string | null; dueDate: string | null; overdue: boolean }[];
+  /** Milestone KRITIS yang belum selesai (informasi untuk Koordinator Program; tidak memblokir). */
+  criticalMilestones: { id: string; code: string; name: string; due: string | null; overdue: boolean; assigneeName: string | null }[];
+  /** Pelonggaran checklist wajib (dijadikan tidak wajib/dihapus) beserta alasannya; yang belum diakui harus diakui saat menutup. */
+  relaxations: { id: string; title: string; kind: "DEMOTED" | "DELETED"; reason: string; byName: string | null; at: string; acknowledged: boolean }[];
+  unacknowledgedRelaxations: number;
+  /** Anggota aktif proyek: pilihan penanggung jawab tindak lanjut. */
+  assignees: { employeeId: string; name: string }[];
 }
 
 const RECOMMENDED_DOCS: DocCategory[] = ["ATTENDANCE", "FINAL_REPORT"];
@@ -154,11 +166,20 @@ const RECOMMENDED_DOCS: DocCategory[] = ["ATTENDANCE", "FINAL_REPORT"];
 export async function getClosurePreview(actor: Actor, projectId: string): Promise<ClosurePreviewDto> {
   const access = await loadProjectAccess(actor, projectId);
   const p = await prisma.trainingProject.findUniqueOrThrow({ where: { id: projectId } });
-  const [tasks, items, docs] = await Promise.all([
+  const [tasks, items, docs, taskRows, relaxRows, memberRows, milestones] = await Promise.all([
     prisma.trainingTask.findMany({ where: { projectId }, select: { status: true, dueDate: true } }),
     prisma.trainingProjectChecklistItem.findMany({ where: { projectId }, orderBy: [{ phase: "asc" }, { sortOrder: "asc" }], select: { id: true, title: true, isRequired: true, isDone: true } }),
     prisma.trainingProjectDocument.groupBy({ by: ["category"], where: { projectId, deletedAt: null }, _count: { _all: true } }),
+    prisma.trainingTask.findMany({
+      where: { projectId, OR: [{ status: { in: ["TODO", "IN_PROGRESS", "IN_REVIEW"] } }, { isFollowUp: true }] }, orderBy: [{ dueDate: "asc" }, { createdAt: "asc" }],
+      select: { id: true, title: true, status: true, assigneeId: true, dueDate: true, requiresReview: true, isFollowUp: true, assignee: { select: { fullName: true, isActive: true, user: { select: { isActive: true } } } } },
+    }),
+    prisma.trainingChecklistRelaxation.findMany({ where: { projectId }, orderBy: { createdAt: "asc" } }),
+    prisma.trainingProjectMember.findMany({ where: { projectId, endedAt: null }, select: { employeeId: true, employee: { select: { fullName: true, isActive: true } } } }),
+    listMilestones(actor, projectId),
   ]);
+  const actorNames = relaxRows.length ? new Map((await prisma.user.findMany({ where: { id: { in: [...new Set(relaxRows.map((r) => r.actorId))] } }, select: { id: true, name: true } })).map((u) => [u.id, u.name])) : new Map<string, string>();
+  const activeIds = new Set(memberRows.map((m) => m.employeeId));
   const t = today();
   const lite = tasks.map((x) => ({ status: x.status, dueDate: x.dueDate ? dateToIso(x.dueDate) : null }));
   const ready = closureReadiness(items, lite);
@@ -176,6 +197,16 @@ export async function getClosurePreview(actor: Actor, projectId: string): Promis
     documents: docs.filter((d) => showSensitive || d.category !== "PARTICIPANT_DOC").map((d) => ({ category: d.category, count: d._count._all })),
     missingRecommendedDocuments: RECOMMENDED_DOCS.filter((c) => !have.has(c)),
     canCloseClean: ready.canCloseClean,
+    openTasks: taskRows.filter((x) => isOpenTask(x.status)).map((x) => ({
+      id: x.id, title: x.title, status: x.status, assigneeId: x.assigneeId, assigneeName: x.assignee?.fullName ?? null,
+      assigneeUnavailable: x.assigneeId && x.assignee ? assigneeUnavailableReason({ activeMember: activeIds.has(x.assigneeId), employeeActive: x.assignee.isActive, accountActive: x.assignee.user?.isActive ?? null }) : null,
+      dueDate: x.dueDate ? dateToIso(x.dueDate) : null, overdue: x.dueDate !== null && dateToIso(x.dueDate) < t, requiresReview: x.requiresReview,
+    })),
+    followUps: taskRows.filter((x) => x.isFollowUp).map((x) => ({ id: x.id, title: x.title, status: x.status, assigneeName: x.assignee?.fullName ?? null, dueDate: x.dueDate ? dateToIso(x.dueDate) : null, overdue: isOpenTask(x.status) && x.dueDate !== null && dateToIso(x.dueDate) < t })),
+    criticalMilestones: milestones.filter((m) => m.critical && !m.notApplicable && m.doneAt === null).map((m) => ({ id: m.id, code: m.code, name: m.name, due: m.due, overdue: m.overdue, assigneeName: m.assigneeName })),
+    relaxations: relaxRows.map((r) => ({ id: r.id, title: r.itemTitle, kind: r.kind, reason: r.reason, byName: actorNames.get(r.actorId) ?? null, at: r.createdAt.toISOString(), acknowledged: r.acknowledgedAt !== null })),
+    unacknowledgedRelaxations: relaxRows.filter((r) => r.acknowledgedAt === null).length,
+    assignees: memberRows.filter((m) => m.employee.isActive).map((m) => ({ employeeId: m.employeeId, name: m.employee.fullName })).sort((a, b) => a.name.localeCompare(b.name)),
   };
 }
 

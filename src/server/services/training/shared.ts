@@ -58,3 +58,12 @@ export async function auditProject(tx: Tx | typeof prisma, actor: Actor, project
 }
 
 export const iso = (d: Date | null | undefined): string | null => (d ? d.toISOString() : null);
+
+/**
+ * Tugas yang masih "hidup": proyeknya belum final, ATAU proyeknya Selesai dan tugas itu ditandai tindak lanjut (dipilih Koordinator Program saat menutup).
+ * Tugas lain pada proyek Selesai/Dibatalkan terkunci, tidak dapat diselesaikan, dan karena itu TIDAK dihitung di Tugas Saya, lencana, dasbor, beranda, laporan,
+ * pengingat, maupun serah terima. Satu definisi agar semua angka konsisten.
+ */
+export const liveTaskWhere: Prisma.TrainingTaskWhereInput = {
+  OR: [{ project: { status: { notIn: ["COMPLETED", "CANCELLED"] } } }, { isFollowUp: true, project: { status: "COMPLETED" } }],
+};

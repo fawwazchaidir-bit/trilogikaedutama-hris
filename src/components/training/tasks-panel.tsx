@@ -56,6 +56,8 @@ export function TasksPanel({ tasks, projectId, members = [], canCreate = false, 
                   <p className={`font-medium ${t.status === "DONE" || t.status === "CANCELLED" ? "text-muted line-through" : "text-ink"}`}>{t.title}</p>
                   <TaskStatusBadge status={t.status} /><PriorityBadge priority={t.priority} />
                   {t.requiresReview && <Badge tone="amber">Perlu diperiksa</Badge>}
+                  {t.isFollowUp && <Badge tone="blue">Tindak lanjut</Badge>}
+                  {t.locked && t.status !== "DONE" && t.status !== "CANCELLED" && <Badge tone="gray">Terkunci (proyek ditutup)</Badge>}
                   {t.overdue && <Badge tone="red">Terlambat</Badge>}
                 </div>
                 {t.description && <p className="mt-0.5 line-clamp-2 text-sm text-muted">{t.description}</p>}

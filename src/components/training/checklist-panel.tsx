@@ -1,11 +1,11 @@
 "use client";
 import { useState } from "react";
-import { Plus, Trash2 } from "lucide-react";
+import { Plus, ShieldAlert, Trash2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { EmptyState, Notice } from "@/components/ui/card";
-import { SelectField, TextField } from "@/components/ui/field";
+import { SelectField, TextAreaField, TextField } from "@/components/ui/field";
 import { api } from "@/lib/api-client";
 import { formatDateShort } from "@/lib/format";
 import { CHECKLIST_PHASES, CHECKLIST_PHASE_LABEL, type ChecklistPhase } from "@/lib/training/types";
@@ -15,6 +15,8 @@ import { ProgressBar } from "./ui";
 import { useRunner } from "./use-runner";
 
 interface Draft { phase: ChecklistPhase; title: string; isRequired: boolean; assigneeId: string }
+/** Melonggarkan item WAJIB: dijadikan tidak wajib atau dihapus — selalu beralasan (dicatat & harus diakui saat menutup proyek). */
+interface Relax { id: string; title: string; mode: "demote" | "delete"; reason: string }
 
 /**
  * Checklist kesiapan proyek. Progres = item selesai ÷ seluruh item (checklist dan tugas sengaja terpisah agar satu pekerjaan
@@ -26,6 +28,7 @@ export function ChecklistPanel({ projectId, data, templates, members, editable }
   const { busy, error, run, reset } = useRunner();
   const [draft, setDraft] = useState<Draft | null>(null);
   const [tpl, setTpl] = useState("");
+  const [relax, setRelax] = useState<Relax | null>(null);
   const live = editable;
 
   return (
@@ -45,7 +48,8 @@ export function ChecklistPanel({ projectId, data, templates, members, editable }
           </div>
         )}
       </div>
-      {error && !draft && <Notice tone="danger">{error}</Notice>}
+      {data.canManage && live && !data.canRelax && <Notice tone="info">Proyek sedang berjalan: menjadikan item wajib tidak wajib atau menghapusnya hanya dapat dilakukan Koordinator Program atau Direktur (dengan alasan).</Notice>}
+      {error && !draft && !relax && <Notice tone="danger">{error}</Notice>}
       {data.items.length === 0 ? <EmptyState title="Checklist belum tersedia" description={data.canManage ? "Terapkan template standar atau tambahkan item satu per satu. Progres baru dihitung setelah ada item." : "Belum ada item checklist pada proyek ini."} /> : CHECKLIST_PHASES.map((phase) => {
         const items = data.items.filter((i) => i.phase === phase);
         if (items.length === 0) return null;
@@ -61,13 +65,27 @@ export function ChecklistPanel({ projectId, data, templates, members, editable }
                     <p className={`text-sm ${i.isDone ? "text-muted line-through" : "text-ink"}`}>{i.title} {i.isRequired && <Badge tone="red">Wajib</Badge>}</p>
                     <p className="text-xs text-muted">{i.assigneeName ? `PJ: ${i.assigneeName}` : "Tanpa penanggung jawab"}{i.assigneeUnavailable && !i.isDone && <span className="font-medium text-brand-700"> ({UNAVAILABLE_LABEL[i.assigneeUnavailable]})</span>}{i.isDone && i.doneAt && <> · selesai {formatDateShort(i.doneAt)}{i.doneByName ? ` oleh ${i.doneByName}` : ""}</>}{i.sourceTemplateName && <> · dari template &quot;{i.sourceTemplateName}&quot;</>}</p>
                   </div>
-                  {data.canManage && live && !i.isDone && <Button size="sm" variant="ghost" aria-label={`Hapus item ${i.title}`} onClick={() => void run(() => api(`/api/training/checklist-items/${i.id}`, { method: "DELETE" }), "Item dihapus.")}><Trash2 className="size-3.5" /></Button>}
+                  {data.canManage && live && i.isRequired && data.canRelax && <Button size="sm" variant="ghost" aria-label={`Jadikan item ${i.title} tidak wajib`} onClick={() => { reset(); setRelax({ id: i.id, title: i.title, mode: "demote", reason: "" }); }}><ShieldAlert className="size-3.5" />Tidak wajib…</Button>}
+                  {data.canManage && live && !i.isDone && (!i.isRequired
+                    ? <Button size="sm" variant="ghost" aria-label={`Hapus item ${i.title}`} onClick={() => void run(() => api(`/api/training/checklist-items/${i.id}`, { method: "DELETE" }), "Item dihapus.")}><Trash2 className="size-3.5" /></Button>
+                    : data.canRelax && <Button size="sm" variant="ghost" aria-label={`Hapus item ${i.title}`} onClick={() => { reset(); setRelax({ id: i.id, title: i.title, mode: "delete", reason: "" }); }}><Trash2 className="size-3.5" /></Button>)}
                 </li>
               ))}
             </ul>
           </section>
         );
       })}
+
+      <Dialog open={relax !== null} onClose={() => !busy && setRelax(null)} size="sm" title={relax?.mode === "delete" ? "Hapus item checklist wajib" : "Jadikan item tidak wajib"}
+        footer={relax && <><Button onClick={() => setRelax(null)} disabled={busy}>Batal</Button>
+          <Button variant="danger" loading={busy} disabled={relax.reason.trim().length < 5}
+            onClick={() => void run(() => relax.mode === "delete" ? api(`/api/training/checklist-items/${relax.id}`, { method: "DELETE", body: { reason: relax.reason } }) : api(`/api/training/checklist-items/${relax.id}`, { method: "PATCH", body: { isRequired: false, reason: relax.reason } }), relax.mode === "delete" ? "Item dihapus." : "Item dijadikan tidak wajib.", () => setRelax(null))}>
+            {relax.mode === "delete" ? "Hapus item" : "Jadikan tidak wajib"}</Button></>}>
+        {relax && <div className="space-y-4">{error && <Notice tone="danger">{error}</Notice>}
+          <Notice tone="warn">Item <strong>{relax.title}</strong> adalah checklist <strong>wajib</strong>. Perubahan ini dicatat sebagai <strong>pelonggaran</strong>, tampil pada ringkasan penutupan, dan harus diakui Koordinator Program saat menutup proyek.</Notice>
+          <TextAreaField label="Alasan" required rows={3} maxLength={300} value={relax.reason} onChange={(e) => setRelax({ ...relax, reason: e.target.value })} hint="Minimal 5 karakter." />
+        </div>}
+      </Dialog>
 
       <Dialog open={draft !== null} onClose={() => !busy && setDraft(null)} size="sm" title="Tambah item checklist"
         footer={draft && <><Button onClick={() => setDraft(null)} disabled={busy}>Batal</Button><Button variant="primary" loading={busy} disabled={draft.title.trim().length < 2} onClick={() => void run(() => api(`/api/training/projects/${projectId}/checklist`, { body: { ...draft, assigneeId: draft.assigneeId || null } }), "Item ditambahkan.", () => setDraft(null))}>Tambahkan</Button></>}>

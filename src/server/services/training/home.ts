@@ -11,7 +11,7 @@ import { INTERN_FORBIDDEN_PROJECT_ROLES } from "@/lib/training/access";
 import { accessibleProjectWhere, requireModule } from "./access";
 import { listProgramCards } from "./indicator-compute";
 import { listCalendar } from "./operations";
-import { auditVisibilityWhere, today } from "./shared";
+import { auditVisibilityWhere, liveTaskWhere, today } from "./shared";
 
 /**
  * Data beranda Training & Operations (kartu ringkasan, grafik aktivitas, proyek saya, kalender, aktivitas terbaru). SEMUA dari data nyata dan
@@ -51,8 +51,8 @@ export async function getTrainingHome(actor: Actor): Promise<TrainingHomeDto> {
 
   const [activeIds, tasksOpen, tasksLate, doneRows, partRows, sessions, memberRows] = await Promise.all([
     prisma.trainingProject.findMany({ where: activeWhere, select: { id: true } }),
-    prisma.trainingTask.count({ where: { project: scope, status: { in: [...OPEN] } } }),
-    prisma.trainingTask.count({ where: { project: scope, status: { in: [...OPEN] }, dueDate: { lt: isoToDate(t) } } }),
+    prisma.trainingTask.count({ where: { AND: [liveTaskWhere, { project: scope, status: { in: [...OPEN] } }] } }),
+    prisma.trainingTask.count({ where: { AND: [liveTaskWhere, { project: scope, status: { in: [...OPEN] }, dueDate: { lt: isoToDate(t) } }] } }),
     prisma.trainingTask.findMany({ where: { project: scope, status: "DONE", completedAt: { gte: since } }, select: { completedAt: true } }),
     prisma.trainingParticipant.findMany({ where: { project: scope, status: { not: "CANCELLED" }, createdAt: { gte: since } }, select: { createdAt: true } }),
     listCalendar(actor, { from: month.from, to: month.to }),

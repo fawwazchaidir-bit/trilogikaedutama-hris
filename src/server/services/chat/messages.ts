@@ -17,6 +17,7 @@ import { canEditMessage, dedupeRefs, isUuid, normalizeBody, parseMentions, snipp
 import { assertChatEnabled, assertUuidOr404, ensureMember, loadPeople, loadRoom, resolveAccess, subjectAccess, type Db, type Who } from "./shared";
 import { enqueueChatPush } from "./push";
 import { processDeliveries } from "../../notify/deliveries";
+import { liveTaskWhere } from "../training/shared";
 
 /** Pesan obrolan: kirim (idempoten, berurutan), baca delta/riwayat, tandai dibaca, sunting, hapus. Rancangan: docs/OBROLAN.md §7. */
 
@@ -88,7 +89,7 @@ export async function listRefOptions(actor: Actor): Promise<ChatRefCardDto[]> {
   if (actor.employeeId) {
     const letters = await prisma.assignmentLetter.findMany({ where: { status: "ISSUED", assignees: { some: { employeeId: actor.employeeId } } }, orderBy: { startDate: "desc" }, take: 20, select: { id: true } });
     out.push(...(await resolveRefCards(prisma, actor, letters.map((l) => ({ type: "ASSIGNMENT_LETTER" as const, id: l.id })))));
-    const tasks = await prisma.trainingTask.findMany({ where: { assigneeId: actor.employeeId, status: { in: ["TODO", "IN_PROGRESS", "IN_REVIEW"] } }, orderBy: { updatedAt: "desc" }, take: 20, select: { id: true } }).catch(() => []);
+    const tasks = await prisma.trainingTask.findMany({ where: { assigneeId: actor.employeeId, status: { in: ["TODO", "IN_PROGRESS", "IN_REVIEW"] }, ...liveTaskWhere }, orderBy: { updatedAt: "desc" }, take: 20, select: { id: true } }).catch(() => []);
     out.push(...(await resolveRefCards(prisma, actor, tasks.map((t) => ({ type: "TRAINING_TASK" as const, id: t.id })))));
   }
   return out.filter((c) => c.accessible);

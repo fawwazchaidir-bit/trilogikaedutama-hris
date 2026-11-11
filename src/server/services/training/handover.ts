@@ -7,6 +7,7 @@ import { dateToIso } from "../../json";
 import { assigneeUnavailableReason } from "@/lib/training/availability";
 import type { ProjectRole, ProjectStatus } from "@/lib/training/types";
 import { accessibleProjectWhere, getModuleContext } from "./access";
+import { liveTaskWhere } from "./shared";
 import { notifyUsers } from "../notifications";
 
 /**
@@ -42,7 +43,8 @@ async function collect(db: Db, employeeId: string): Promise<{ name: string; acti
   const inLive = { project: { status: { in: LIVE_PROJECT } } };
   const [members, tasks, items, milestones, readiness, instructor] = await Promise.all([
     db.trainingProjectMember.findMany({ where: { employeeId, endedAt: null, ...inLive }, select: { projectId: true, role: true } }),
-    db.trainingTask.findMany({ where: { assigneeId: employeeId, status: { in: [...OPEN_TASK] }, ...inLive }, select: { id: true, projectId: true, title: true, status: true, dueDate: true }, orderBy: { dueDate: "asc" } }),
+    // Tugas tindak lanjut pada proyek yang sudah Selesai ikut dihitung: tugas itu masih hidup dan harus dialihkan bila pemegangnya berhenti.
+    db.trainingTask.findMany({ where: { assigneeId: employeeId, status: { in: [...OPEN_TASK] }, ...liveTaskWhere }, select: { id: true, projectId: true, title: true, status: true, dueDate: true }, orderBy: { dueDate: "asc" } }),
     db.trainingProjectChecklistItem.findMany({ where: { assigneeId: employeeId, isDone: false, ...inLive }, select: { id: true, projectId: true, title: true, phase: true }, orderBy: [{ phase: "asc" }, { sortOrder: "asc" }] }),
     db.trainingMilestone.findMany({ where: { assigneeId: employeeId, doneAt: null, notApplicable: false, ...inLive }, select: { id: true, projectId: true, code: true, name: true }, orderBy: { sortOrder: "asc" } }),
     db.trainingReadinessItem.findMany({ where: { assigneeId: employeeId, status: "OPEN", ...inLive }, select: { id: true, projectId: true, name: true }, orderBy: { sortOrder: "asc" } }),

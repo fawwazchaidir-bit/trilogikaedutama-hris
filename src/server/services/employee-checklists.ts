@@ -21,6 +21,7 @@ import { addDays, diffDays, todayIso } from "@/lib/time";
 import { formatDateLong, formatDays } from "@/lib/format";
 import { SETTLEMENT_STATUS_LABEL } from "@/lib/final-settlement";
 import { KIND_LABEL, type ChecklistItemStatus, type ChecklistKind, type Signal } from "@/lib/employee-checklist";
+import { liveTaskWhere } from "./training/shared";
 
 /**
  * CHECKLIST MASUK & BERHENTI karyawan — daftar centang sederhana agar prosesnya tidak bergantung pada ingatan satu orang.
@@ -92,7 +93,7 @@ export async function signalsFor(db: Db, kind: ChecklistKind, employeeId: string
     ? { state: docs ? "OK" : "WARN", text: `Berhenti ${formatDateLong(dateToIso(e.endDate))}; ${docs ? `${plural(docs, "dokumen")} dicatat sejak proses dimulai` : "belum ada dokumen penyelesaian yang dicatat"}.` }
     : { state: "INFO", text: "Karyawan masih aktif; tanggal berhenti dicatat saat karyawan dinonaktifkan." };
   const [tasks, projects, reports] = await Promise.all([
-    db.trainingTask.count({ where: { assigneeId: employeeId, status: { in: ["TODO", "IN_PROGRESS", "IN_REVIEW"] }, project: live } }),
+    db.trainingTask.count({ where: { assigneeId: employeeId, status: { in: ["TODO", "IN_PROGRESS", "IN_REVIEW"] }, ...liveTaskWhere } }),
     db.trainingProjectMember.count({ where: { employeeId, endedAt: null, project: live } }),
     db.employee.count({ where: { supervisorId: employeeId, isActive: true } }),
   ]);

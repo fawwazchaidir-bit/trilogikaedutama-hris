@@ -10,6 +10,7 @@ import { decideProgramEscalations, type EscalationEvent, type RecipientSpec } fr
 import { canUserViewProject } from "./access";
 import { computeActivePrograms, loadData, loadSnapshots, runsOf, weekLoadOf, type Env, type ProgramIndicatorDto } from "./indicator-compute";
 import { dateCtx, specOf, toProgramRow } from "./indicator-data";
+import { liveTaskWhere } from "./shared";
 
 /**
  * Pekerja harian Training & Operations: (1) snapshot status program, (2) eskalasi otomatis sesuai dokumen §5.2, (3) pengingat tenggat H-1 dan hari-H.
@@ -209,7 +210,7 @@ async function reminders(env: Env, cfg: IndicatorConfig, rec: Recipients): Promi
   if (days.length) {
     // Tugas: penanggung jawab. Hanya yang masih dikerjakan (Belum/Proses); "Menunggu pemeriksaan" ada di tangan pemeriksa.
     const tasks = await prisma.trainingTask.findMany({
-      where: { status: { in: [...OPEN_TASK] }, assigneeId: { not: null }, dueDate: { in: days.map((d) => isoToDate(d.iso)) }, project: { status: { notIn: ["COMPLETED", "CANCELLED"] } } },
+      where: { status: { in: [...OPEN_TASK] }, assigneeId: { not: null }, dueDate: { in: days.map((d) => isoToDate(d.iso)) }, ...liveTaskWhere },
       select: { id: true, title: true, dueDate: true, assigneeId: true, project: { select: { id: true, code: true } } },
     });
     for (const x of tasks) {

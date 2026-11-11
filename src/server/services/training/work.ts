@@ -1,7 +1,7 @@
 import "server-only";
 import { Prisma } from "@prisma/client";
 import { prisma, transaction, type Tx } from "../../db";
-import { Errors } from "../../errors";
+import { AppError, Errors } from "../../errors";
 import { parseInput } from "../../validate";
 import type { Actor } from "../../actor";
 import { writeAudit, diffFields } from "../../audit";
@@ -9,20 +9,21 @@ import { dateToIso, isoToDate } from "../../json";
 import { notifyUsers } from "../notifications";
 import { projectAbilities } from "@/lib/training/access";
 import { allowedTaskTransitions, reviewBlockReason } from "@/lib/training/status";
+import { isLiveFollowUp, type ClosureTaskPlan } from "@/lib/training/closure";
 import { assigneeUnavailableReason, type AssigneeUnavailable } from "@/lib/training/availability";
 import { checklistProgress, isTaskDueSoon, isTaskDueToday, isTaskOverdue, requiredOutstanding, type ChecklistProgress } from "@/lib/training/indicators";
 import { DEFAULT_TEMPLATE_ITEMS, DEFAULT_TEMPLATE_NAME } from "@/lib/training/misc";
 import {
-  CHECKLIST_PHASES, TASK_STATUS_LABEL, isOpenTask, type ChecklistPhase, type ProjectRole, type TaskPriority, type TaskStatus,
+  CHECKLIST_PHASES, TASK_STATUS_LABEL, isFinalProject, isOpenTask, type ChecklistPhase, type ProjectRole, type TaskPriority, type TaskStatus,
 } from "@/lib/training/types";
 import {
   applyTemplateSchema, checklistItemCreateSchema, checklistItemUpdateSchema, myTasksSchema, taskCommentSchema, taskCreateSchema,
-  taskStatusSchema, taskUpdateSchema, templateSaveSchema,
+  taskStatusSchema, taskUpdateSchema, templateSaveSchema, checklistItemDeleteSchema,
 } from "@/lib/validation/training";
 import {
   assertEditable, getModuleContext, loadProjectAccess, requireAbility, requireGlobalCap, requireModule, accessibleProjectWhere, type ProjectAccess,
 } from "./access";
-import { assertUuid, auditProject, iso, today } from "./shared";
+import { assertUuid, auditProject, iso, liveTaskWhere, today } from "./shared";
 
 // ═════════════════════════════ Tugas ═════════════════════════════
 
@@ -44,10 +45,14 @@ export interface TaskDto {
   allowedNext: TaskStatus[];
   /** Pelaku boleh mengubah isi tugas (judul, penanggung jawab, tenggat, dst.). */
   canEdit: boolean;
+  /** Tugas tindak lanjut: sengaja dilanjutkan setelah proyek ditutup (diputuskan saat penutupan). */
+  isFollowUp: boolean;
+  /** Proyek sudah final (Selesai/Dibatalkan) dan tugas ini TERKUNCI (bukan tindak lanjut pada proyek Selesai): tidak ada aksi yang tersedia. */
+  locked: boolean;
 }
 
 const taskInclude = {
-  project: { select: { code: true, name: true } },
+  project: { select: { code: true, name: true, status: true } },
   assignee: { select: { fullName: true, isActive: true, user: { select: { isActive: true } } } },
   _count: { select: { comments: true } },
 } satisfies Prisma.TrainingTaskInclude;
@@ -86,6 +91,7 @@ async function toTaskDtos(rows: TaskRow[], ctx: TaskCtx): Promise<TaskDto[]> {
     const isSubmitter = !!r.submittedById && r.submittedById === ctx.actor.userId;
     const isExecutor = !!ctx.actor.employeeId && (r.assigneeAtSubmitId === ctx.actor.employeeId || r.assigneeId === ctx.actor.employeeId);
     const due = r.dueDate ? dateToIso(r.dueDate) : null;
+    const locked = isFinalProject(r.project.status) && !isLiveFollowUp(r.project.status, r.isFollowUp);
     const unavailable = r.assigneeId && r.assignee ? assigneeUnavailableReason({ activeMember: ctx.activeAssignees.has(`${r.projectId}:${r.assigneeId}`), employeeActive: r.assignee.isActive, accountActive: r.assignee.user?.isActive ?? null }) : null;
     return {
       id: r.id, projectId: r.projectId, projectCode: r.project.code, projectName: r.project.name, title: r.title, description: r.description,
@@ -97,8 +103,8 @@ async function toTaskDtos(rows: TaskRow[], ctx: TaskCtx): Promise<TaskDto[]> {
       submittedByName: r.submittedById ? uname.get(r.submittedById) ?? null : null, submittedAt: iso(r.submittedAt),
       reviewedByName: r.reviewedById ? uname.get(r.reviewedById) ?? null : null, reviewedAt: iso(r.reviewedAt), viewerIsExecutor: isExecutor,
       overdue: isTaskOverdue({ status: r.status, dueDate: due }, t), commentCount: r._count.comments,
-      allowedNext: abilities.has("view") ? allowedTaskTransitions({ status: r.status, requiresReview: r.requiresReview, isAssignee, canManage, isSubmitter, isExecutor }) : [],
-      canEdit: canManage,
+      allowedNext: abilities.has("view") && !locked ? allowedTaskTransitions({ status: r.status, requiresReview: r.requiresReview, isAssignee, canManage, isSubmitter, isExecutor }) : [],
+      canEdit: canManage && !locked, isFollowUp: r.isFollowUp, locked,
     };
   });
 }
@@ -112,6 +118,12 @@ function sortTasks(list: TaskDto[]): TaskDto[] {
     || PRIORITY_RANK[a.priority] - PRIORITY_RANK[b.priority]
     || STATUS_RANK[a.status] - STATUS_RANK[b.status]
     || a.createdAt.localeCompare(b.createdAt));
+}
+
+/** Proyek final mengunci semua tugasnya, KECUALI tindak lanjut pada proyek yang Selesai (dibuat saat penutupan; proyek Dibatalkan tidak punya tindak lanjut). */
+function assertTaskEditable(project: Pick<ProjectAccess["project"], "status">, task: { isFollowUp: boolean }): void {
+  if (isLiveFollowUp(project.status, task.isFollowUp)) return;
+  assertEditable(project);
 }
 
 async function loadTask(actor: Actor, taskId: string): Promise<{ task: TaskRow; access: ProjectAccess }> {
@@ -139,7 +151,8 @@ export async function listMyTasks(actor: Actor, raw: unknown = {}): Promise<Task
   const f = parseInput(myTasksSchema, raw);
   if (!actor.employeeId) return [];
   const rows = await prisma.trainingTask.findMany({
-    where: { assigneeId: actor.employeeId, ...(f.projectId ? { projectId: f.projectId } : {}), project: { AND: [accessibleProjectWhere(actor, mod), activeMemberOf(actor.employeeId)] } },
+    // Tugas terbuka hanya yang "hidup" (lihat `liveTaskWhere`); riwayat Selesai/Dibatalkan tetap tampil (terkunci bila proyeknya final).
+    where: { AND: [{ OR: [liveTaskWhere, { status: { in: ["DONE", "CANCELLED"] } }] }, { assigneeId: actor.employeeId, ...(f.projectId ? { projectId: f.projectId } : {}), project: { AND: [accessibleProjectWhere(actor, mod), activeMemberOf(actor.employeeId)] } }] },
     include: taskInclude,
   });
   const dtos = await toTaskDtos(rows, await buildTaskCtx(actor, rows));
@@ -164,7 +177,7 @@ export async function countMyOverdueTasks(actor: Actor): Promise<number> {
   if (!actor.employeeId) return 0;
   const mod = await getModuleContext(actor);
   return prisma.trainingTask.count({
-    where: { assigneeId: actor.employeeId, status: { in: ["TODO", "IN_PROGRESS", "IN_REVIEW"] }, dueDate: { lt: isoToDate(today()) }, project: { AND: [accessibleProjectWhere(actor, mod), activeMemberOf(actor.employeeId)] } },
+    where: { AND: [liveTaskWhere, { assigneeId: actor.employeeId, status: { in: ["TODO", "IN_PROGRESS", "IN_REVIEW"] }, dueDate: { lt: isoToDate(today()) }, project: { AND: [accessibleProjectWhere(actor, mod), activeMemberOf(actor.employeeId)] } }] },
   });
 }
 
@@ -217,7 +230,7 @@ export async function createTask(actor: Actor, projectId: string, raw: unknown):
 export async function updateTask(actor: Actor, taskId: string, raw: unknown): Promise<void> {
   const { task, access } = await loadTask(actor, taskId);
   requireAbility(access, "manage_tasks");
-  assertEditable(access.project);
+  assertTaskEditable(access.project, task);
   const input = parseInput(taskUpdateSchema, raw);
   const reason = input.reason?.trim() || null;
   await transaction(async (tx) => {
@@ -273,7 +286,7 @@ export async function updateTask(actor: Actor, taskId: string, raw: unknown): Pr
  */
 export async function changeTaskStatus(actor: Actor, taskId: string, raw: unknown): Promise<TaskDto> {
   const { task, access } = await loadTask(actor, taskId);
-  assertEditable(access.project);
+  assertTaskEditable(access.project, task);
   const input = parseInput(taskStatusSchema, raw);
   const named = !!actor.employeeId && task.assigneeId === actor.employeeId;
   const isAssignee = named && access.memberRole !== null;       // pemilik SAH: tercatat sebagai penanggung jawab DAN masih anggota aktif proyek
@@ -337,7 +350,7 @@ export async function listComments(actor: Actor, taskId: string): Promise<TaskCo
 /** Semua anggota proyek boleh berkomentar pada tugas proyeknya (catatan tidak dapat diubah/dihapus). */
 export async function addComment(actor: Actor, taskId: string, raw: unknown): Promise<void> {
   const { task, access } = await loadTask(actor, taskId);
-  assertEditable(access.project);
+  assertTaskEditable(access.project, task);
   // Komentar adalah perubahan data: hanya ANGGOTA proyek (atau pengelola tugas) — Pemantau/Super Admin hanya melihat.
   if (!access.memberRole && !access.abilities.has("manage_tasks")) throw Errors.forbidden("Hanya anggota proyek yang dapat berkomentar pada tugas.");
   const { body } = parseInput(taskCommentSchema, raw);
@@ -357,7 +370,11 @@ export interface ChecklistItemDto {
   /** Penanggung jawab tidak tersedia (berhenti / akun nonaktif / bukan anggota aktif) → perlu dialihkan; null = tersedia. */
   assigneeUnavailable: AssigneeUnavailable | null;
 }
-export interface ChecklistDto { items: ChecklistItemDto[]; progress: ChecklistProgress; requiredOutstanding: number; canManage: boolean }
+export interface ChecklistDto {
+  items: ChecklistItemDto[]; progress: ChecklistProgress; requiredOutstanding: number; canManage: boolean;
+  /** Boleh menjadikan item WAJIB tidak wajib / menghapusnya (beralasan). Setelah proyek Berjalan hanya Koordinator Program/Direktur. */
+  canRelax: boolean;
+}
 
 export async function listChecklist(actor: Actor, projectId: string): Promise<ChecklistDto> {
   const access = await loadProjectAccess(actor, projectId);
@@ -374,7 +391,8 @@ export async function listChecklist(actor: Actor, projectId: string): Promise<Ch
     canToggle: canManage || (!!actor.employeeId && r.assigneeId === actor.employeeId && access.memberRole !== null),
     assigneeUnavailable: r.assigneeId && r.assignee ? assigneeUnavailableReason({ activeMember: activeIds.has(r.assigneeId), employeeActive: r.assignee.isActive, accountActive: r.assignee.user?.isActive ?? null }) : null,
   }));
-  return { items, progress: checklistProgress(items), requiredOutstanding: requiredOutstanding(items).length, canManage };
+  const canRelax = canManage && (access.project.status !== "RUNNING" || access.abilities.has("close"));
+  return { items, progress: checklistProgress(items), requiredOutstanding: requiredOutstanding(items).length, canManage, canRelax };
 }
 
 async function loadItem(actor: Actor, itemId: string) {
@@ -427,6 +445,10 @@ export async function updateChecklistItem(actor: Actor, itemId: string, raw: unk
   const structural = ["phase", "title", "isRequired", "assigneeId", "note"].some((k) => k in input);
   if (structural && !canManage) throw Errors.forbidden("Hanya pengelola checklist yang dapat mengubah isi item.");
   if ("isDone" in input && !canManage && !isOwner) throw Errors.forbidden(named ? NOT_MEMBER_MESSAGE : "Hanya penanggung jawab item atau pengelola checklist yang dapat menandai selesai.");
+  // Melonggarkan item WAJIB (jadi tidak wajib) harus beralasan, tercatat sebagai pelonggaran, dan harus diakui saat menutup proyek.
+  const demoting = input.isRequired === false && item.isRequired;
+  const promoting = input.isRequired === true && !item.isRequired;
+  const relaxReason = demoting ? assertMayRelax(access, input.reason) : null;
   await transaction(async (tx) => {
     if ("isDone" in input && !canManage && isOwner) await assertStillActiveMember(tx, item.projectId, actor.employeeId!);
     if ("assigneeId" in input && (input.assigneeId ?? null) !== item.assigneeId) await assertAssigneeInTeam(tx, item.projectId, input.assigneeId);
@@ -438,23 +460,94 @@ export async function updateChecklistItem(actor: Actor, itemId: string, raw: unk
     if (Object.keys(data).length === 0) return;
     await tx.trainingProjectChecklistItem.update({ where: { id: itemId }, data });
     const toggled = data.isDone !== undefined;
+    if (demoting) {
+      const snap = { itemTitle: (data.title as string | undefined) ?? item.title, phase: (data.phase as ChecklistPhase | undefined) ?? item.phase };
+      await tx.trainingChecklistRelaxation.upsert({
+        where: { itemId },
+        create: { projectId: item.projectId, itemId, kind: "DEMOTED", reason: relaxReason!, actorId: actor.userId, ...snap },
+        update: { kind: "DEMOTED", reason: relaxReason!, actorId: actor.userId, createdAt: new Date(), acknowledgedAt: null, acknowledgedById: null, ...snap },
+      });
+    }
+    if (promoting) await tx.trainingChecklistRelaxation.deleteMany({ where: { itemId } });   // wajib lagi: tidak ada lagi yang dilonggarkan
     await auditProject(tx, actor, item.projectId, {
       action: toggled ? "training.checklist.toggle" : "training.checklist.update",
-      summary: toggled ? `Checklist "${item.title}" ${input.isDone ? "ditandai selesai" : "dibuka kembali"}${item.isRequired ? " (wajib)" : ""}` : `Item checklist "${item.title}" diubah`,
+      summary: toggled ? `Checklist "${item.title}" ${input.isDone ? "ditandai selesai" : "dibuka kembali"}${item.isRequired ? " (wajib)" : ""}`
+        : demoting ? `Item checklist WAJIB "${item.title}" dijadikan TIDAK WAJIB (pelonggaran)` : promoting ? `Item checklist "${item.title}" dijadikan wajib` : `Item checklist "${item.title}" diubah`,
       before: { itemId, isDone: item.isDone, isRequired: item.isRequired }, after: { itemId, ...Object.fromEntries(Object.entries(data).map(([k, v]) => [k, v instanceof Date ? v.toISOString() : v])) },
+      ...(relaxReason ? { reason: relaxReason } : {}),
     });
   });
 }
 
-export async function deleteChecklistItem(actor: Actor, itemId: string): Promise<void> {
+export async function deleteChecklistItem(actor: Actor, itemId: string, raw: unknown = {}): Promise<void> {
   const { item, access } = await loadItem(actor, itemId);
   requireAbility(access, "manage_checklist");
   assertEditable(access.project);
+  const { reason } = parseInput(checklistItemDeleteSchema, raw ?? {});
   if (item.isDone) throw Errors.conflict("Item yang sudah selesai tidak dapat dihapus. Buka kembali tanda selesainya dulu bila memang keliru.");
+  const relaxReason = item.isRequired ? assertMayRelax(access, reason) : null;
   await transaction(async (tx) => {
     await tx.trainingProjectChecklistItem.delete({ where: { id: itemId } });
-    await auditProject(tx, actor, item.projectId, { action: "training.checklist.delete", summary: `Item checklist "${item.title}" dihapus${item.isRequired ? " (wajib)" : ""}`, before: { itemId, phase: item.phase, isRequired: item.isRequired } });
+    if (item.isRequired) {
+      await tx.trainingChecklistRelaxation.upsert({
+        where: { itemId },
+        create: { projectId: item.projectId, itemId, itemTitle: item.title, phase: item.phase, kind: "DELETED", reason: relaxReason!, actorId: actor.userId },
+        update: { kind: "DELETED", reason: relaxReason!, actorId: actor.userId, createdAt: new Date(), acknowledgedAt: null, acknowledgedById: null },
+      });
+    } else {
+      await tx.trainingChecklistRelaxation.updateMany({ where: { itemId }, data: { kind: "DELETED" } });   // sebelumnya sudah dilonggarkan (tidak wajib), kini dihapus
+    }
+    await auditProject(tx, actor, item.projectId, {
+      action: "training.checklist.delete", summary: `Item checklist "${item.title}" dihapus${item.isRequired ? " (WAJIB — pelonggaran)" : ""}`,
+      before: { itemId, phase: item.phase, isRequired: item.isRequired }, ...(relaxReason ? { reason: relaxReason } : {}),
+    });
   });
+}
+
+const MIN_RELAX_REASON = 5;
+/**
+ * Melonggarkan item checklist WAJIB (dijadikan tidak wajib atau dihapus): alasan wajib. Setelah proyek BERJALAN, hanya pemegang hak menutup proyek
+ * (Koordinator Program / Direktur) yang boleh — itulah persetujuannya; PIC dan Admin Program meminta mereka. Sebelum itu (Draf/Persiapan) cukup beralasan.
+ * Pelonggaran dicatat (`TrainingChecklistRelaxation`), tampil di ringkasan penutupan, dan harus diakui saat menutup.
+ */
+function assertMayRelax(access: ProjectAccess, reason: string | null | undefined): string {
+  if (access.project.status === "RUNNING" && !access.abilities.has("close")) {
+    throw Errors.forbidden("Setelah proyek berjalan, checklist wajib hanya dapat dijadikan tidak wajib atau dihapus oleh Koordinator Program atau Direktur (dengan alasan). Mintalah mereka mengubahnya.");
+  }
+  const r = (reason ?? "").trim();
+  if (r.length < MIN_RELAX_REASON) throw Errors.validation("Menjadikan checklist wajib tidak wajib atau menghapusnya harus disertai alasan.", { reason: `Alasan wajib diisi (minimal ${MIN_RELAX_REASON} karakter)` });
+  return r;
+}
+
+// ═════════════════════════════ Penutupan proyek: keputusan per tugas terbuka ═════════════════════════════
+
+/** Penanggung jawab tindak lanjut harus karyawan aktif & anggota aktif proyek (pesan menyebut tugasnya). */
+export async function assertFollowUpAssignees(tx: Tx, projectId: string, plan: ClosureTaskPlan): Promise<void> {
+  for (const f of plan.followUp) {
+    try { await assertAssigneeInTeam(tx, projectId, f.assigneeId); }
+    catch (e) { if (e instanceof AppError) throw Errors.validation(`Tindak lanjut "${f.title}": ${e.message}`, { taskDecisions: "Penanggung jawab tidak valid" }); throw e; }
+  }
+}
+
+/** Terapkan keputusan penutupan pada tugas terbuka (dipanggil `closeProject` DI DALAM transaksinya). Setiap tugas dicatat di komentar tugas & diberitahukan ke penanggung jawabnya. */
+export async function settleOpenTasksForClosure(tx: Tx, actor: Actor, project: { id: string; code: string }, plan: ClosureTaskPlan): Promise<void> {
+  for (const f of plan.followUp) {
+    const t = await tx.trainingTask.findUniqueOrThrow({ where: { id: f.taskId }, select: { assigneeId: true, dueDate: true } });
+    await tx.trainingTask.update({ where: { id: f.taskId }, data: { isFollowUp: true, assigneeId: f.assigneeId, dueDate: isoToDate(f.dueDate) } });
+    const parts = [f.assigneeChanged && "penanggung jawab diganti", f.dueChanged && `tenggat ${t.dueDate ? dateToIso(t.dueDate) : "—"} → ${f.dueDate}`].filter(Boolean).join("; ");
+    await tx.trainingTaskComment.create({ data: { taskId: f.taskId, authorId: actor.userId, body: `[Tindak lanjut] Proyek ${project.code} ditutup; tugas ini dilanjutkan sebagai tindak lanjut, tenggat ${f.dueDate}.${parts ? ` (${parts})` : ""}${f.reason ? ` Alasan: ${f.reason}` : ""}` } });
+    await notifyEmployee(tx, actor, f.assigneeId, { type: "training.task.followup", title: "Tugas tindak lanjut untuk Anda", body: `${project.code} · ${f.title} · tenggat ${f.dueDate}`, href: "/training/tugas-saya" });
+  }
+  for (const c of plan.cancel) {
+    const t = await tx.trainingTask.findUniqueOrThrow({ where: { id: c.taskId }, select: { assigneeId: true } });
+    const r = await tx.trainingTask.updateMany({
+      where: { id: c.taskId, status: { in: ["TODO", "IN_PROGRESS", "IN_REVIEW"] } },
+      data: { status: "CANCELLED", completedAt: null, completedById: null, submittedById: null, submittedAt: null, assigneeAtSubmitId: null, reviewedById: null, reviewedAt: null },
+    });
+    if (r.count === 0) throw Errors.conflict("Status tugas baru saja diubah pengguna lain. Muat ulang halaman.");
+    await tx.trainingTaskComment.create({ data: { taskId: c.taskId, authorId: actor.userId, body: `[Dibatalkan saat penutupan proyek ${project.code}] ${c.reason}` } });
+    await notifyEmployee(tx, actor, t.assigneeId, { type: "training.task.cancelled", title: "Tugas dibatalkan saat penutupan proyek", body: `${project.code} · ${c.title}`, href: `/training/proyek/${project.id}?tab=tugas` });
+  }
 }
 
 export interface MyChecklistItemDto { id: string; projectId: string; projectCode: string; projectName: string; phase: ChecklistPhase; title: string; isRequired: boolean }

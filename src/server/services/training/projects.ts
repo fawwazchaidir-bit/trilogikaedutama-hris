@@ -15,6 +15,7 @@ import { INTERN_FORBIDDEN_PROJECT_ROLES, type ProjectAbility } from "@/lib/train
 import { assigneeUnavailableReason } from "@/lib/training/availability";
 import { assertNotIntern } from "../function-guard";
 import { PROJECT_FORWARD, checkReadyForPreparation } from "@/lib/training/status";
+import { checkClosureTasks, unacknowledgedRelaxations } from "@/lib/training/closure";
 import { attentionReasons, checklistProgress, closureReadiness, type AttentionCode, type ChecklistProgress } from "@/lib/training/indicators";
 import { formatProjectCode } from "@/lib/training/misc";
 import {
@@ -25,8 +26,9 @@ import type { Paged } from "@/lib/types";
 import {
   accessibleProjectWhere, assertEditable, assertModuleEnabled, loadProjectAccess, requireAbility, requireGlobalCap, requireModule,
 } from "./access";
-import { assertUuid, auditProject, iso, today } from "./shared";
+import { assertUuid, auditProject, iso, liveTaskWhere, today } from "./shared";
 import { loadConfig } from "./indicator-config";
+import { assertFollowUpAssignees, settleOpenTasksForClosure } from "./work";
 import { applyTemplatesTx, loadProgramRow, regenerateWorkloadTx, toProgramRow } from "./indicator-data";
 import type { Track } from "@/lib/training/indicators/config";
 
@@ -111,8 +113,8 @@ async function loadSignals(db: Tx | typeof prisma, ids: string[]): Promise<Map<s
   if (ids.length === 0) return out;
   const t = isoToDate(today());
   const [tasks, overdue, items, pics] = await Promise.all([
-    db.trainingTask.groupBy({ by: ["projectId"], where: { projectId: { in: ids }, status: { in: ["TODO", "IN_PROGRESS", "IN_REVIEW"] } }, _count: { _all: true } }),
-    db.trainingTask.groupBy({ by: ["projectId"], where: { projectId: { in: ids }, status: { in: ["TODO", "IN_PROGRESS", "IN_REVIEW"] }, dueDate: { lt: t } }, _count: { _all: true } }),
+    db.trainingTask.groupBy({ by: ["projectId"], where: { AND: [liveTaskWhere, { projectId: { in: ids }, status: { in: ["TODO", "IN_PROGRESS", "IN_REVIEW"] } }] }, _count: { _all: true } }),
+    db.trainingTask.groupBy({ by: ["projectId"], where: { AND: [liveTaskWhere, { projectId: { in: ids }, status: { in: ["TODO", "IN_PROGRESS", "IN_REVIEW"] }, dueDate: { lt: t } }] }, _count: { _all: true } }),
     db.trainingProjectChecklistItem.groupBy({ by: ["projectId", "isDone", "isRequired"], where: { projectId: { in: ids } }, _count: { _all: true } }),
     db.trainingProjectMember.findMany({ where: { projectId: { in: ids }, role: "PROJECT_MANAGER", endedAt: null }, select: { projectId: true, employee: { select: { fullName: true } } } }),
   ]);
@@ -381,12 +383,15 @@ export async function changeProjectStatus(actor: Actor, id: string, raw: unknown
   });
 }
 
-export interface CloseResult { code: string; closedWithOverride: boolean; outstandingRequired: string[]; openTasks: number }
+export interface CloseResult { code: string; closedWithOverride: boolean; outstandingRequired: string[]; openTasks: number; followUpTasks: number; cancelledTasks: number; acknowledgedRelaxations: number }
 
 /**
- * Penutupan proyek (Koordinator Program). Syarat: semua item checklist WAJIB selesai. Bila ada yang belum, penutupan hanya
- * boleh dengan alasan pengecualian tertulis, dan daftar item yang dilewati dicatat di audit. Menutup proyek TIDAK
- * mengubah status tugas, surat tugas, uang harian, invoice, sertifikat, atau kompetensi peserta.
+ * Penutupan proyek (Koordinator Program). Syarat:
+ *  1. semua item checklist WAJIB selesai — bila ada yang belum, hanya boleh dengan alasan pengecualian tertulis (item yang dilewati dicatat di audit);
+ *  2. SETIAP tugas yang masih terbuka diputuskan: dijadikan tindak lanjut (penanggung jawab + tenggat; tetap dapat dikerjakan setelah proyek Selesai) atau dibatalkan (beralasan).
+ *     Tugas terbuka tidak menghalangi penutupan, tetapi tidak boleh menggantung;
+ *  3. pelonggaran checklist wajib (dijadikan tidak wajib/dihapus) yang belum diakui harus DIAKUI (`acknowledgeRelaxed`), lalu tercatat di audit.
+ * Menutup proyek TIDAK mengubah surat tugas, uang harian, invoice, sertifikat, atau kompetensi peserta.
  */
 export async function closeProject(actor: Actor, id: string, raw: unknown): Promise<CloseResult> {
   const access = await loadProjectAccess(actor, id);
@@ -396,25 +401,53 @@ export async function closeProject(actor: Actor, id: string, raw: unknown): Prom
   return transaction(async (tx) => {
     const p = await tx.trainingProject.findUniqueOrThrow({ where: { id } });
     if (p.status !== "PREPARATION" && p.status !== "RUNNING") throw Errors.conflict("Hanya proyek berstatus Persiapan atau Berjalan yang dapat ditutup.");
-    const [items, tasks] = await Promise.all([
+    const [items, tasks, relaxations] = await Promise.all([
       tx.trainingProjectChecklistItem.findMany({ where: { projectId: id }, select: { title: true, isRequired: true, isDone: true } }),
-      tx.trainingTask.findMany({ where: { projectId: id }, select: { status: true, dueDate: true } }),
+      tx.trainingTask.findMany({ where: { projectId: id }, select: { id: true, title: true, status: true, assigneeId: true, dueDate: true } }),
+      tx.trainingChecklistRelaxation.findMany({ where: { projectId: id }, orderBy: { createdAt: "asc" }, select: { id: true, itemTitle: true, kind: true, reason: true, acknowledgedAt: true } }),
     ]);
-    const ready = closureReadiness(items, tasks.map((t) => ({ status: t.status, dueDate: t.dueDate ? dateToIso(t.dueDate) : null })));
+    const lite = tasks.map((t) => ({ id: t.id, title: t.title, status: t.status, assigneeId: t.assigneeId, dueDate: t.dueDate ? dateToIso(t.dueDate) : null }));
+    const ready = closureReadiness(items, lite.map((t) => ({ status: t.status, dueDate: t.dueDate })));
     const outstanding = items.filter((i) => i.isRequired && !i.isDone).map((i) => i.title);
     if (!ready.canCloseClean && !input.overrideReason) {
       throw Errors.conflict(`Masih ada ${outstanding.length} checklist wajib yang belum selesai. Selesaikan, atau tutup dengan alasan pengecualian tertulis.`, { outstanding });
     }
+    const pending = unacknowledgedRelaxations(relaxations.map((r) => ({ ...r, acknowledgedAt: r.acknowledgedAt ? r.acknowledgedAt.toISOString() : null })));
+    if (pending.length > 0 && !input.acknowledgeRelaxed) {
+      throw Errors.conflict(`Ada ${pending.length} checklist wajib yang dilonggarkan (dijadikan tidak wajib/dihapus). Periksa alasannya, lalu centang pengakuan untuk menutup.`, { relaxed: pending.map((r) => r.itemTitle) });
+    }
+    const chk = checkClosureTasks(lite, input.taskDecisions, today());
+    if (!chk.ok) {
+      const head = chk.undecided.length ? `Masih ada ${chk.undecided.length} tugas terbuka yang belum diputuskan. Pilih: jadikan tindak lanjut atau batalkan.`
+        : chk.unknown.length ? "Daftar tugas terbuka berubah sejak halaman dimuat. Muat ulang halaman penutupan."
+        : chk.invalid[0]!.message;
+      throw Errors.conflict(head, { undecided: chk.undecided.map((t) => t.title), unknown: chk.unknown, invalid: chk.invalid.map((x) => `${x.title}: ${x.message}`) });
+    }
+    await assertFollowUpAssignees(tx, id, chk.plan);
     const r = await tx.trainingProject.updateMany({
       where: { id, status: p.status },
       data: { status: "COMPLETED", closedAt: new Date(), closedById: actor.userId, closureSummary: input.summary, closureFollowUp: input.followUp, closureOverrideReason: ready.canCloseClean ? null : input.overrideReason },
     });
     if (r.count === 0) throw Errors.conflict("Status proyek baru saja diubah pengguna lain. Muat ulang halaman.");
+    await settleOpenTasksForClosure(tx, actor, { id, code: p.code }, chk.plan);
+    if (pending.length > 0) await tx.trainingChecklistRelaxation.updateMany({ where: { id: { in: pending.map((x) => x.id) } }, data: { acknowledgedAt: new Date(), acknowledgedById: actor.userId } });
+    const note = [
+      ready.canCloseClean ? "" : ` DENGAN PENGECUALIAN (${outstanding.length} checklist wajib dilewati)`,
+      chk.plan.followUp.length || chk.plan.cancel.length ? `; tugas terbuka: ${chk.plan.followUp.length} jadi tindak lanjut, ${chk.plan.cancel.length} dibatalkan` : "",
+      pending.length ? `; ${pending.length} pelonggaran checklist wajib diakui` : "",
+    ].join("");
     await auditProject(tx, actor, id, {
-      action: "training.project.close", summary: `Proyek ${p.code} ditutup${ready.canCloseClean ? "" : ` DENGAN PENGECUALIAN (${outstanding.length} checklist wajib dilewati)`}`,
-      before: { status: p.status }, after: { status: "COMPLETED", skippedRequired: ready.canCloseClean ? [] : outstanding, openTasks: ready.openTasks }, reason: ready.canCloseClean ? null : input.overrideReason,
+      action: "training.project.close", summary: `Proyek ${p.code} ditutup${note}`,
+      before: { status: p.status },
+      after: {
+        status: "COMPLETED", skippedRequired: ready.canCloseClean ? [] : outstanding, openTasks: ready.openTasks,
+        followUp: chk.plan.followUp.map((f) => ({ taskId: f.taskId, title: f.title, assigneeId: f.assigneeId, dueDate: f.dueDate })),
+        cancelled: chk.plan.cancel.map((c) => ({ taskId: c.taskId, title: c.title, reason: c.reason })),
+        relaxedAcknowledged: pending.map((x) => ({ title: x.itemTitle, kind: x.kind, reason: x.reason })),
+      },
+      reason: ready.canCloseClean ? null : input.overrideReason,
     });
-    return { code: p.code, closedWithOverride: !ready.canCloseClean, outstandingRequired: outstanding, openTasks: ready.openTasks };
+    return { code: p.code, closedWithOverride: !ready.canCloseClean, outstandingRequired: outstanding, openTasks: ready.openTasks, followUpTasks: chk.plan.followUp.length, cancelledTasks: chk.plan.cancel.length, acknowledgedRelaxations: pending.length };
   });
 }
 
@@ -440,8 +473,10 @@ export async function reopenProject(actor: Actor, id: string, raw: unknown): Pro
     const p = await tx.trainingProject.findUniqueOrThrow({ where: { id } });
     if (p.status !== "COMPLETED") throw Errors.conflict("Hanya proyek berstatus Selesai yang dapat dibuka kembali.");
     await tx.trainingProject.update({ where: { id }, data: { status: "RUNNING", closedAt: null, closedById: null, closureSummary: null, closureFollowUp: null, closureOverrideReason: null } });
+    // Proyek aktif lagi: tugas tindak lanjut kembali menjadi tugas biasa (penutupan berikutnya meminta keputusan untuk semua tugas yang terbuka).
+    const cleared = await tx.trainingTask.updateMany({ where: { projectId: id, isFollowUp: true }, data: { isFollowUp: false } });
     await auditProject(tx, actor, id, {
-      action: "training.project.reopen", summary: `Proyek ${p.code} dibuka kembali (Selesai → Berjalan)`,
+      action: "training.project.reopen", summary: `Proyek ${p.code} dibuka kembali (Selesai → Berjalan)${cleared.count ? `; ${cleared.count} tugas tindak lanjut kembali menjadi tugas biasa` : ""}`,
       before: { status: "COMPLETED", closedAt: iso(p.closedAt), closureSummary: p.closureSummary, closureFollowUp: p.closureFollowUp, closureOverrideReason: p.closureOverrideReason }, after: { status: "RUNNING" }, reason,
     });
   });

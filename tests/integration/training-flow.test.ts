@@ -243,16 +243,18 @@ describe("penutupan proyek", () => {
     expect((await getProject(fx.mgr, id)).status).toBe("RUNNING");
   });
 
-  it("hanya Koordinator Program yang menutup (PIC tidak); selesai → ditutup bersih; tugas terbuka tidak diubah", async () => {
+  it("hanya Koordinator Program yang menutup (PIC tidak); selesai → ditutup bersih; tugas terbuka diputuskan (tindak lanjut) dan tidak diselesaikan otomatis", async () => {
     const { id, a } = await runningWithRequired();
     const t = await createTask(fx.mgr, id, { title: "Tugas masih terbuka", assigneeId: fx.empIds[BUDI] });
     await updateChecklistItem(fx.mgr, a.id, { isDone: true });
     expect(await fail(closeProject(fx.emp1, id, { summary: "PIC mencoba menutup" }))).toMatchObject({ code: "FORBIDDEN" });
-    const r = await closeProject(fx.mgr, id, { summary: "Pelatihan berjalan lancar", followUp: "Kirim sertifikat" });
-    expect(r).toMatchObject({ closedWithOverride: false, outstandingRequired: [], openTasks: 1 });
+    // Tugas terbuka tidak menghalangi penutupan, tetapi wajib diputuskan (lihat training-closure.test.ts untuk aturan lengkapnya).
+    expect(await fail(closeProject(fx.mgr, id, { summary: "Pelatihan berjalan lancar" }))).toMatchObject({ code: "CONFLICT" });
+    const r = await closeProject(fx.mgr, id, { summary: "Pelatihan berjalan lancar", followUp: "Kirim sertifikat", taskDecisions: [{ taskId: t.id, action: "FOLLOW_UP", dueDate: inDays(7) }] });
+    expect(r).toMatchObject({ closedWithOverride: false, outstandingRequired: [], openTasks: 1, followUpTasks: 1 });
     const p = await getProject(fx.mgr, id);
     expect(p).toMatchObject({ status: "COMPLETED", closedByName: "Maya Manajer", closureSummary: "Pelatihan berjalan lancar", closureFollowUp: "Kirim sertifikat", closureOverrideReason: null });
-    expect((await getTask(fx.mgr, t.id)).status).toBe("TODO"); // menutup proyek tidak menyelesaikan tugas
+    expect(await getTask(fx.mgr, t.id)).toMatchObject({ status: "TODO", isFollowUp: true }); // menutup proyek tidak menyelesaikan tugas
   });
 
   it("pengecualian: boleh ditutup dengan alasan tertulis; item yang dilewati dicatat di audit", async () => {

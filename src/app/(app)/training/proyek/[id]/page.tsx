@@ -68,7 +68,7 @@ export default async function ProjectDetailPage({ params, searchParams }: { para
         </>}
       />
       {p.attention.length > 0 && <div className="mb-4"><AttentionBadges codes={p.attention} /></div>}
-      {!editable && <div className="mb-4"><Notice tone={p.status === "CANCELLED" ? "danger" : "info"}>{p.status === "COMPLETED" ? "Proyek sudah ditutup (Selesai): data bersifat baca-saja." : `Proyek dibatalkan${p.cancelReason ? `: ${p.cancelReason}` : ""}. Data bersifat baca-saja.`}</Notice></div>}
+      {!editable && <div className="mb-4"><Notice tone={p.status === "CANCELLED" ? "danger" : "info"}>{p.status === "COMPLETED" ? "Proyek sudah ditutup (Selesai): data bersifat baca-saja, kecuali tugas tindak lanjut (ditandai pada tab Tugas) yang tetap dapat dikerjakan." : `Proyek dibatalkan${p.cancelReason ? `: ${p.cancelReason}` : ""}. Data bersifat baca-saja.`}</Notice></div>}
       <TabNav base={base} active={tab} tabs={[
         { key: "ringkasan", label: "Ringkasan" }, { key: "pemantauan", label: "Pemantauan" }, { key: "tim", label: "Tim" }, { key: "tugas", label: "Tugas & Checklist", count: p.openTasks }, { key: "jadwal", label: "Jadwal" },
         { key: "peserta", label: "Peserta" }, { key: "instruktur", label: "Instruktur / Asesor" }, { key: "dokumen", label: "Dokumen" }, { key: "riwayat", label: "Riwayat" }, { key: "penutupan", label: "Penutupan" },
@@ -128,7 +128,7 @@ export default async function ProjectDetailPage({ params, searchParams }: { para
         const active = members.filter((m) => m.active).map((m) => ({ employeeId: m.employeeId, name: m.name }));
         return (
           <div className="space-y-8">
-            <section aria-label="Tugas"><h2 className="mb-3 text-base font-semibold text-ink">Tugas</h2><TasksPanel tasks={tasks} projectId={id} members={active} canCreate={can("manage_tasks")} editable={editable} /></section>
+            <section aria-label="Tugas"><h2 className="mb-3 text-base font-semibold text-ink">Tugas</h2><TasksPanel tasks={tasks} projectId={id} members={active} canCreate={can("manage_tasks") && editable} /></section>
             <section aria-label="Checklist"><h2 className="mb-3 text-base font-semibold text-ink">Checklist kesiapan</h2><ChecklistPanel projectId={id} data={checklist} templates={templates?.map((t) => ({ id: t.id, name: t.name, itemCount: t.items.length })) ?? null} members={active} editable={editable} /></section>
           </div>
         );
