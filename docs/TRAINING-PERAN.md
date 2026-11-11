@@ -133,6 +133,8 @@ Aturan ini ditegakkan di **setiap pintu pemberian** (service) dan **saat berjala
 | Peran proyek PIC / Admin Program / PJ Peserta | Ditolak; peran yang menyusup langsung ke tabel dipangkas ke kemampuan **melihat + mengunggah dokumen** |
 | Atasan langsung, pengganti peninjau, tingkat Supervisor/Manajer | Ditolak (DB juga menolak lewat CHECK `employees_intern_staff_level`) |
 | **Daftar** peserta (menu Peserta, tab Peserta, API) | Tertutup (403); menu disembunyikan. Angka agregat di dashboard tetap tampil |
+| **Nama peserta di audit proyek** (tab *Riwayat*, "Aktivitas terbaru" di beranda Training) | **Disembunyikan seluruhnya**: baris `training.participant.*` (tambah, status, konfirmasi, ubah data) tidak ditampilkan, sehingga pembatasan peserta berlaku di semua jalur baca, bukan hanya daftar peserta. Disaring di query (total & halaman akurat); aksi peserta baru otomatis ikut tersaring lewat awalan. Data audit aslinya tidak dihapus (tetap terlihat di Log Audit Super Admin) |
+| Dokumen **peserta** (unggah/hapus/dibuka) di audit proyek | Judulnya hanya terlihat oleh pengelola peserta proyek itu (juga berlaku untuk Staf biasa & Pemantau yang tidak berhak membuka dokumennya) |
 | Mengubah status karyawan menjadi Magang | **Diblok** selama masih memegang salah satu hal di atas; pesan kesalahan menyebut daftar yang harus dicabut dulu (tidak dicabut otomatis) |
 
 ## Status keputusan

@@ -7,10 +7,11 @@ import { dateToIso, isoToDate } from "../../json";
 import { addDays, currentYearMonth, localDate, monthRange } from "@/lib/time";
 import { checklistProgress, type ChecklistProgress } from "@/lib/training/indicators";
 import type { ProjectStatus } from "@/lib/training/types";
+import { INTERN_FORBIDDEN_PROJECT_ROLES } from "@/lib/training/access";
 import { accessibleProjectWhere, requireModule } from "./access";
 import { listProgramCards } from "./indicator-compute";
 import { listCalendar } from "./operations";
-import { today } from "./shared";
+import { auditVisibilityWhere, today } from "./shared";
 
 /**
  * Data beranda Training & Operations (kartu ringkasan, grafik aktivitas, proyek saya, kalender, aktivitas terbaru). SEMUA dari data nyata dan
@@ -55,7 +56,7 @@ export async function getTrainingHome(actor: Actor): Promise<TrainingHomeDto> {
     prisma.trainingTask.findMany({ where: { project: scope, status: "DONE", completedAt: { gte: since } }, select: { completedAt: true } }),
     prisma.trainingParticipant.findMany({ where: { project: scope, status: { not: "CANCELLED" }, createdAt: { gte: since } }, select: { createdAt: true } }),
     listCalendar(actor, { from: month.from, to: month.to }),
-    actor.employeeId ? prisma.trainingProjectMember.findMany({ where: { employeeId: actor.employeeId, endedAt: null }, select: { projectId: true } }) : Promise.resolve([]),
+    actor.employeeId ? prisma.trainingProjectMember.findMany({ where: { employeeId: actor.employeeId, endedAt: null }, select: { projectId: true, role: true } }) : Promise.resolve([]),
   ]);
   const activeProjectIds = activeIds.map((p) => p.id);
   const participants = activeProjectIds.length ? await prisma.trainingParticipant.count({ where: { projectId: { in: activeProjectIds }, status: { not: "CANCELLED" } } }) : 0;
@@ -94,7 +95,12 @@ export async function getTrainingHome(actor: Actor): Promise<TrainingHomeDto> {
 
   // Aktivitas terbaru: audit proyek dalam lingkup (Direktur/Pemantau/Manajer: semua proyek; lainnya: proyek yang diikuti).
   const actWhere: Prisma.AuditLogWhereInput = mod.caps.viewAll ? { entityType: "TrainingProject" } : { entityType: "TrainingProject", entityId: { in: memberIds.length ? memberIds : ["00000000-0000-0000-0000-000000000000"] } };
-  const logs = (await prisma.auditLog.findMany({ where: actWhere, orderBy: { id: "desc" }, take: 6, select: { id: true, createdAt: true, action: true, summary: true, entityId: true, actor: { select: { name: true } } } })).flatMap((l) => (l.entityId ? [{ ...l, entityId: l.entityId }] : []));
+  // Baris berisi data peserta disembunyikan bagi yang tak berhak (Magang); dokumen peserta hanya terlihat di proyek tempat pelaku mengelola peserta.
+  const hidden = auditVisibilityWhere({
+    viewParticipants: mod.caps.viewParticipants, manageAll: mod.caps.fullAccess,
+    manageProjectIds: mod.caps.viewParticipants ? memberRows.filter((m) => INTERN_FORBIDDEN_PROJECT_ROLES.includes(m.role)).map((m) => m.projectId) : [],
+  });
+  const logs = (await prisma.auditLog.findMany({ where: hidden ? { AND: [actWhere, hidden] } : actWhere, orderBy: { id: "desc" }, take: 6, select: { id: true, createdAt: true, action: true, summary: true, entityId: true, actor: { select: { name: true } } } })).flatMap((l) => (l.entityId ? [{ ...l, entityId: l.entityId }] : []));
   const codes = logs.length ? await prisma.trainingProject.findMany({ where: { id: { in: [...new Set(logs.map((l) => l.entityId))] } }, select: { id: true, code: true } }) : [];
   const activity = logs.map((l) => ({ id: l.id.toString(), at: l.createdAt.toISOString(), actorName: l.actor?.name ?? null, summary: l.summary ?? l.action, action: l.action, projectId: l.entityId, projectCode: codes.find((c) => c.id === l.entityId)?.code ?? null }));
 

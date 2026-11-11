@@ -15,7 +15,7 @@ import { accessibleProjectWhere, loadProjectAccess, requireModule } from "./acce
 import { listProjects, type ProjectListItemDto } from "./projects";
 import { listMyChecklistItems, listMyTasks, type MyChecklistItemDto, type TaskDto } from "./work";
 import { listCalendar, type ScheduleDto } from "./operations";
-import { today } from "./shared";
+import { auditVisibilityWhere, today } from "./shared";
 
 // ═════════════════════════════ Dashboard ═════════════════════════════
 
@@ -183,8 +183,10 @@ export interface ActivityDto { id: string; at: string; actorName: string | null;
 
 /** Riwayat proyek dari audit log. Sengaja tanpa IP, user-agent, email, dan isi before/after (bisa memuat detail internal). */
 export async function listProjectActivity(actor: Actor, projectId: string, page = 1, pageSize = 30): Promise<Paged<ActivityDto>> {
-  await loadProjectAccess(actor, projectId);
-  const where: Prisma.AuditLogWhereInput = { entityType: "TrainingProject", entityId: projectId };
+  const access = await loadProjectAccess(actor, projectId);
+  // Baris yang memuat data peserta disembunyikan bagi yang tak berhak (mis. akun Magang) — lihat `auditVisibilityWhere`.
+  const hidden = auditVisibilityWhere({ viewParticipants: access.abilities.has("view_participants"), manageAll: access.abilities.has("manage_participants") });
+  const where: Prisma.AuditLogWhereInput = { entityType: "TrainingProject", entityId: projectId, ...(hidden ?? {}) };
   const [total, rows] = await Promise.all([
     prisma.auditLog.count({ where }),
     prisma.auditLog.findMany({ where, orderBy: { id: "desc" }, skip: (Math.max(page, 1) - 1) * pageSize, take: pageSize, select: { id: true, createdAt: true, action: true, summary: true, reason: true, actor: { select: { name: true } } } }),
