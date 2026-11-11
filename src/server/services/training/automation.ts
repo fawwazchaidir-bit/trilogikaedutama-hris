@@ -54,6 +54,27 @@ class Recipients {
     this.viewCache.set(key, ok);
     return ok;
   }
+  private memberCache = new Map<string, boolean>();
+  /** Karyawan masih anggota AKTIF proyek itu (pengingat tugas hanya ke yang berwenang mengerjakannya; sisanya diteruskan). */
+  async isActiveMember(projectId: string, employeeId: string | null | undefined): Promise<boolean> {
+    if (!employeeId) return false;
+    const key = `${projectId}:${employeeId}`;
+    const hit = this.memberCache.get(key);
+    if (hit !== undefined) return hit;
+    const ok = (await prisma.trainingProjectMember.count({ where: { projectId, employeeId, endedAt: null } })) > 0;
+    this.memberCache.set(key, ok);
+    return ok;
+  }
+  /**
+   * Tujuan eskalasi bila penanggung jawab tidak tersedia (berhenti / akun nonaktif / bukan anggota aktif): PIC proyek bila ia sendiri tersedia; bila PIC pun tidak
+   * tersedia atau tidak ada → Koordinator Program dan Direktur. Tidak pernah kosong selama ada Super Admin aktif, sehingga pekerjaan tidak lolos tanpa pengingat.
+   */
+  async escalation(projectId: string): Promise<string[]> {
+    const pic = await this.userOf(await this.pic(projectId));
+    if (pic) return [pic];
+    const coords = await prisma.trainingAccess.findMany({ where: { level: "COORDINATOR", user: { isActive: true } }, select: { userId: true } });
+    return [...new Set([...coords.map((c) => c.userId), ...(await this.directors())])];
+  }
   async directors(): Promise<string[]> {
     return (this.directorCache ??= (await prisma.user.findMany({ where: { isActive: true, role: "SUPER_ADMIN" }, select: { id: true } })).map((u) => u.id));
   }
@@ -195,14 +216,15 @@ async function reminders(env: Env, cfg: IndicatorConfig, rec: Recipients): Promi
       const userId = await rec.userOf(x.assigneeId);
       const due = dateToIso(x.dueDate!);
       const when = due === t ? "H" : "H-1";
-      if (!userId) continue;
-      if (await rec.mayView(x.project.id, x.assigneeId)) {
+      // Penanggung jawab diingatkan hanya bila TERSEDIA: akun & karyawan aktif, masih anggota aktif, dan masih boleh membuka proyek. Selain itu (berhenti, akun
+      // nonaktif, keluar dari tim) tugas TIDAK dilewati — diteruskan ke PIC, atau ke Koordinator Program & Direktur bila PIC-nya pun tidak tersedia.
+      if (userId && (await rec.isActiveMember(x.project.id, x.assigneeId)) && (await rec.mayView(x.project.id, x.assigneeId))) {
         out.push({ dedupeKey: `rem:task:${x.id}:${due}:${when}:${userId}`, kind: "reminder.task", projectId: x.project.id, userId, ...msg(when, "Tugas"), body: `${x.project.code} · ${x.title}`, href: "/training/tugas-saya" });
         continue;
       }
-      // Penanggung jawab sudah tidak boleh membuka proyek ini (keanggotaan berakhir): tidak dikirimi apa pun; PIC yang menindaklanjuti tugas yatim itu.
-      const pic = await rec.userOf(await rec.pic(x.project.id));
-      if (pic) out.push({ dedupeKey: `rem:task:${x.id}:${due}:${when}:${pic}`, kind: "reminder.task", projectId: x.project.id, userId: pic, ...msg(when, "Tugas tanpa penanggung jawab aktif"), body: `${x.project.code} · ${x.title}`, href: `/training/proyek/${x.project.id}?tab=tugas` });
+      for (const target of await rec.escalation(x.project.id)) {
+        out.push({ dedupeKey: `rem:task:${x.id}:${due}:${when}:${target}`, kind: "reminder.task", projectId: x.project.id, userId: target, ...msg(when, "Tugas tanpa penanggung jawab aktif"), body: `${x.project.code} · ${x.title}`, href: `/training/proyek/${x.project.id}?tab=tugas` });
+      }
     }
 
     // Milestone & item kesiapan: tenggat dihitung dari tanggal H/T + offset (tidak disimpan).
@@ -213,20 +235,24 @@ async function reminders(env: Env, cfg: IndicatorConfig, rec: Recipients): Promi
       const d = data.get(p.id)!;
       const dues = resolveDueMap(d.milestones.map((m) => ({ code: m.code, spec: specOf(m) })), dateCtx(row), env.cal);
       // Penanggung jawab hanya diingatkan bila masih boleh membuka proyek; selain itu (tak terjangkau / sudah tak punya akses) ke PIC.
-      const picUser = async (assignee: string | null) => ((await rec.mayView(p.id, assignee)) ? await rec.userOf(assignee) : null) ?? (await rec.userOf(await rec.pic(p.id)));
+      // Penerima: penanggung jawab bila tersedia dan masih boleh membuka proyek; selain itu eskalasi (PIC → Koordinator Program & Direktur).
+      const targetsOf = async (assignee: string | null): Promise<string[]> => {
+        const own = (await rec.mayView(p.id, assignee)) ? await rec.userOf(assignee) : null;
+        return own ? [own] : await rec.escalation(p.id);
+      };
       for (const m of d.milestones) {
         const due = dues.get(m.code) ?? null;
         if (!due || m.doneAt || m.notApplicable || (m.bnspOnly && !p.bnsp)) continue;
         const hit = days.find((x) => x.iso === due);
-        const userId = hit && (await picUser(m.assigneeId));
-        if (hit && userId) out.push({ dedupeKey: `rem:ms:${m.id}:${due}:${hit.when}:${userId}`, kind: "reminder.milestone", projectId: p.id, userId, ...msg(hit.when, "Milestone"), body: `${p.code} · ${m.code} ${m.name}`, href: `/training/proyek/${p.id}?tab=pemantauan` });
+        if (!hit) continue;
+        for (const userId of await targetsOf(m.assigneeId)) out.push({ dedupeKey: `rem:ms:${m.id}:${due}:${hit.when}:${userId}`, kind: "reminder.milestone", projectId: p.id, userId, ...msg(hit.when, "Milestone"), body: `${p.code} · ${m.code} ${m.name}`, href: `/training/proyek/${p.id}?tab=pemantauan` });
       }
       for (const i of d.items) {
         if (i.status !== "OPEN" || (i.bnspOnly && !p.bnsp)) continue;
         const due = resolveOffset(specOf(i), dateCtx(row), (c) => dues.get(c) ?? null, env.cal);
         const hit = due ? days.find((x) => x.iso === due) : undefined;
-        const userId = hit && (await picUser(i.assigneeId));
-        if (hit && due && userId) out.push({ dedupeKey: `rem:item:${i.id}:${due}:${hit.when}:${userId}`, kind: "reminder.item", projectId: p.id, userId, ...msg(hit.when, "Item kesiapan"), body: `${p.code} · ${i.name}`, href: `/training/proyek/${p.id}?tab=pemantauan` });
+        if (!hit || !due) continue;
+        for (const userId of await targetsOf(i.assigneeId)) out.push({ dedupeKey: `rem:item:${i.id}:${due}:${hit.when}:${userId}`, kind: "reminder.item", projectId: p.id, userId, ...msg(hit.when, "Item kesiapan"), body: `${p.code} · ${i.name}`, href: `/training/proyek/${p.id}?tab=pemantauan` });
       }
     }
   }

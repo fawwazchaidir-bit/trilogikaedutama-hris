@@ -8,6 +8,7 @@ import { parseInput } from "../../validate";
 import { dateToIso, isoToDate } from "../../json";
 import { addDays } from "@/lib/time";
 import { isOpenTask, PROJECT_STATUSES, type ActivityKind, type DocCategory, type ProjectStatus, PROJECT_STATUS_LABEL, ACTIVITY_KIND_LABEL } from "@/lib/training/types";
+import { assigneeUnavailableReason } from "@/lib/training/availability";
 import { ATTENTION_LABEL, ATTENTION_WINDOW_DAYS, closureReadiness, type AttentionCode, type ChecklistProgress } from "@/lib/training/indicators";
 import { isoDate, uuid } from "@/lib/validation/common";
 import type { Paged } from "@/lib/types";
@@ -92,12 +93,13 @@ export async function getTrainingDashboard(actor: Actor): Promise<DashboardDto> 
   const pastEnd = activeRows.filter((p) => p.endDate !== null && dateToIso(p.endDate) < t).length;
 
   // Tugas terbuka yang penanggung jawabnya sudah tidak anggota aktif proyek (perlu dialihkan).
-  const openAssigned = await prisma.trainingTask.findMany({ where: taskScope({ status: OPEN, assigneeId: { not: null } }), select: { projectId: true, assigneeId: true } });
+  const openAssigned = await prisma.trainingTask.findMany({ where: taskScope({ status: OPEN, assigneeId: { not: null } }), select: { projectId: true, assigneeId: true, assignee: { select: { isActive: true, user: { select: { isActive: true } } } } } });
   const activeMembers = openAssigned.length
     ? await prisma.trainingProjectMember.findMany({ where: { projectId: { in: [...new Set(openAssigned.map((x) => x.projectId))] }, endedAt: null }, select: { projectId: true, employeeId: true } })
     : [];
   const am = new Set(activeMembers.map((m) => `${m.projectId}:${m.employeeId}`));
-  const orphanTasks = openAssigned.filter((x) => !am.has(`${x.projectId}:${x.assigneeId}`)).length;
+  // Satu definisi "penanggung jawab tidak tersedia": bukan anggota aktif, karyawan berhenti, atau akun nonaktif (lib/training/availability).
+  const orphanTasks = openAssigned.filter((x) => assigneeUnavailableReason({ activeMember: am.has(`${x.projectId}:${x.assigneeId}`), employeeActive: x.assignee?.isActive ?? false, accountActive: x.assignee?.user?.isActive ?? null }) !== null).length;
 
   let teamLoad: DashboardDto["teamLoad"] = [];
   if (variant === "manager" || variant === "admin") {

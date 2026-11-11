@@ -10,6 +10,7 @@ import { SelectField, TextAreaField, TextField } from "@/components/ui/field";
 import { api } from "@/lib/api-client";
 import { formatDateShort, formatDateTime } from "@/lib/format";
 import { TASK_PRIORITIES, TASK_PRIORITY_LABEL, TASK_STATUS_LABEL, type TaskPriority, type TaskStatus } from "@/lib/training/types";
+import { UNAVAILABLE_LABEL } from "@/lib/training/availability";
 import type { TaskDto, TaskCommentDto } from "@/server/services/training/work";
 import Link from "next/link";
 import { PriorityBadge, TaskStatusBadge } from "./ui";
@@ -60,7 +61,7 @@ export function TasksPanel({ tasks, projectId, members = [], canCreate = false, 
                 {t.description && <p className="mt-0.5 line-clamp-2 text-sm text-muted">{t.description}</p>}
                 <p className="mt-1 text-xs text-muted">
                   {showProject && <><Link href={`/training/proyek/${t.projectId}?tab=tugas`} className="font-medium text-ink-soft hover:underline">{t.projectCode}</Link> · </>}
-                  {t.assigneeName ?? "Belum ada penanggung jawab"}{t.assigneeInactive && <span className="font-medium text-brand-700"> (sudah tidak di tim — alihkan)</span>}
+                  {t.assigneeName ?? "Belum ada penanggung jawab"}{t.assigneeUnavailable && <span className="font-medium text-brand-700"> ({UNAVAILABLE_LABEL[t.assigneeUnavailable]})</span>}
                   {t.dueDate && <> · tenggat {formatDateShort(t.dueDate)}</>}
                 </p>
                 {t.requiresReview && (t.submittedByName || t.reviewedByName) && (

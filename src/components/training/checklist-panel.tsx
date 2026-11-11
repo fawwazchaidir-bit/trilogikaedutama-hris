@@ -9,6 +9,7 @@ import { SelectField, TextField } from "@/components/ui/field";
 import { api } from "@/lib/api-client";
 import { formatDateShort } from "@/lib/format";
 import { CHECKLIST_PHASES, CHECKLIST_PHASE_LABEL, type ChecklistPhase } from "@/lib/training/types";
+import { UNAVAILABLE_LABEL } from "@/lib/training/availability";
 import type { ChecklistDto } from "@/server/services/training/work";
 import { ProgressBar } from "./ui";
 import { useRunner } from "./use-runner";
@@ -58,7 +59,7 @@ export function ChecklistPanel({ projectId, data, templates, members, editable }
                     onChange={(e) => void run(() => api(`/api/training/checklist-items/${i.id}`, { method: "PATCH", body: { isDone: e.target.checked } }))} />
                   <div className="min-w-0 flex-1">
                     <p className={`text-sm ${i.isDone ? "text-muted line-through" : "text-ink"}`}>{i.title} {i.isRequired && <Badge tone="red">Wajib</Badge>}</p>
-                    <p className="text-xs text-muted">{i.assigneeName ? `PJ: ${i.assigneeName}` : "Tanpa penanggung jawab"}{i.isDone && i.doneAt && <> · selesai {formatDateShort(i.doneAt)}{i.doneByName ? ` oleh ${i.doneByName}` : ""}</>}{i.sourceTemplateName && <> · dari template &quot;{i.sourceTemplateName}&quot;</>}</p>
+                    <p className="text-xs text-muted">{i.assigneeName ? `PJ: ${i.assigneeName}` : "Tanpa penanggung jawab"}{i.assigneeUnavailable && !i.isDone && <span className="font-medium text-brand-700"> ({UNAVAILABLE_LABEL[i.assigneeUnavailable]})</span>}{i.isDone && i.doneAt && <> · selesai {formatDateShort(i.doneAt)}{i.doneByName ? ` oleh ${i.doneByName}` : ""}</>}{i.sourceTemplateName && <> · dari template &quot;{i.sourceTemplateName}&quot;</>}</p>
                   </div>
                   {data.canManage && live && !i.isDone && <Button size="sm" variant="ghost" aria-label={`Hapus item ${i.title}`} onClick={() => void run(() => api(`/api/training/checklist-items/${i.id}`, { method: "DELETE" }), "Item dihapus.")}><Trash2 className="size-3.5" /></Button>}
                 </li>

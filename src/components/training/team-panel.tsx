@@ -41,7 +41,7 @@ export function TeamPanel({ projectId, members, directory, canManageTeam, canMan
             <tbody>
               {active.map((m) => (
                 <tr key={m.id}>
-                  <Td><p className="font-medium text-ink">{m.name}</p><p className="text-xs text-muted">{m.employeeNo} · {m.position}</p></Td>
+                  <Td><p className="font-medium text-ink">{m.name}{m.unavailable && <Badge tone="red">{m.unavailable === "EMPLOYEE_INACTIVE" ? "Sudah berhenti" : "Akun nonaktif"}</Badge>}</p><p className="text-xs text-muted">{m.employeeNo} · {m.position}</p>{m.unavailable && (m.openTasks > 0 || m.openChecklist > 0 || m.role === "PROJECT_MANAGER") && <p className="text-xs font-medium text-brand-700">{m.role === "PROJECT_MANAGER" ? "PIC — tetapkan PIC baru. " : ""}Alihkan tugas & checklist lalu akhiri penugasan.</p>}</Td>
                   <Td><Badge tone={m.role === "PROJECT_MANAGER" ? "red" : "gray"}>{PROJECT_ROLE_LABEL[m.role]}</Badge>{m.note && <p className="mt-1 text-xs text-muted">{m.note}</p>}</Td>
                   <Td>{formatDateShort(m.startedAt)}</Td>
                   <Td><span className="text-sm">{m.openTasks} tugas terbuka · {m.openChecklist} checklist</span></Td>

@@ -9,6 +9,7 @@ import { dateToIso, isoToDate } from "../../json";
 import { notifyUsers } from "../notifications";
 import { projectAbilities } from "@/lib/training/access";
 import { allowedTaskTransitions, reviewBlockReason } from "@/lib/training/status";
+import { assigneeUnavailableReason, type AssigneeUnavailable } from "@/lib/training/availability";
 import { checklistProgress, isTaskDueSoon, isTaskDueToday, isTaskOverdue, requiredOutstanding, type ChecklistProgress } from "@/lib/training/indicators";
 import { DEFAULT_TEMPLATE_ITEMS, DEFAULT_TEMPLATE_NAME } from "@/lib/training/misc";
 import {
@@ -28,8 +29,10 @@ import { assertUuid, auditProject, iso, today } from "./shared";
 export interface TaskDto {
   id: string; projectId: string; projectCode: string; projectName: string; title: string; description: string | null;
   assigneeId: string | null; assigneeName: string | null;
-  /** Penanggung jawab sudah tidak menjadi anggota aktif proyek (tugas perlu dialihkan). */
+  /** Penanggung jawab tidak tersedia (tugas perlu dialihkan): bukan anggota aktif, karyawan berhenti, atau akun nonaktif. */
   assigneeInactive: boolean;
+  /** Alasan ketidaktersediaan (satu definisi di `lib/training/availability`); null = tersedia. */
+  assigneeUnavailable: AssigneeUnavailable | null;
   dueDate: string | null; priority: TaskPriority; status: TaskStatus; requiresReview: boolean;
   completedAt: string | null; createdByName: string | null; createdAt: string;
   /** Tiga peran pemeriksaan (tugas wajib periksa), disimpan terpisah: pelaksana saat dikirim · pengirim hasil · pemeriksa. */
@@ -45,7 +48,7 @@ export interface TaskDto {
 
 const taskInclude = {
   project: { select: { code: true, name: true } },
-  assignee: { select: { fullName: true } },
+  assignee: { select: { fullName: true, isActive: true, user: { select: { isActive: true } } } },
   _count: { select: { comments: true } },
 } satisfies Prisma.TrainingTaskInclude;
 type TaskRow = Prisma.TrainingTaskGetPayload<{ include: typeof taskInclude }>;
@@ -83,10 +86,11 @@ async function toTaskDtos(rows: TaskRow[], ctx: TaskCtx): Promise<TaskDto[]> {
     const isSubmitter = !!r.submittedById && r.submittedById === ctx.actor.userId;
     const isExecutor = !!ctx.actor.employeeId && (r.assigneeAtSubmitId === ctx.actor.employeeId || r.assigneeId === ctx.actor.employeeId);
     const due = r.dueDate ? dateToIso(r.dueDate) : null;
+    const unavailable = r.assigneeId && r.assignee ? assigneeUnavailableReason({ activeMember: ctx.activeAssignees.has(`${r.projectId}:${r.assigneeId}`), employeeActive: r.assignee.isActive, accountActive: r.assignee.user?.isActive ?? null }) : null;
     return {
       id: r.id, projectId: r.projectId, projectCode: r.project.code, projectName: r.project.name, title: r.title, description: r.description,
       assigneeId: r.assigneeId, assigneeName: r.assignee?.fullName ?? null,
-      assigneeInactive: !!r.assigneeId && !ctx.activeAssignees.has(`${r.projectId}:${r.assigneeId}`),
+      assigneeInactive: unavailable !== null, assigneeUnavailable: unavailable,
       dueDate: due, priority: r.priority, status: r.status, requiresReview: r.requiresReview, completedAt: iso(r.completedAt),
       createdByName: uname.get(r.createdById) ?? null, createdAt: r.createdAt.toISOString(),
       executorName: r.assigneeAtSubmitId ? ename.get(r.assigneeAtSubmitId) ?? null : null,
@@ -181,6 +185,9 @@ const NOT_MEMBER_MESSAGE = "Anda sudah tidak menjadi anggota aktif proyek ini, s
 /** Penanggung jawab tugas harus anggota AKTIF proyek itu — tugas tidak dapat diberikan ke orang di luar tim. */
 async function assertAssigneeInTeam(tx: Tx | typeof prisma, projectId: string, employeeId: string | null | undefined): Promise<void> {
   if (!employeeId) return;
+  // Karyawan yang sudah berhenti tidak boleh diberi tugas/checklist BARU (pekerjaan lama miliknya ditandai "alihkan", bukan ditambah).
+  const e = await tx.employee.findUnique({ where: { id: employeeId }, select: { isActive: true } });
+  if (!e?.isActive) throw Errors.validation("Karyawan ini sudah nonaktif (berhenti). Pilih penanggung jawab lain.", { assigneeId: "Karyawan nonaktif" });
   const m = await tx.trainingProjectMember.count({ where: { projectId, employeeId, endedAt: null } });
   if (m === 0) throw Errors.validation("Penanggung jawab harus anggota aktif proyek. Tambahkan dulu pada tab Tim.", { assigneeId: "Bukan anggota proyek" });
 }
@@ -214,7 +221,8 @@ export async function updateTask(actor: Actor, taskId: string, raw: unknown): Pr
   const input = parseInput(taskUpdateSchema, raw);
   const reason = input.reason?.trim() || null;
   await transaction(async (tx) => {
-    if ("assigneeId" in input) await assertAssigneeInTeam(tx, task.projectId, input.assigneeId);
+    // Penanggung jawab divalidasi hanya bila DIGANTI: menyunting hal lain pada tugas yang masih atas nama karyawan yang sudah berhenti tidak boleh terkunci.
+    if ("assigneeId" in input && (input.assigneeId ?? null) !== task.assigneeId) await assertAssigneeInTeam(tx, task.projectId, input.assigneeId);
     const data: Prisma.TrainingTaskUncheckedUpdateInput = {};
     for (const k of ["title", "description", "assigneeId", "priority", "requiresReview"] as const) if (k in input) (data as Record<string, unknown>)[k] = input[k];
     if ("dueDate" in input) data.dueDate = input.dueDate ? isoToDate(input.dueDate) : null;
@@ -346,14 +354,17 @@ export interface ChecklistItemDto {
   assigneeId: string | null; assigneeName: string | null; isDone: boolean; doneAt: string | null; doneByName: string | null; note: string | null; sourceTemplateName: string | null;
   /** Pelaku boleh mengubah tanda selesai (penanggung jawab item atau pengelola checklist). */
   canToggle: boolean;
+  /** Penanggung jawab tidak tersedia (berhenti / akun nonaktif / bukan anggota aktif) → perlu dialihkan; null = tersedia. */
+  assigneeUnavailable: AssigneeUnavailable | null;
 }
 export interface ChecklistDto { items: ChecklistItemDto[]; progress: ChecklistProgress; requiredOutstanding: number; canManage: boolean }
 
 export async function listChecklist(actor: Actor, projectId: string): Promise<ChecklistDto> {
   const access = await loadProjectAccess(actor, projectId);
   const rows = await prisma.trainingProjectChecklistItem.findMany({
-    where: { projectId }, orderBy: [{ phase: "asc" }, { sortOrder: "asc" }, { createdAt: "asc" }], include: { assignee: { select: { fullName: true } } },
+    where: { projectId }, orderBy: [{ phase: "asc" }, { sortOrder: "asc" }, { createdAt: "asc" }], include: { assignee: { select: { fullName: true, isActive: true, user: { select: { isActive: true } } } } },
   });
+  const activeIds = new Set((await prisma.trainingProjectMember.findMany({ where: { projectId, endedAt: null }, select: { employeeId: true } })).map((m) => m.employeeId));
   const doers = await prisma.user.findMany({ where: { id: { in: [...new Set(rows.map((r) => r.doneById).filter((x): x is string => !!x))] } }, select: { id: true, name: true } });
   const dn = new Map(doers.map((u) => [u.id, u.name]));
   const canManage = access.abilities.has("manage_checklist");
@@ -361,6 +372,7 @@ export async function listChecklist(actor: Actor, projectId: string): Promise<Ch
     id: r.id, projectId: r.projectId, phase: r.phase, title: r.title, isRequired: r.isRequired, sortOrder: r.sortOrder, assigneeId: r.assigneeId, assigneeName: r.assignee?.fullName ?? null,
     isDone: r.isDone, doneAt: iso(r.doneAt), doneByName: r.doneById ? dn.get(r.doneById) ?? null : null, note: r.note, sourceTemplateName: r.sourceTemplateName,
     canToggle: canManage || (!!actor.employeeId && r.assigneeId === actor.employeeId && access.memberRole !== null),
+    assigneeUnavailable: r.assigneeId && r.assignee ? assigneeUnavailableReason({ activeMember: activeIds.has(r.assigneeId), employeeActive: r.assignee.isActive, accountActive: r.assignee.user?.isActive ?? null }) : null,
   }));
   return { items, progress: checklistProgress(items), requiredOutstanding: requiredOutstanding(items).length, canManage };
 }
@@ -417,7 +429,7 @@ export async function updateChecklistItem(actor: Actor, itemId: string, raw: unk
   if ("isDone" in input && !canManage && !isOwner) throw Errors.forbidden(named ? NOT_MEMBER_MESSAGE : "Hanya penanggung jawab item atau pengelola checklist yang dapat menandai selesai.");
   await transaction(async (tx) => {
     if ("isDone" in input && !canManage && isOwner) await assertStillActiveMember(tx, item.projectId, actor.employeeId!);
-    if ("assigneeId" in input) await assertAssigneeInTeam(tx, item.projectId, input.assigneeId);
+    if ("assigneeId" in input && (input.assigneeId ?? null) !== item.assigneeId) await assertAssigneeInTeam(tx, item.projectId, input.assigneeId);
     const data: Prisma.TrainingProjectChecklistItemUncheckedUpdateInput = {};
     for (const k of ["phase", "title", "isRequired", "assigneeId", "note"] as const) if (k in input) (data as Record<string, unknown>)[k] = input[k];
     if (input.isDone !== undefined && input.isDone !== item.isDone) {

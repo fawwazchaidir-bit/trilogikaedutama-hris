@@ -20,6 +20,7 @@ import { ensureOrgBaseline, recordOrgChangeFromUpdate } from "./org";
 import { assertMayBecomeIntern } from "./function-guard";
 import type { JobLevelValue } from "@/lib/org-level";
 import { autoTarget, startChecklistIfNone } from "./employee-checklists";
+import { handoverFor, notifyHandover, type HandoverDto } from "./training/handover";
 import type { Paged } from "@/lib/types";
 
 // ─────────────────────────── Skema ───────────────────────────
@@ -333,7 +334,7 @@ const linkedAccount = (tx: Tx, userId: string | null): Promise<LinkedAccount | n
  *     (di sana dijaga "minimal satu Super Admin aktif"), baru nonaktifkan data karyawannya;
  *   · akun admin yang sudah nonaktif dibiarkan apa adanya.
  */
-export async function deactivateEmployee(actor: Actor, id: string, raw: unknown): Promise<void> {
+export async function deactivateEmployee(actor: Actor, id: string, raw: unknown): Promise<{ handover: HandoverDto }> {
   assertCan(actor, "employee:manage");
   const input = parseInput(deactivateSchema, raw ?? {});
   await transaction(async (tx) => {
@@ -356,7 +357,11 @@ export async function deactivateEmployee(actor: Actor, id: string, raw: unknown)
     await writeAudit(tx, actor, { action: "employee.deactivate", entityType: "Employee", entityId: id, summary: `Karyawan ${e.fullName} dinonaktifkan (berhenti ${endDate})`, reason: input.reason, after: { endDate } });
     // Proses berhenti tidak boleh terlupa: checklist berhenti dimulai otomatis bila belum ada yang berjalan.
     await startChecklistIfNone(tx, actor, id, "OFFBOARDING", { targetDate: autoTarget(endDate, 14), note: "Dimulai otomatis saat karyawan dinonaktifkan" });
+    // Serah terima Training: PIC (atau Koordinator Program & Direktur bila PIC-nya yang berhenti) diberi tahu SEKALI per proyek yang masih memegang pekerjaannya.
+    // Tidak ada yang dialihkan/diakhiri otomatis; penandanya dihitung dari status karyawan sehingga hilang sendiri bila diaktifkan kembali.
+    await notifyHandover(tx, id);
   });
+  return { handover: await handoverFor(actor, id) };
 }
 
 /** Hasil mengaktifkan kembali karyawan terhadap akun loginnya. */

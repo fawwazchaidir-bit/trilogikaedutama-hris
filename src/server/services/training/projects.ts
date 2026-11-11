@@ -12,6 +12,7 @@ import {
   type ActivityKind, type DeliveryMode, type ProjectRole, type ProjectStatus,
 } from "@/lib/training/types";
 import { INTERN_FORBIDDEN_PROJECT_ROLES, type ProjectAbility } from "@/lib/training/access";
+import { assigneeUnavailableReason } from "@/lib/training/availability";
 import { assertNotIntern } from "../function-guard";
 import { PROJECT_FORWARD, checkReadyForPreparation } from "@/lib/training/status";
 import { attentionReasons, checklistProgress, closureReadiness, type AttentionCode, type ChecklistProgress } from "@/lib/training/indicators";
@@ -453,13 +454,15 @@ export interface MemberDto {
   startedAt: string; endedAt: string | null; active: boolean;
   /** Tanggung jawab: tugas terbuka & checklist belum selesai yang ditugaskan kepadanya pada proyek ini. */
   openTasks: number; openChecklist: number;
+  /** Karyawan sudah berhenti / akunnya nonaktif padahal keanggotaan masih aktif → PIC perlu mengalihkan tugasnya lalu mengakhiri penugasan. */
+  unavailable: "EMPLOYEE_INACTIVE" | "ACCOUNT_INACTIVE" | null;
 }
 
 export async function listMembers(actor: Actor, projectId: string): Promise<MemberDto[]> {
   await loadProjectAccess(actor, projectId);
   const rows = await prisma.trainingProjectMember.findMany({
     where: { projectId }, orderBy: [{ endedAt: { sort: "asc", nulls: "first" } }, { role: "asc" }, { startedAt: "asc" }],
-    include: { employee: { select: { employeeNo: true, fullName: true, position: true } } },
+    include: { employee: { select: { employeeNo: true, fullName: true, position: true, isActive: true, user: { select: { isActive: true } } } } },
   });
   const ids = rows.map((r) => r.employeeId);
   const [tasks, chk] = await Promise.all([
@@ -471,6 +474,7 @@ export async function listMembers(actor: Actor, projectId: string): Promise<Memb
   return rows.map((r) => ({
     id: r.id, employeeId: r.employeeId, employeeNo: r.employee.employeeNo, name: r.employee.fullName, position: r.employee.position, role: r.role, note: r.note,
     startedAt: r.startedAt.toISOString(), endedAt: iso(r.endedAt), active: r.endedAt === null, openTasks: t.get(r.employeeId) ?? 0, openChecklist: c.get(r.employeeId) ?? 0,
+    unavailable: r.endedAt !== null ? null : (assigneeUnavailableReason({ activeMember: true, employeeActive: r.employee.isActive, accountActive: r.employee.user?.isActive ?? null }) as MemberDto["unavailable"]),
   }));
 }
 

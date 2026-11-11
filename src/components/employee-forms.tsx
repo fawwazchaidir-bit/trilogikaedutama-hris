@@ -12,6 +12,8 @@ import { uploadFile } from "@/components/upload";
 import { EMPLOYMENT_LABEL, type EmploymentStatus } from "@/lib/labels";
 import { TAX_STATUSES, TAX_STATUS_LABEL, type TaxStatus } from "@/lib/statutory";
 import type { EmployeeDto } from "@/server/services/employees";
+import type { HandoverDto } from "@/server/services/training/handover";
+import { HandoverList } from "@/components/training/handover-list";
 
 interface Div { id: string; name: string }
 type Form = {
@@ -129,6 +131,7 @@ export function EmployeeActions({ employee, divisions, today, canManage, canCrea
   const [fe, setFe] = useState<Record<string, string>>({});
   const [deact, setDeact] = useState({ endDate: today, reason: "" });
   const [acct, setAcct] = useState({ email: employee.email ?? "", password: "" });
+  const [handover, setHandover] = useState<HandoverDto | null>(null);
   const [bank, setBank] = useState<{ bankName: string | null; accountNo: string | null; holder: string | null } | null>(null);
   const close = () => { setDlg(null); setError(null); setFe({}); setBank(null); };
 
@@ -158,7 +161,7 @@ export function EmployeeActions({ employee, divisions, today, canManage, canCrea
       {dlg === "edit" && <EmployeeFormDialog open onClose={close} employee={employee} divisions={divisions} today={today} />}
 
       <Dialog open={dlg === "deactivate"} onClose={() => !busy && close()} size="sm" title={`Nonaktifkan ${employee.fullName}?`} description="Data tidak dihapus. Akun login Karyawan dinonaktifkan dan sesi diakhiri; akun Super Admin harus dinonaktifkan lebih dulu di Akun Pengguna. Hari setelah tanggal berhenti tidak dihitung dalam rekap & gaji."
-        footer={<><Button onClick={close} disabled={busy}>Batal</Button><Button variant="danger" loading={busy} onClick={() => void run(() => api(`/api/employees/${employee.id}/deactivate`, { body: deact }), "Karyawan dinonaktifkan.")}>Nonaktifkan</Button></>}>
+        footer={<><Button onClick={close} disabled={busy}>Batal</Button><Button variant="danger" loading={busy} onClick={() => void run(async () => { const r = await api<{ handover?: HandoverDto }>(`/api/employees/${employee.id}/deactivate`, { body: deact }); if (r.handover && r.handover.total > 0) setHandover(r.handover); return r; }, "Karyawan dinonaktifkan.")}>Nonaktifkan</Button></>}>
         <div className="space-y-4">{error && <Notice tone="danger">{error}</Notice>}
           <TextField label="Tanggal berhenti" type="date" required value={deact.endDate} onChange={(e) => setDeact({ ...deact, endDate: e.target.value })} error={fe.endDate} hint="Hari terakhir masih dihitung." />
           <TextAreaField label="Alasan (opsional)" rows={2} value={deact.reason} onChange={(e) => setDeact({ ...deact, reason: e.target.value })} /></div>
@@ -169,6 +172,12 @@ export function EmployeeActions({ employee, divisions, today, canManage, canCrea
         <div className="space-y-4">{error && <Notice tone="danger">{error}</Notice>}
           <TextField label="Email login" type="email" required value={acct.email} onChange={(e) => setAcct({ ...acct, email: e.target.value })} error={fe.email} />
           <PasswordField label="Password sementara" autoComplete="new-password" required value={acct.password} onChange={(e) => setAcct({ ...acct, password: e.target.value })} error={fe.password} hint="Minimal 12 karakter. Sampaikan lewat kanal aman." /></div>
+      </Dialog>
+
+      <Dialog open={handover !== null} onClose={() => setHandover(null)} size="md" title={`Serah terima Training — ${handover?.employeeName ?? employee.fullName}`}
+        description="Pekerjaan berikut masih tercatat atas nama karyawan ini dan perlu dialihkan. PIC proyek (atau Koordinator Program bila PIC-nya yang berhenti) sudah diberi tahu; tidak ada yang dialihkan otomatis."
+        footer={<Button variant="primary" onClick={() => setHandover(null)}>Mengerti</Button>}>
+        {handover && <HandoverList handover={handover} />}
       </Dialog>
 
       <Dialog open={dlg === "bank" && !!bank} onClose={close} size="sm" title="Rekening pembayaran gaji" description="Pembukaan nomor lengkap dicatat di audit log. Jangan dibagikan."

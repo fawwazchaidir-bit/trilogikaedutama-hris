@@ -11,6 +11,7 @@ import {
   resolveDueMap, resolveOffset, standardHours, type DateContext, type ItemStatus, type OffsetSpec, type WorkCal,
 } from "@/lib/training/indicators/engine";
 import { offsetLabel } from "@/lib/training/indicators/format";
+import { assigneeUnavailableReason, type AssigneeUnavailable } from "@/lib/training/availability";
 import { COMPONENT_LABEL, type Anchor, type IndicatorConfig, type ItemComponent, type Track } from "@/lib/training/indicators/config";
 import {
   milestoneAddSchema, milestoneCompleteSchema, milestoneUpdateSchema, readinessAddSchema, readinessStatusSchema, staffCapacitySchema, workloadSchema, workloadUpdateSchema,
@@ -159,12 +160,14 @@ export interface MilestoneDto {
   /** Tidak berlaku (ditandai atau khusus BNSP padahal program tanpa BNSP). */
   notApplicable: boolean; weight: number; critical: boolean; assigneeId: string | null; assigneeName: string | null; reference: string | null;
   overdue: boolean; daysOverdue: number; canComplete: boolean; canManage: boolean; manualDate: string | null; anchor: Anchor;
+  /** PIC milestone sudah berhenti / akunnya nonaktif → perlu dialihkan (satu definisi di `lib/training/availability`). */
+  assigneeUnavailable: AssigneeUnavailable | null;
 }
 
 export async function listMilestones(actor: Actor, projectId: string): Promise<MilestoneDto[]> {
   const access = await loadProjectAccess(actor, projectId);
   const cal = await loadCal(prisma, (await loadConfig()).config);
-  const [p, rows] = await Promise.all([loadProgramRow(prisma, projectId), prisma.trainingMilestone.findMany({ where: { projectId }, orderBy: [{ sortOrder: "asc" }, { code: "asc" }], include: { assignee: { select: { fullName: true } } } })]);
+  const [p, rows] = await Promise.all([loadProgramRow(prisma, projectId), prisma.trainingMilestone.findMany({ where: { projectId }, orderBy: [{ sortOrder: "asc" }, { code: "asc" }], include: { assignee: { select: { fullName: true, isActive: true, user: { select: { isActive: true } } } } } })]);
   const dues = resolveDueMap(rows.map((r) => ({ code: r.code, spec: specOf(r) })), dateCtx(p), cal);
   const t = today();
   const canManage = access.abilities.has("manage_tasks");
@@ -177,6 +180,7 @@ export async function listMilestones(actor: Actor, projectId: string): Promise<M
       id: r.id, code: r.code, name: r.name, offsetLabel: offsetLabel({ anchor: r.anchor, days: r.offsetDays, work: r.offsetWork, ref: r.refCode }), due, doneAt: done, evidence: r.evidence, notApplicable: na,
       weight: r.weight, critical: r.critical, assigneeId: r.assigneeId, assigneeName: r.assignee?.fullName ?? null, reference: r.reference, overdue, daysOverdue: overdue ? diffDays(t, due!) : 0,
       canComplete: !na && (canManage || (!!actor.employeeId && r.assigneeId === actor.employeeId)), canManage, manualDate: r.manualDate ? dateToIso(r.manualDate) : null, anchor: r.anchor,
+      assigneeUnavailable: r.assigneeId && r.assignee ? assigneeUnavailableReason({ activeMember: true, employeeActive: r.assignee.isActive, accountActive: r.assignee.user?.isActive ?? null }) : null,
     };
   });
 }
@@ -269,6 +273,8 @@ export interface ReadinessItemDto {
   id: string; component: ItemComponent; componentLabel: string; name: string; critical: boolean; offsetLabel: string; due: string | null; status: ItemStatus;
   /** Tidak berlaku karena khusus BNSP padahal program tanpa BNSP (status tampilan, tidak mengubah baris). */
   bnspExcluded: boolean; assigneeId: string | null; assigneeName: string | null; canUpdate: boolean; canManage: boolean; overdue: boolean;
+  /** Penanggung jawab item sudah berhenti / akunnya nonaktif → perlu dialihkan. */
+  assigneeUnavailable: AssigneeUnavailable | null;
 }
 
 export async function listReadiness(actor: Actor, projectId: string): Promise<ReadinessItemDto[]> {
@@ -276,7 +282,7 @@ export async function listReadiness(actor: Actor, projectId: string): Promise<Re
   const cal = await loadCal(prisma, (await loadConfig()).config);
   const [p, rows, milestones] = await Promise.all([
     loadProgramRow(prisma, projectId),
-    prisma.trainingReadinessItem.findMany({ where: { projectId }, orderBy: [{ component: "asc" }, { sortOrder: "asc" }], include: { assignee: { select: { fullName: true } } } }),
+    prisma.trainingReadinessItem.findMany({ where: { projectId }, orderBy: [{ component: "asc" }, { sortOrder: "asc" }], include: { assignee: { select: { fullName: true, isActive: true, user: { select: { isActive: true } } } } } }),
     prisma.trainingMilestone.findMany({ where: { projectId } }),
   ]);
   const dues = resolveDueMap(milestones.map((r) => ({ code: r.code, spec: specOf(r) })), dateCtx(p), cal);
@@ -290,6 +296,7 @@ export async function listReadiness(actor: Actor, projectId: string): Promise<Re
       id: r.id, component: r.component, componentLabel: COMPONENT_LABEL[r.component], name: r.name, critical: r.critical, offsetLabel: offsetLabel({ anchor: r.anchor, days: r.offsetDays, work: r.offsetWork, ref: r.refCode }), due, status, bnspExcluded,
       assigneeId: r.assigneeId, assigneeName: r.assignee?.fullName ?? null, overdue: status === "OPEN" && due !== null && due < t,
       canUpdate: !bnspExcluded && (canManage || (!!actor.employeeId && r.assigneeId === actor.employeeId)), canManage,
+      assigneeUnavailable: r.assigneeId && r.assignee ? assigneeUnavailableReason({ activeMember: true, employeeActive: r.assignee.isActive, accountActive: r.assignee.user?.isActive ?? null }) : null,
     };
   });
 }

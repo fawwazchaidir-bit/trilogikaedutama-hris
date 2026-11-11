@@ -4,6 +4,7 @@ import { ATTENTION_WINDOW_DAYS, attentionReasons, checklistProgress, closureRead
 import { DEFAULT_TEMPLATE_ITEMS, formatProjectCode, intervalsOverlap, normalizeRoom } from "@/lib/training/misc";
 import { PROJECT_STATUSES, TASK_STATUSES, isActiveProject, isFinalProject, isOpenTask, type ProjectStatus, type TaskStatus } from "@/lib/training/types";
 import { addDays } from "@/lib/time";
+import { assigneeUnavailableReason } from "@/lib/training/availability";
 import { projectCreateSchema, scheduleSchema, participantSchema, projectCloseSchema, templateSaveSchema } from "@/lib/validation/training";
 
 describe("alur status proyek", () => {
@@ -175,5 +176,20 @@ describe("pemisahan pelaksana / pengirim hasil / pemeriksa", () => {
     expect(reviewBlockReason({ isAssignee: true, isSubmitter: true })).toBe("SUBMITTER");
     expect(reviewBlockReason({ isAssignee: true })).toBe("EXECUTOR");
     expect(reviewBlockReason({ isAssignee: false, isExecutor: true })).toBe("EXECUTOR");
+  });
+});
+
+describe("ketersediaan penanggung jawab (satu definisi)", () => {
+  const ok = { activeMember: true, employeeActive: true, accountActive: true as boolean | null };
+  it("tersedia hanya bila anggota aktif, karyawan aktif, dan akun aktif (atau belum punya akun)", () => {
+    expect(assigneeUnavailableReason(ok)).toBeNull();
+    expect(assigneeUnavailableReason({ ...ok, accountActive: null })).toBeNull();      // tanpa akun: tidak ada yang bisa "nonaktif"
+  });
+  it("prioritas alasan: berhenti > akun nonaktif > di luar tim", () => {
+    expect(assigneeUnavailableReason({ ...ok, employeeActive: false })).toBe("EMPLOYEE_INACTIVE");
+    expect(assigneeUnavailableReason({ activeMember: false, employeeActive: false, accountActive: false })).toBe("EMPLOYEE_INACTIVE");
+    expect(assigneeUnavailableReason({ ...ok, accountActive: false })).toBe("ACCOUNT_INACTIVE");
+    expect(assigneeUnavailableReason({ activeMember: false, employeeActive: true, accountActive: false })).toBe("ACCOUNT_INACTIVE");
+    expect(assigneeUnavailableReason({ ...ok, activeMember: false })).toBe("NOT_MEMBER");
   });
 });

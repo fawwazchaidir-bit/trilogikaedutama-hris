@@ -11,6 +11,7 @@ import { listEmployeeChecklists } from "@/server/services/employee-checklists";
 import { listAssignableUsers } from "@/server/services/employee-checklist-templates";
 import { listEmployeeAssets } from "@/server/services/assets";
 import { settlementOfEmployee } from "@/server/services/final-settlements";
+import { getEmployeeHandover } from "@/server/services/training/handover";
 import { listComponents } from "@/server/services/components";
 import { getBalance, getLedger, getLeavePolicy } from "@/server/services/leave";
 import { listCorrections } from "@/server/services/attendance";
@@ -23,6 +24,7 @@ import { BalanceCard } from "@/components/balance-card";
 import { OrgCard } from "@/components/org-card";
 import { EmployeeChecklistCard } from "@/components/employee-checklist-card";
 import { EmployeeAssetsCard } from "@/components/employee-assets-card";
+import { EmployeeHandoverCard } from "@/components/employee-handover-card";
 import { EmployeeSettlementCard } from "@/components/employee-settlement-card";
 import { LeavePolicyCard } from "@/components/leave-policy-card";
 import { formatClock, formatDateLong, formatDateTime } from "@/lib/format";
@@ -41,7 +43,7 @@ export default async function EmployeeDetailPage({ params }: { params: Promise<{
   try { e = await getEmployee(user, id); } catch (err) { if (err instanceof AppError) notFound(); throw err; }
   const today = todayIso(env().APP_TIMEZONE);
   const year = Number(today.slice(0, 4));
-  const [divisions, comps, balance, ledger, leavePolicy, corrections, org, orgHistory, people, checklists, assignable, assets, settlement] = await Promise.all([
+  const [divisions, comps, balance, ledger, leavePolicy, corrections, org, orgHistory, people, checklists, assignable, assets, settlement, handover] = await Promise.all([
     listDivisions(user),
     actorCan(user, "payroll:components") ? listComponents(user, id) : Promise.resolve(null),
     actorCan(user, "leave:view_all") ? getBalance(user, id, year) : Promise.resolve(null),
@@ -55,6 +57,7 @@ export default async function EmployeeDetailPage({ params }: { params: Promise<{
     listAssignableUsers(user),
     listEmployeeAssets(user, id),
     actorCan(user, "payroll:view") ? settlementOfEmployee(user, id) : Promise.resolve(null),
+    !e.isActive && actorCan(user, "employee:manage") ? getEmployeeHandover(user, id) : Promise.resolve(null),
   ]);
   const row = (k: string, v: React.ReactNode) => (<div className="grid grid-cols-[9rem_1fr] gap-2 py-2 text-sm"><dt className="text-muted">{k}</dt><dd className="font-medium">{v || "—"}</dd></div>);
   return (
@@ -77,6 +80,7 @@ export default async function EmployeeDetailPage({ params }: { params: Promise<{
       </Card>
       <OrgCard profile={org} history={orgHistory} divisions={divisions} people={people} canManage={actorCan(user, "employee:manage") && e.isActive} today={today} />
       <EmployeeChecklistCard employeeId={id} checklists={checklists} canManage={actorCan(user, "employee:manage")} isActive={e.isActive} users={assignable.map((u) => ({ id: u.id, name: u.name }))} />
+      {handover && handover.total > 0 && <EmployeeHandoverCard handover={handover} />}
       <EmployeeAssetsCard holding={assets.holding} history={assets.history} canManage={actorCan(user, "employee:manage")} />
       {actorCan(user, "payroll:view") && (!e.isActive || settlement || checklists.some((c) => c.kind === "OFFBOARDING" && c.status === "OPEN")) && <EmployeeSettlementCard employeeId={id} existing={settlement} canPrepare={actorCan(user, "payroll:prepare")} endDate={e.endDate} />}
       {comps && <ComponentsManager employeeId={id} items={comps} today={today} />}

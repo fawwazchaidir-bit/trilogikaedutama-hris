@@ -10,6 +10,7 @@ import { Table, TableWrap, Td, Th } from "@/components/ui/table";
 import { api } from "@/lib/api-client";
 import { formatDateShort, formatDateTime } from "@/lib/format";
 import { COMPONENT_LABEL, ITEM_COMPONENTS } from "@/lib/training/indicators/config";
+import { UNAVAILABLE_LABEL } from "@/lib/training/availability";
 import type { ProgramIndicatorDto } from "@/server/services/training/indicator-compute";
 import type { MilestoneDto, ReadinessItemDto, WorkloadTaskDto } from "@/server/services/training/indicator-data";
 import type { RecoveryNoteDto } from "@/server/services/training/recovery";
@@ -67,7 +68,7 @@ export function MonitoringPanel(p: Props) {
                     <Td mono>{m.code}</Td>
                     <Td><p className="font-medium text-ink">{m.name}{m.critical && <Badge tone="red" className="ml-2">Kritikal</Badge>}</p>{m.reference && <p className="text-xs text-muted">{m.reference}</p>}{m.evidence && <p className="text-xs text-muted">Bukti: {m.evidence}</p>}</Td>
                     <Td><p>{dueText(m.due)}</p><p className="text-xs text-muted">{m.offsetLabel}</p></Td>
-                    <Td>{m.assigneeName ?? <span className="text-xs text-muted">Belum ada</span>}</Td>
+                    <Td>{m.assigneeName ?? <span className="text-xs text-muted">Belum ada</span>}{m.assigneeUnavailable && !m.doneAt && <span className="block text-xs font-medium text-brand-700">{UNAVAILABLE_LABEL[m.assigneeUnavailable]}</span>}</Td>
                     <Td align="right">{m.weight}</Td>
                     <Td>{m.notApplicable ? <Badge tone="gray">Tidak berlaku</Badge> : m.doneAt ? <Badge tone="green">Selesai {formatDateShort(m.doneAt)}</Badge> : m.overdue ? <Badge tone="red">Terlambat {m.daysOverdue} hari</Badge> : <Badge tone="gray">Menunggu</Badge>}</Td>
                     {live && <Td align="right"><span className="inline-flex gap-1.5">
@@ -92,7 +93,7 @@ export function MonitoringPanel(p: Props) {
                     <li key={i.id} className="flex flex-wrap items-center justify-between gap-2 px-4 py-2.5 text-sm">
                       <div className="min-w-0">
                         <p className="font-medium text-ink">{i.name}{i.critical && <Badge tone="red" className="ml-2">Kritikal</Badge>}{i.bnspExcluded && <Badge tone="gray" className="ml-2">Khusus BNSP</Badge>}</p>
-                        <p className="text-xs text-muted">Tenggat {dueText(i.due)} ({i.offsetLabel}){i.assigneeName ? ` · ${i.assigneeName}` : ""}{i.overdue ? " · terlambat" : ""}</p>
+                        <p className="text-xs text-muted">Tenggat {dueText(i.due)} ({i.offsetLabel}){i.assigneeName ? ` · ${i.assigneeName}` : ""}{i.assigneeUnavailable && i.status === "OPEN" ? ` (${UNAVAILABLE_LABEL[i.assigneeUnavailable]})` : ""}{i.overdue ? " · terlambat" : ""}</p>
                       </div>
                       {i.canUpdate && live ? (
                         <select aria-label={`Status ${i.name}`} className="h-8 rounded-md border border-line bg-white px-2 text-sm" value={i.status} disabled={busy}

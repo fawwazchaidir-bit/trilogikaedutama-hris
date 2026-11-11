@@ -44,6 +44,19 @@ Akibat yang Anda rasakan:
   tidak ditawarkan, dan tugasnya tidak muncul di *Tugas Saya*, lencana terlambat, maupun daftar checklist saya. Pemeriksaan keanggotaan dibaca ulang di
   dalam transaksi dengan kunci baris (tidak ada celah balapan). Pengelola proyek (PIC/Koordinator/Direktur) tetap dapat bertindak atas nama; ditambahkan
   kembali ke tim memulihkan hak itu. Pemantau yang **masih anggota aktif** dan diberi tugas bekerja seperti biasa.
+- **Serah terima saat karyawan berhenti.** Menonaktifkan karyawan di HRIS menampilkan **daftar yang masih ia pegang di Training**, per proyek: tugas terbuka,
+  item checklist belum selesai, milestone & item kesiapan belum selesai, keanggotaan tim (PIC disorot), dan penugasan instruktur. HR (tanpa akses Training) melihat
+  **jumlah** per proyek; Koordinator/Direktur/PIC melihat **rincian** judulnya (dan tautan ke proyek). Daftar yang sama tersedia di kartu *Serah terima Training*
+  pada detail karyawan yang sudah berhenti (`GET /api/employees/:id/handover`). **Tidak ada yang dialihkan atau diakhiri otomatis** — itu keputusan PIC/Koordinator.
+  - **Penanda "perlu dialihkan" satu definisi** (`lib/training/availability`): penanggung jawab tidak tersedia bila **karyawan berhenti**, **akun nonaktif**, atau **bukan anggota
+    aktif** (khusus tugas & checklist). Label: *sudah berhenti / akun nonaktif / sudah tidak di tim — alihkan*; berlaku di tugas, checklist, milestone, item kesiapan,
+    tab Tim (lencana *Sudah berhenti*), dan hitungan "tugas yatim" di dasbor risiko. Penanda dihitung dari status, sehingga **hilang sendiri bila karyawan diaktifkan kembali**.
+  - **Pemberitahuan SEKALI per proyek** (kunci `handover:<karyawan>:<proyek>`): ke **PIC**; bila PIC-nya yang berhenti, atau tidak ada PIC aktif → ke **Koordinator Program dan
+    Direktur**. Menonaktifkan ulang, atau mengaktifkan lalu menonaktifkan lagi, tidak mengirim ulang.
+  - **Penugasan baru ke karyawan nonaktif ditolak** (tugas, checklist, milestone, item kesiapan, tugas jam kerja, anggota tim, instruktur). Divalidasi hanya saat penanggung jawab
+    **diganti**; menyunting hal lain pada tugas lama atas namanya tidak terkunci.
+  - **Pengingat tenggat tidak melewati tugas**: penanggung jawab diingatkan hanya bila tersedia; selain itu pengingat diteruskan ke PIC (judul *Tugas tanpa penanggung jawab
+    aktif*), atau ke Koordinator Program & Direktur bila PIC-nya pun tidak tersedia. Berlaku juga untuk milestone dan item kesiapan.
 - **Mengakhiri anggota hanya memperingatkan** (tidak menolak): dialog menampilkan jumlah tugas & item checklist yang masih dipegang, hasilnya dilaporkan
   dan dicatat di audit ("perlu dialihkan"). Tugas tidak dialihkan otomatis — itu keputusan PIC.
 - **Tidak ada akses tambahan ke data sensitif.** Level modul dan peran proyek *tidak* memberi akses slip gaji, presensi, cuti,
