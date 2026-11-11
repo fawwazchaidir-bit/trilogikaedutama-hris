@@ -5,6 +5,7 @@ import { prisma, transaction, type Tx } from "../db";
 import { Errors } from "../errors";
 import { parseInput } from "../validate";
 import { actorCan, assertCan, type Actor } from "../actor";
+import { manageableRoles, type Role } from "@/lib/permissions";
 import { diffFields, writeAudit } from "../audit";
 import { dateToIso, isoToDate } from "../json";
 import { decryptField, encryptField } from "../crypto";
@@ -319,7 +320,19 @@ export async function setEmployeePhoto(actor: Actor, id: string, fileId: string,
 
 const deactivateSchema = z.object({ endDate: isoDate.optional(), reason: optionalText(300, "Alasan") });
 
-/** Nonaktifkan: tidak menghapus data. Mengisi tanggal berhenti, menonaktifkan akun login, dan mengakhiri sesinya. */
+/** Akun login yang tertaut ke karyawan, untuk keputusan menonaktifkan/mengaktifkan. */
+type LinkedAccount = { id: string; role: Role; isActive: boolean; email: string };
+const linkedAccount = (tx: Tx, userId: string | null): Promise<LinkedAccount | null> =>
+  userId ? tx.user.findUnique({ where: { id: userId }, select: { id: true, role: true, isActive: true, email: true } }) : Promise.resolve(null);
+
+/**
+ * Nonaktifkan: tidak menghapus data. Mengisi tanggal berhenti dan — untuk akun Karyawan — menonaktifkan akun login serta mengakhiri sesinya.
+ * Jalur ini TIDAK boleh melewati aturan modul Akun Pengguna:
+ *   · akun ADMIN (HR/Super Admin) yang aktif hanya boleh disentuh Super Admin (HR ditolak);
+ *   · akun SUPER ADMIN yang aktif TIDAK ikut dinonaktifkan di sini — dua langkah terpisah: nonaktifkan akunnya dulu di Akun Pengguna
+ *     (di sana dijaga "minimal satu Super Admin aktif"), baru nonaktifkan data karyawannya;
+ *   · akun admin yang sudah nonaktif dibiarkan apa adanya.
+ */
 export async function deactivateEmployee(actor: Actor, id: string, raw: unknown): Promise<void> {
   assertCan(actor, "employee:manage");
   const input = parseInput(deactivateSchema, raw ?? {});
@@ -328,12 +341,17 @@ export async function deactivateEmployee(actor: Actor, id: string, raw: unknown)
     if (!e) throw Errors.notFound("Karyawan");
     if (!e.isActive) throw Errors.conflict("Karyawan sudah nonaktif.");
     if (e.userId === actor.userId) throw Errors.validation("Anda tidak dapat menonaktifkan data karyawan akun Anda sendiri.");
+    const acct = await linkedAccount(tx, e.userId);
+    if (acct?.isActive && acct.role !== "EMPLOYEE") {
+      if (!manageableRoles(actor.role).includes(acct.role)) throw Errors.forbidden("Karyawan ini memiliki akun admin yang masih aktif; hanya Super Admin yang dapat mengelolanya.");
+      if (acct.role === "SUPER_ADMIN") throw Errors.conflict("Karyawan ini memiliki akun Super Admin yang masih aktif. Nonaktifkan akunnya lebih dulu di Akun Pengguna (oleh Super Admin lain; sistem memastikan masih ada Super Admin aktif), lalu nonaktifkan data karyawannya.");
+    }
     const endDate = input.endDate ?? todayIso(env().APP_TIMEZONE);
     if (endDate < dateToIso(e.joinDate)) throw Errors.validation("Tanggal berhenti tidak boleh sebelum tanggal mulai bekerja.", { endDate: "Sebelum tanggal mulai" });
     await tx.employee.update({ where: { id }, data: { isActive: false, endDate: isoToDate(endDate) } });
-    if (e.userId) {
-      await tx.user.update({ where: { id: e.userId }, data: { isActive: false } });
-      await tx.session.updateMany({ where: { userId: e.userId, revokedAt: null }, data: { revokedAt: new Date() } });
+    if (acct) {
+      if (acct.isActive) await tx.user.update({ where: { id: acct.id }, data: { isActive: false } });
+      await tx.session.updateMany({ where: { userId: acct.id, revokedAt: null }, data: { revokedAt: new Date() } });
     }
     await writeAudit(tx, actor, { action: "employee.deactivate", entityType: "Employee", entityId: id, summary: `Karyawan ${e.fullName} dinonaktifkan (berhenti ${endDate})`, reason: input.reason, after: { endDate } });
     // Proses berhenti tidak boleh terlupa: checklist berhenti dimulai otomatis bila belum ada yang berjalan.
@@ -341,15 +359,30 @@ export async function deactivateEmployee(actor: Actor, id: string, raw: unknown)
   });
 }
 
-export async function reactivateEmployee(actor: Actor, id: string): Promise<void> {
+/** Hasil mengaktifkan kembali karyawan terhadap akun loginnya. */
+export type ReactivateAccountResult = "NO_ACCOUNT" | "REACTIVATED" | "ALREADY_ACTIVE" | "ADMIN_KEPT_INACTIVE";
+
+/**
+ * Aktifkan kembali data karyawan. Akun login ikut aktif HANYA bila akun berperan Karyawan. Akun admin (HR/Super Admin) tidak pernah ikut hidup dari sini —
+ * diaktifkan eksplisit oleh Super Admin di Akun Pengguna — sehingga jalur ini tidak bisa dipakai membuka kembali akun admin yang sengaja dimatikan.
+ */
+export async function reactivateEmployee(actor: Actor, id: string): Promise<{ account: ReactivateAccountResult }> {
   assertCan(actor, "employee:manage");
-  await transaction(async (tx) => {
+  return transaction(async (tx) => {
     const e = await tx.employee.findUnique({ where: { id } });
     if (!e) throw Errors.notFound("Karyawan");
     if (e.isActive) throw Errors.conflict("Karyawan sudah aktif.");
+    const acct = await linkedAccount(tx, e.userId);
     await tx.employee.update({ where: { id }, data: { isActive: true, endDate: null } });
-    if (e.userId) await tx.user.update({ where: { id: e.userId }, data: { isActive: true } });
-    await writeAudit(tx, actor, { action: "employee.reactivate", entityType: "Employee", entityId: id, summary: `Karyawan ${e.fullName} diaktifkan kembali${e.userId ? " (akun login ikut diaktifkan)" : ""}` });
+    let account: ReactivateAccountResult = "NO_ACCOUNT";
+    if (acct) {
+      if (acct.isActive) account = "ALREADY_ACTIVE";
+      else if (acct.role === "EMPLOYEE") { await tx.user.update({ where: { id: acct.id }, data: { isActive: true } }); account = "REACTIVATED"; }
+      else account = "ADMIN_KEPT_INACTIVE";
+    }
+    const note = account === "REACTIVATED" ? " (akun login ikut diaktifkan)" : account === "ADMIN_KEPT_INACTIVE" ? " (akun admin tetap nonaktif — diaktifkan terpisah oleh Super Admin di Akun Pengguna)" : "";
+    await writeAudit(tx, actor, { action: "employee.reactivate", entityType: "Employee", entityId: id, summary: `Karyawan ${e.fullName} diaktifkan kembali${note}` });
+    return { account };
   });
 }
 

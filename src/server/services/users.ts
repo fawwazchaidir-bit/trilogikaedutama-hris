@@ -114,6 +114,11 @@ export async function updateUser(actor: Actor, id: string, raw: unknown): Promis
       throw Errors.validation("Akun yang tidak tertaut ke data karyawan tidak dapat dijadikan peran Karyawan.");
     }
     if (input.role !== undefined && input.role !== "EMPLOYEE" && input.role !== user.role) await assertNotIntern(tx, user.employee?.id, `diberi peran ${ROLE_LABELS[input.role]}`, "role");
+    // Akun yang tertaut ke karyawan NONAKTIF tidak boleh diaktifkan (mantan karyawan tidak boleh hidup lagi karena salah kelola): aktifkan dulu data karyawannya.
+    if (input.isActive === true && !user.isActive && user.employee) {
+      const emp = await tx.employee.findUnique({ where: { id: user.employee.id }, select: { isActive: true, fullName: true } });
+      if (emp && !emp.isActive) throw Errors.validation(`Data karyawan ${emp.fullName} sudah nonaktif (berhenti). Aktifkan kembali data karyawannya lebih dulu di menu Karyawan, baru akunnya diaktifkan.`, { isActive: "Karyawan nonaktif" });
+    }
     const leavingSuper = user.role === "SUPER_ADMIN" && ((input.role && input.role !== "SUPER_ADMIN") || input.isActive === false);
     if (leavingSuper) {
       const others = await tx.user.count({ where: { role: "SUPER_ADMIN", isActive: true, id: { not: id } } });

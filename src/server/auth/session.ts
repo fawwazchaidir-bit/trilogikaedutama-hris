@@ -3,6 +3,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { prisma } from "../db";
 import { env, isSecureDeployment } from "../env";
 import type { Actor } from "../actor";
+import { accountUsable } from "@/lib/account";
 
 /**
  * Sesi berbasis cookie opaque. Token acak 256-bit; yang disimpan di DB hanya SHA-256-nya,
@@ -67,13 +68,13 @@ export async function validateSession(token: string | undefined | null): Promise
   if (!token || token.length < 20 || token.length > 200) return null;
   const session = await prisma.session.findUnique({
     where: { tokenHash: hashToken(token) },
-    include: { user: { include: { employee: { select: { id: true } } } } },
+    include: { user: { include: { employee: { select: { id: true, isActive: true } } } } },
   });
   if (!session || session.revokedAt) return null;
   const now = Date.now();
   if (session.expiresAt.getTime() <= now) return null;
   if (now - session.lastSeenAt.getTime() > env().SESSION_IDLE_HOURS * 3_600_000) return null;
-  if (!session.user.isActive) return null;
+  if (!accountUsable(session.user)) return null;
 
   // Sliding idle window; tulis paling sering 1×/menit agar tidak membebani DB.
   if (now - session.lastSeenAt.getTime() > 60_000) {
@@ -98,8 +99,8 @@ export async function validateSession(token: string | undefined | null): Promise
  * tidak memperpanjang sesi tanpa batas; sesi dicabut/kedaluwarsa/idle atau pengguna dinonaktifkan → aliran ditutup.
  */
 export async function isSessionAlive(sessionId: string): Promise<boolean> {
-  const s = await prisma.session.findUnique({ where: { id: sessionId }, select: { revokedAt: true, expiresAt: true, lastSeenAt: true, user: { select: { isActive: true } } } });
-  if (!s || s.revokedAt || !s.user.isActive) return false;
+  const s = await prisma.session.findUnique({ where: { id: sessionId }, select: { revokedAt: true, expiresAt: true, lastSeenAt: true, user: { select: { isActive: true, role: true, employee: { select: { isActive: true } } } } } });
+  if (!s || s.revokedAt || !accountUsable(s.user)) return false;
   const now = Date.now();
   return s.expiresAt.getTime() > now && now - s.lastSeenAt.getTime() <= env().SESSION_IDLE_HOURS * 3_600_000;
 }

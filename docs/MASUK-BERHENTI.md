@@ -63,6 +63,6 @@ Butir **Pengembalian aset** memakai sinyal dari modul **Aset** (lihat `ASET.md`)
 ## Yang belum tercakup
 
 - Butir tambahan pada satu checklist hanya berlaku untuk checklist itu (untuk menambah ke semua checklist baru, ubah template).
-- Menonaktifkan karyawan tetap langsung menonaktifkan akun dan sesinya (perilaku lama, aman). Bila akses perlu bertahan sampai serah terima selesai, nonaktifkan karyawan pada saat itu — jangan lebih awal.
+- Menonaktifkan karyawan tetap langsung menonaktifkan akun **Karyawan** dan sesinya (perilaku lama, aman). Akun **admin** mengikuti aturan khusus: HR Admin hanya oleh Super Admin; Super Admin harus dinonaktifkan akunnya dulu di Akun Pengguna (lihat [PERAN-DAN-WEWENANG.md](PERAN-DAN-WEWENANG.md)). Bila akses perlu bertahan sampai serah terima selesai, nonaktifkan karyawan pada saat itu — jangan lebih awal.
 - Tidak ada surat keterangan kerja otomatis.
 - Aset dan penyelesaian akhir punya dokumen sendiri: [ASET.md](ASET.md) dan [PENYELESAIAN-AKHIR.md](PENYELESAIAN-AKHIR.md). Pesangon, UPMK, UPH, THR, dan pajak **tidak dihitung sistem**.

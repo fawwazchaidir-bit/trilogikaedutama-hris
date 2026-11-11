@@ -4,6 +4,7 @@ import { z } from "zod";
 import { prisma, transaction } from "../db";
 import { parseInput } from "../validate";
 import type { Role } from "@/lib/permissions";
+import { accountUsable } from "@/lib/account";
 import { env } from "../env";
 import { Errors } from "../errors";
 import { writeAudit } from "../audit";
@@ -55,18 +56,18 @@ export async function startLogin(input: { email: string; password: string }, met
     });
   }
 
-  const user = await prisma.user.findUnique({ where: { email } });
+  const user = await prisma.user.findUnique({ where: { email }, include: { employee: { select: { isActive: true } } } });
   // Selalu jalankan verifikasi (hash dummy bila user tidak ada) agar waktu respons seragam.
   const ok = await verifyPassword(input.password, user?.passwordHash ?? (await dummyHash()));
 
-  if (!user || !ok || !user.isActive) {
+  if (!user || !ok || !accountUsable(user)) {
     const [e] = await Promise.all([recordFailure(emailKey, cfg.email), ipKey ? recordFailure(ipKey, cfg.ip) : null]);
     if (user) {
       await writeAudit(prisma, null, {
         action: "auth.login_failed",
         entityType: "User",
         entityId: user.id,
-        summary: user.isActive ? "Percobaan masuk gagal (password salah)" : "Percobaan masuk ke akun nonaktif",
+        summary: accountUsable(user) ? "Percobaan masuk gagal (password salah)" : "Percobaan masuk ke akun nonaktif",
         after: { email, ip: meta.ip, lockedOut: e.blocked },
       });
     }
@@ -127,8 +128,8 @@ const challengeSchema = z.object({ challenge: z.string().min(20).max(200), code:
  */
 export async function completeLogin(raw: unknown, meta: RequestMeta): Promise<Extract<LoginOutcome, { requiresTwoFactor: false }>> {
   const input = parseInput(challengeSchema, raw);
-  const ch = await prisma.loginChallenge.findUnique({ where: { tokenHash: hashToken(input.challenge) }, include: { user: true } });
-  if (!ch || ch.expiresAt.getTime() <= Date.now() || !ch.user.isActive) {
+  const ch = await prisma.loginChallenge.findUnique({ where: { tokenHash: hashToken(input.challenge) }, include: { user: { include: { employee: { select: { isActive: true } } } } } });
+  if (!ch || ch.expiresAt.getTime() <= Date.now() || !accountUsable(ch.user)) {
     throw Errors.unauthenticated("Verifikasi kedaluwarsa. Masuk kembali dengan email dan password.");
   }
   await assertTwoFactorNotBlocked(ch.userId);

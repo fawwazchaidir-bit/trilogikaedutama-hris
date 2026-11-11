@@ -132,9 +132,9 @@ export function EmployeeActions({ employee, divisions, today, canManage, canCrea
   const [bank, setBank] = useState<{ bankName: string | null; accountNo: string | null; holder: string | null } | null>(null);
   const close = () => { setDlg(null); setError(null); setFe({}); setBank(null); };
 
-  async function run(fn: () => Promise<unknown>, ok: string) {
+  async function run(fn: () => Promise<unknown>, ok: string | ((result: unknown) => string)) {
     setBusy(true); setError(null); setFe({});
-    try { await fn(); toast.success(ok); close(); router.refresh(); }
+    try { const r = await fn(); toast.success(typeof ok === "function" ? ok(r) : ok); close(); router.refresh(); }
     catch (e) { setError(errorMessage(e)); if (e instanceof ApiClientError) setFe(e.fieldErrors); }
     finally { setBusy(false); }
   }
@@ -153,11 +153,11 @@ export function EmployeeActions({ employee, divisions, today, canManage, canCrea
       {canCreateAccount && !employee.userId && employee.isActive && <Button onClick={() => setDlg("account")}><KeyRound className="size-4" />Buat akun login</Button>}
       {employee.isActive
         ? <Button variant="danger" onClick={() => setDlg("deactivate")}><UserX className="size-4" />Nonaktifkan</Button>
-        : <Button onClick={() => void run(() => api(`/api/employees/${employee.id}/reactivate`, { body: {} }), "Karyawan diaktifkan kembali.")}><UserCheck className="size-4" />Aktifkan kembali</Button>}
+        : <Button onClick={() => void run(() => api(`/api/employees/${employee.id}/reactivate`, { body: {} }), (r) => (r as { account?: string } | null)?.account === "ADMIN_KEPT_INACTIVE" ? "Karyawan diaktifkan kembali. Akun admin tetap NONAKTIF — Super Admin mengaktifkannya terpisah di menu Akun Pengguna." : "Karyawan diaktifkan kembali.")}><UserCheck className="size-4" />Aktifkan kembali</Button>}
 
       {dlg === "edit" && <EmployeeFormDialog open onClose={close} employee={employee} divisions={divisions} today={today} />}
 
-      <Dialog open={dlg === "deactivate"} onClose={() => !busy && close()} size="sm" title={`Nonaktifkan ${employee.fullName}?`} description="Data tidak dihapus. Akun login dinonaktifkan dan sesi diakhiri. Hari setelah tanggal berhenti tidak dihitung dalam rekap & gaji."
+      <Dialog open={dlg === "deactivate"} onClose={() => !busy && close()} size="sm" title={`Nonaktifkan ${employee.fullName}?`} description="Data tidak dihapus. Akun login Karyawan dinonaktifkan dan sesi diakhiri; akun Super Admin harus dinonaktifkan lebih dulu di Akun Pengguna. Hari setelah tanggal berhenti tidak dihitung dalam rekap & gaji."
         footer={<><Button onClick={close} disabled={busy}>Batal</Button><Button variant="danger" loading={busy} onClick={() => void run(() => api(`/api/employees/${employee.id}/deactivate`, { body: deact }), "Karyawan dinonaktifkan.")}>Nonaktifkan</Button></>}>
         <div className="space-y-4">{error && <Notice tone="danger">{error}</Notice>}
           <TextField label="Tanggal berhenti" type="date" required value={deact.endDate} onChange={(e) => setDeact({ ...deact, endDate: e.target.value })} error={fe.endDate} hint="Hari terakhir masih dihitung." />

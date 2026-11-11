@@ -18,6 +18,20 @@ alur atasan–bawahan di [ORGANISASI-ATASAN.md](./ORGANISASI-ATASAN.md); keamana
 tim) dan **level Training**, dua mekanisme yang sudah ada dan teruji. Menambah role global berarti menyentuh seluruh matriks
 izin HRIS yang berjalan.
 
+### Akun login vs data karyawan (aturan satu pintu)
+
+Menonaktifkan/mengaktifkan **data karyawan** tidak boleh melewati aturan **Akun Pengguna**:
+
+| Akun yang tertaut ke karyawan | Nonaktifkan karyawan (`employee:manage`) | Aktifkan kembali karyawan |
+|---|---|---|
+| **Karyawan** | akun ikut nonaktif, sesi diakhiri (HR boleh) | akun ikut aktif |
+| **HR Admin** (aktif) | **hanya Super Admin**; HR ditolak. Akun ikut nonaktif | akun **tidak** ikut aktif — Super Admin mengaktifkannya di Akun Pengguna |
+| **Super Admin** (aktif) | **ditolak untuk siapa pun** sampai akunnya dinonaktifkan lebih dulu di Akun Pengguna (dua langkah) | akun **tidak** ikut aktif — diaktifkan Super Admin lain di Akun Pengguna |
+| Akun admin yang **sudah nonaktif** | data karyawan boleh dinonaktifkan HR; akun dibiarkan | seperti di atas |
+
+- **Minimal satu Super Admin aktif** dijaga di service (Akun Pengguna) **dan** di database (trigger `users_last_super_admin_guard`, dengan kunci serialisasi agar dua penonaktifan bersamaan tidak lolos keduanya). Berlaku juga untuk penurunan peran dan penghapusan akun.
+- Akun yang tertaut ke karyawan **nonaktif tidak bisa diaktifkan** di Akun Pengguna: aktifkan dulu data karyawannya (menu Karyawan → *Aktifkan kembali*). Akun Karyawan yang aktif sementara karyawannya nonaktif (data tidak konsisten) ditolak **saat login dan pada sesi berjalan**. Super Admin dikecualikan dari lapis kedua ini agar data yang tidak konsisten tidak mengunci pimpinan; ia hanya dikendalikan lewat dua langkah di atas.
+
 ### Tingkat jabatan disimpan eksplisit
 
 Tingkat **tidak** diturunkan dari bentuk pohon atasan: bawahan Manajer Marketing & Relations (Admisi 1/2, Social Media) tidak
