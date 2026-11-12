@@ -2321,24 +2321,34 @@ model TrainingReadinessItem {
 
 /// Tugas beban kerja (jam) per staf untuk satu program. Dibuat dari Tabel Jam Standar (source = TEMPLATE) atau ditambah atasan (MANUAL).
 model TrainingWorkloadTask {
-  id          String                 @id @default(uuid()) @db.Uuid
-  projectId   String                 @db.Uuid
-  employeeId  String                 @db.Uuid
-  name        String
-  hours       Float
-  startDate   DateTime               @db.Date
-  endDate     DateTime               @db.Date
-  status      TrainingWorkloadStatus @default(OPEN)
-  /// "TEMPLATE" (dibuat otomatis; dibuat ulang bila tanggal/peserta program berubah) atau "MANUAL" (tidak pernah ditimpa otomatis).
-  source      String                 @default("TEMPLATE")
-  roleKey     String?
-  createdById String?                @db.Uuid
-  createdAt   DateTime               @default(now())
-  updatedAt   DateTime               @updatedAt
+  id               String                 @id @default(uuid()) @db.Uuid
+  projectId        String                 @db.Uuid
+  employeeId       String                 @db.Uuid
+  name             String
+  hours            Float
+  startDate        DateTime               @db.Date
+  endDate          DateTime               @db.Date
+  status           TrainingWorkloadStatus @default(OPEN)
+  /// ASAL baris: "TEMPLATE" (berasal dari Tabel Jam Standar) atau "MANUAL" (dibuat manual dari awal; tidak pernah ditimpa otomatis). Tidak berubah karena diedit —
+  /// "sudah disesuaikan" disimpan terpisah di `adjusted`.
+  source           String                 @default("TEMPLATE")
+  roleKey          String?
+  /// ID TETAP baris Tabel Jam Standar asal (bukan nama/urutan/jam/pemegang jabatan): identitas "pekerjaan template yang sama" saat dihitung ulang.
+  /// Satu baris per (proyek, ID); null = dibuat manual dari awal, atau baris lama yang asalnya belum ditinjau (lihat `originReviewedAt`).
+  templateKey      String?
+  /// Baris template yang SUDAH DISESUAIKAN manual (nama/jam/tanggal diubah): dipertahankan saat dihitung ulang, tidak mengikuti template lagi sampai "Kembalikan ke template".
+  adjusted         Boolean                @default(false)
+  adjustedAt       DateTime?
+  /// Baris LAMA (sebelum ada `templateKey`) yang asalnya sudah ditinjau pengguna (ditautkan ke template atau dinyatakan berdiri sendiri).
+  originReviewedAt DateTime?
+  createdById      String?                @db.Uuid
+  createdAt        DateTime               @default(now())
+  updatedAt        DateTime               @updatedAt
 
   project  TrainingProject @relation(fields: [projectId], references: [id], onDelete: Restrict)
   employee Employee        @relation(fields: [employeeId], references: [id], onDelete: Restrict)
 
+  @@unique([projectId, templateKey])
   @@index([projectId, status])
   @@index([employeeId, startDate, endDate])
   @@map("training_workload_tasks")

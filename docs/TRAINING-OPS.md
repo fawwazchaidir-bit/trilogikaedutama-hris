@@ -158,7 +158,7 @@ status program Merah (milestone kritikal R06 terlambat 3 hari + item kritikal "J
   H (tanggal mulai), hari terakhir, T, atau milestone lain ± hari (kalender atau hari kerja), sehingga ikut bergeser bila tanggal berubah.
 - Milestone selesai **dengan bukti** (tautan/rujukan dokumen, dapat dimatikan di konfigurasi) oleh PIC-nya atau pengelola tugas; dapat dibuka kembali dengan alasan. Semua tercatat di audit.
 - Peserta ditandai **terkonfirmasi** secara manual (reguler: pembayaran terverifikasi; kerjasama: nama diterima dari klien). Ini **bukan** status pembayaran dari sistem lain.
-- Jam kerja per staf dari Tabel Jam Standar (jam tetap + per peserta + per hari kelas), dibagi rata pada hari kerja jendela tugas; tugas manual tidak pernah ditimpa. Kapasitas bawaan 6 jam/hari Senin–Jumat;
+- Jam kerja per staf dari Tabel Jam Standar (jam tetap + per peserta + per hari kelas), dibagi rata pada hari kerja jendela tugas; tugas manual tidak pernah ditimpa (lihat **Jam kerja tanpa hitung ganda** di bawah). Kapasitas bawaan 6 jam/hari Senin–Jumat;
   pengecualian per staf oleh Koordinator Program/Direktur; cuti **disetujui** dari HRIS mengurangi kapasitas (hanya tanggal & porsi hari yang dibaca).
 
 **Tafsir & penyesuaian yang saya ambil (perlu Anda ketahui — semuanya dapat ditinjau)**
@@ -176,6 +176,26 @@ status program Merah (milestone kritikal R06 terlambat 3 hari + item kritikal "J
 tabel riwayat di database append-only). Konfigurasi yang rusak (mis. disunting langsung di DB) **tidak pernah dipakai menghitung**: dipakai bawaan dokumen dan ditandai.
 Efek perubahan: ambang/bobot/kapasitas/proyeksi/KP/wajib-bukti **langsung** berlaku; template milestone/item dan PIC berlaku untuk **program baru**; jam standar & pemegang jabatan berlaku saat jam kerja dihitung ulang
 (otomatis bila tanggal, peserta acuan, moda, atau jenis program berubah; atau tombol "Hitung ulang dari template").
+
+### Jam kerja tanpa hitung ganda (`lib/training/workload-sync.ts`, `syncWorkloadTx`)
+
+Tugas jam kerja (sumber indikator **Beban Tim**) disinkronkan dengan Tabel Jam Standar tanpa membuat satu pekerjaan terhitung dua kali.
+
+- **ID tetap.** Setiap baris Tabel Jam Standar punya `id` (mis. `kampanye-reguler`) yang **tidak diturunkan dari nama, urutan, jam, atau pemegang jabatan** — semuanya boleh berubah tanpa mengganti ID. Baris baru di editor diberi ID acak sekali. ID kembar ditolak saat simpan. Konfigurasi tersimpan sebelum ada ID dilengkapi saat dibaca (cocok dengan baris bawaan → ID bawaan; lainnya → ID turunan isi yang stabil sampai disimpan).
+- **Asal ≠ disesuaikan.** `source` = asal baris (`TEMPLATE`/`MANUAL`) dan **tidak berubah karena diedit**; `templateKey` = ID baris tabel jam asal (unik per proyek: `UNIQUE(projectId, templateKey)`); `adjusted` = sudah disesuaikan manual (nama/jam/tanggal diubah; mengganti status saja bukan penyesuaian).
+- **Hitung ulang idempoten** (saat template diterapkan, tombol "Hitung ulang dari template", tanggal/peserta/moda program berubah, jenis program berganti), dalam satu transaksi dengan kunci advisory per proyek (dua orang menekan bersamaan tidak membuat salinan):
+
+| Kondisi baris | Saat dihitung ulang |
+|---|---|
+| Dari template, belum disentuh, Terbuka | Mengikuti hitungan template (diperbarui bila berbeda; staf ikut pindah bila pemegang jabatan berganti; dihapus bila pekerjaan tak berlaku lagi) |
+| Dari template, sudah **disesuaikan** | Dipertahankan; bila berbeda dari template → peringatan "tidak ikut berubah" |
+| Dari template, **selesai/dibatalkan** | Dipertahankan beserta status dan riwayatnya (tidak dibuka kembali) |
+| **Manual** dari awal | Berdiri sendiri, tidak pernah ditimpa |
+
+  Masukan sama → tidak ada perubahan: jumlah baris dan total jam tetap. Mengganti jenis program tetap ditolak bila sudah ada baris manual/disesuaikan/selesai (kemajuan dijaga).
+- **Kembalikan ke template** (per baris): pratinjau menampilkan apa yang berubah (nama, staf, jam, tanggal); baris selesai/dibatalkan **tidak** dikembalikan (tidak terbuka sendiri, riwayat utuh); tercatat di riwayat.
+- **Data lama (sebelum ada ID) tidak ditebak.** Baris lama yang berjabatan (bukti asal-template) dan cocok **pasti** (nama sama dengan tepat satu baris tabel, atau jabatannya hanya punya satu pekerjaan) ditautkan otomatis saat dihitung ulang — yang berstatus Manual dianggap *disesuaikan*. Bila **meragukan** → lencana **Perlu diperiksa** (pengguna menautkan ke pekerjaan template atau menyatakan berdiri sendiri); bila ada **dua baris untuk pekerjaan yang sama** (warisan bug) → lencana **Kembar**: pengguna melihat kedua baris dan memilih satu yang dipertahankan ("Rapikan duplikat"; baris selesai tak boleh dihapus; tercatat siapa, baris mana yang dipertahankan/dihapus beserta nilainya). Selama belum ditinjau, baris itu tidak diubah dan **tidak dibuatkan baris pengganti diam-diam** (pekerjaan jabatan terkait ditunda dengan peringatan).
+- Migrasi: `20261111210000_workload_template_key` (aditif; tidak mengubah baris lama).
 
 ### 3b. Otomasi: snapshot harian, eskalasi, pengingat tenggat
 
@@ -280,6 +300,7 @@ Mengaktifkan flag tidak memberi siapa pun akses otomatis: Super Admin harus memb
 | Unit (logika murni: akses, status, indikator dashboard, validasi, usulan level) | `tests/unit/training-access.test.ts`, `training-rules.test.ts` | 32 |
 | Integrasi — gerbang akses, IDOR, tim, penjaga DB, aturan akses untuk pekerja latar belakang | `tests/integration/training-access.test.ts` | 27 |
 | Integrasi — alur bisnis (proyek→penutupan, dashboard, jadwal, peserta, dokumen, referensi) | `tests/integration/training-flow.test.ts` | 35 |
+| Unit + integrasi — jam kerja tanpa hitung ganda (idempoten, disesuaikan/selesai/manual, ganti pemegang jabatan, serentak, data lama, kembalikan ke template, rapikan kembar, ID konfigurasi) | `tests/unit/training-workload-sync.test.ts`, `tests/integration/training-workload-sync.test.ts` | 22 + 21 |
 | Unit + integrasi — penutupan: keputusan tugas terbuka, tindak lanjut hidup, tugas yatim tidak dihitung, pelonggaran checklist wajib & pengakuan | `tests/unit/training-closure.test.ts`, `tests/integration/training-closure.test.ts` | 13 + 20 |
 | Integrasi — modul dimatikan | `tests/integration/training-flag.test.ts` | 3 |
 | Unit — mesin indikator, konfigurasi, skema PATCH, eskalasi & deret hari kerja, waktu relatif | `tests/unit/training-indicators.test.ts`, `training-validation.test.ts`, `training-escalation.test.ts`, `nav-pref.test.ts`, `format-timeago.test.ts` | 60 |

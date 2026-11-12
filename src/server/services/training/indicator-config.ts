@@ -5,7 +5,7 @@ import { parseInput } from "../../validate";
 import type { Actor } from "../../actor";
 import { writeAudit } from "../../audit";
 import { toJson } from "../../json";
-import { checkIndicatorConfig, defaultIndicatorConfig, indicatorConfigSchema, type IndicatorConfig } from "@/lib/training/indicators/config";
+import { checkIndicatorConfig, defaultIndicatorConfig, fillHourIds, indicatorConfigSchema, type IndicatorConfig } from "@/lib/training/indicators/config";
 import { indicatorConfigSaveSchema } from "@/lib/validation/training";
 import { assertModuleEnabled, requireModule } from "./access";
 
@@ -20,7 +20,7 @@ export interface LoadedConfig { version: number; config: IndicatorConfig; update
 export async function loadConfig(db: Db = prisma): Promise<LoadedConfig> {
   const row = await db.trainingIndicatorConfig.findUnique({ where: { id: 1 } });
   if (!row) return { version: 0, config: defaultIndicatorConfig(), updatedAt: null, updatedById: null, note: null, fromDefault: true, damaged: false };
-  const parsed = indicatorConfigSchema.safeParse(row.config);
+  const parsed = indicatorConfigSchema.safeParse(fillHourIds(row.config));   // konfigurasi lama (tanpa ID baris jam) dilengkapi ID-nya saat dibaca
   if (!parsed.success) return { version: row.version, config: defaultIndicatorConfig(), updatedAt: row.updatedAt, updatedById: row.updatedById, note: row.note, fromDefault: true, damaged: true };
   return { version: row.version, config: parsed.data, updatedAt: row.updatedAt, updatedById: row.updatedById, note: row.note, fromDefault: false, damaged: false };
 }
@@ -89,13 +89,16 @@ async function assertEmployeesActive(tx: Tx, ids: string[]): Promise<void> {
   if (n !== uniq.length) throw Errors.validation("Ada pemegang jabatan atau fasilitator yang bukan karyawan aktif. Muat ulang halaman dan pilih ulang.", { config: "Karyawan tidak valid" });
 }
 
+/** Klien lama / API yang tidak mengirim ID baris jam: lengkapi sebelum validasi (ID yang sudah ada tidak disentuh). */
+const fillRawHourIds = (raw: unknown): unknown => (raw && typeof raw === "object" && "config" in raw ? { ...(raw as object), config: fillHourIds((raw as { config: unknown }).config) } : raw);
+
 export interface SaveConfigResult { version: number; warnings: string[]; changed: string[] }
 
 /** Simpan konfigurasi baru sebagai VERSI BARU. Hanya Super Admin (Direktur). Galat semantik memblokir; peringatan (mis. bobot ≠ 100) tidak. */
 export async function saveIndicatorConfig(actor: Actor, raw: unknown): Promise<SaveConfigResult> {
   assertModuleEnabled();
   if (actor.role !== "SUPER_ADMIN") throw Errors.forbidden("Hanya Super Admin (Direktur) yang dapat mengubah rumus dan parameter indikator.");
-  const input = parseInput(indicatorConfigSaveSchema, raw);
+  const input = parseInput(indicatorConfigSaveSchema, fillRawHourIds(raw));
   const check = checkIndicatorConfig(input.config);
   if (check.errors.length) throw Errors.validation(check.errors[0]!, { config: check.errors.join(" · ") });
   return transaction(async (tx) => {

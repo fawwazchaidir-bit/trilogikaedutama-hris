@@ -333,11 +333,11 @@ export async function updateProject(actor: Actor, id: string, raw: unknown): Pro
     if (d.changed.length === 0) return;
     const trackChanged = d.changed.includes("track") && b.indicatorsAppliedAt !== null;
     if (trackChanged) {
-      // Jenis program menentukan template. Boleh diganti hanya selama belum ada kemajuan yang tercatat (tidak ada milestone selesai, item bukan "terbuka", jam kerja manual).
+      // Jenis program menentukan template. Boleh diganti hanya selama belum ada kemajuan yang tercatat (tidak ada milestone selesai, item bukan "terbuka", jam kerja manual/disesuaikan/selesai).
       const [doneMs, touchedItems, manualWork] = await Promise.all([
         tx.trainingMilestone.count({ where: { projectId: id, OR: [{ doneAt: { not: null } }, { notApplicable: true }] } }),
         tx.trainingReadinessItem.count({ where: { projectId: id, status: { not: "OPEN" } } }),
-        tx.trainingWorkloadTask.count({ where: { projectId: id, OR: [{ source: "MANUAL" }, { status: { not: "OPEN" } }] } }),
+        tx.trainingWorkloadTask.count({ where: { projectId: id, OR: [{ source: "MANUAL" }, { adjusted: true }, { status: { not: "OPEN" } }] } }),
       ]);
       if (doneMs + touchedItems + manualWork > 0) throw Errors.conflict("Jenis program tidak dapat diganti karena milestone/item kesiapan sudah mulai dikerjakan atau ada jam kerja manual. Buat proyek baru dengan jenis yang benar.");
     }
@@ -350,11 +350,11 @@ export async function updateProject(actor: Actor, id: string, raw: unknown): Pro
       if (trackChanged) {
         await tx.trainingMilestone.deleteMany({ where: { projectId: id } });
         await tx.trainingReadinessItem.deleteMany({ where: { projectId: id } });
-        await tx.trainingWorkloadTask.deleteMany({ where: { projectId: id, source: "TEMPLATE" } });
+        // Jam kerja TIDAK dihapus di sini: `applyTemplatesTx` menyinkronkannya (baris yang belum disentuh mengikuti template baru; yang disesuaikan/selesai dipertahankan).
         await applyTemplatesTx(tx, actor, row, cfg);
       } else {
         const r = await regenerateWorkloadTx(tx, actor, row, cfg);
-        await auditProject(tx, actor, id, { action: "training.indicator.workload", summary: `Tugas jam kerja dari template dihitung ulang karena data program berubah (${r.created} tugas)`, after: { created: r.created } });
+        await auditProject(tx, actor, id, { action: "training.indicator.workload", summary: `Tugas jam kerja dari template dihitung ulang karena data program berubah (${r.created} baru, ${r.updated} diperbarui, ${r.removed} dihapus${r.warnings.length ? `; ${r.warnings.length} peringatan` : ""})`, after: { created: r.created, updated: r.updated, removed: r.removed, warnings: r.warnings } });
       }
     }
   });

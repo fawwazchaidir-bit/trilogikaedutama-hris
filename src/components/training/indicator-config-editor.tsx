@@ -9,7 +9,7 @@ import { TextAreaField, TextField } from "@/components/ui/field";
 import { api } from "@/lib/api-client";
 import { formatDateTime } from "@/lib/format";
 import {
-  ANCHORS, ANCHOR_LABEL, COMPONENTS, COMPONENT_LABEL, ITEM_COMPONENTS, TRACKS, TRACK_LABEL, checkIndicatorConfig,
+  ANCHORS, ANCHOR_LABEL, COMPONENTS, COMPONENT_LABEL, ITEM_COMPONENTS, TRACKS, TRACK_LABEL, checkIndicatorConfig, newHourRowId,
   type Anchor, type IndicatorConfig, type ItemTemplate, type MilestoneTemplate, type Track,
 } from "@/lib/training/indicators/config";
 import { offsetLabel } from "@/lib/training/indicators/format";
@@ -249,7 +249,7 @@ export function IndicatorConfigEditor({ initial }: { initial: IndicatorConfigDto
                 <td className="px-2 py-1.5"><button type="button" aria-label={`Hapus baris jam ${h.task}`} className="rounded p-1 text-muted hover:bg-stone-100 hover:text-brand-700" onClick={() => edit((c) => { c.hourTable.splice(i, 1); })}><Trash2 className="size-4" /></button></td>
               </tr>))}</tbody>
           </table></div>
-          <Button size="sm" onClick={() => edit((c) => { c.hourTable.push({ roleKey: c.roles[0]!.key, task: "Tugas baru", tracks: ["REGULAR", "PARTNER"], fixed: { REGULAR: 0, PARTNER: 0 }, perParticipant: 0, perClassDay: 0, modes: [], start: { anchor: "H", days: -7 }, end: { anchor: "H", days: 0 } }); })}><Plus className="size-4" />Tambah baris</Button>
+          <Button size="sm" onClick={() => edit((c) => { c.hourTable.push({ id: newHourRowId(), roleKey: c.roles[0]!.key, task: "Tugas baru", tracks: ["REGULAR", "PARTNER"], fixed: { REGULAR: 0, PARTNER: 0 }, perParticipant: 0, perClassDay: 0, modes: [], start: { anchor: "H", days: -7 }, end: { anchor: "H", days: 0 } }); })}><Plus className="size-4" />Tambah baris</Button>
         </Section>
 
         <Section title="Eskalasi & pengingat otomatis" desc="Pesan otomatis (notifikasi dalam aplikasi; email/WhatsApp hanya bila dikonfigurasi dan dipilih pengguna) menurut dokumen §5.2. Penerima ditentukan lewat JABATAN → pemegang jabatan. Garis atasan di bawah adalah USULAN dari bagan organisasi — sesuaikan. Tanpa pemegang/atasan yang dapat dijangkau, pesan jatuh ke Direktur (Super Admin) agar tidak hilang.">

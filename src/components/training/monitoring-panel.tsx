@@ -12,7 +12,7 @@ import { formatDateShort, formatDateTime } from "@/lib/format";
 import { COMPONENT_LABEL, ITEM_COMPONENTS } from "@/lib/training/indicators/config";
 import { UNAVAILABLE_LABEL } from "@/lib/training/availability";
 import type { ProgramIndicatorDto } from "@/server/services/training/indicator-compute";
-import type { MilestoneDto, ReadinessItemDto, WorkloadTaskDto } from "@/server/services/training/indicator-data";
+import type { MilestoneDto, ReadinessItemDto, WorkloadRevertPreview, WorkloadSyncResult, WorkloadTaskDto, WorkloadTemplateEntryDto } from "@/server/services/training/indicator-data";
 import type { RecoveryNoteDto } from "@/server/services/training/recovery";
 import { RECOVERY_KINDS, RECOVERY_KIND_LABEL, type RecoveryKind } from "@/lib/training/indicators/escalation";
 import { IndicatorTiles } from "./indicator-ui";
@@ -21,6 +21,8 @@ import { useRunner } from "./use-runner";
 interface Props {
   recovery: RecoveryNoteDto[]; canWriteRecovery: boolean;
   projectId: string; indicators: ProgramIndicatorDto; milestones: MilestoneDto[]; items: ReadinessItemDto[]; workload: WorkloadTaskDto[];
+  /** Pekerjaan Tabel Jam Standar yang berlaku untuk proyek ini (pilihan saat menautkan baris lama); kosong bila tidak berwenang. */
+  workloadEntries?: WorkloadTemplateEntryDto[];
   employees: { id: string; name: string }[];
   /** Kemampuan pada proyek ini (dari server; penegakan tetap di server). */
   canUpdate: boolean; canManageTasks: boolean; canManageChecklist: boolean; editable: boolean;
@@ -41,13 +43,19 @@ export function MonitoringPanel(p: Props) {
   const [addWork, setAddWork] = useState(false);
   const [w, setW] = useState({ employeeId: "", name: "", hours: "", startDate: "", endDate: "" });
   const [rec, setRec] = useState<{ kind: RecoveryKind; body: string; newDate: string }>({ kind: "YELLOW_STREAK", body: "", newDate: "" });
+  // Jam kerja: hasil hitung ulang, pratinjau "Kembalikan ke template", tinjau baris lama, rapikan kembar.
+  const [recalc, setRecalc] = useState<WorkloadSyncResult | null>(null);
+  const [revert, setRevert] = useState<{ row: WorkloadTaskDto; preview: WorkloadRevertPreview | null } | null>(null);
+  const [review, setReview] = useState<{ row: WorkloadTaskDto; key: string } | null>(null);
+  const [merge, setMerge] = useState<{ ids: string[]; keep: string } | null>(null);
+  const reviewCount = p.workload.filter((x) => x.review !== null).length;
 
   const applied = p.indicators.applied;
   const byComponent = ITEM_COMPONENTS.map((c) => ({ c, rows: p.items.filter((i) => i.component === c) })).filter((g) => g.rows.length > 0);
 
   return (
     <div className="space-y-8">
-      {error && !finish && !reopen && !addWork && <Notice tone="danger">{error}</Notice>}
+      {error && !finish && !reopen && !addWork && !revert && !review && !merge && <Notice tone="danger">{error}</Notice>}
       <IndicatorTiles ind={p.indicators} />
 
       {!applied ? (
@@ -113,18 +121,41 @@ export function MonitoringPanel(p: Props) {
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <h2 className="text-base font-semibold text-ink">Jam kerja per staf</h2>
                 {p.canManageTasks && live && <span className="inline-flex gap-2">
-                  <Button loading={busy} onClick={() => void run(() => api<{ created: number }>(`/api/training/projects/${p.projectId}/indicators/workload`, { body: {} }), "Jam kerja dari template dihitung ulang.")}>Hitung ulang dari template</Button>
+                  <Button loading={busy} onClick={() => void run(() => api<WorkloadSyncResult>(`/api/training/projects/${p.projectId}/indicators/workload`, { body: {} }), "Jam kerja dari template dihitung ulang.", (r) => setRecalc(r))}>Hitung ulang dari template</Button>
                   <Button variant="primary" onClick={() => { reset(); setW({ employeeId: "", name: "", hours: "", startDate: "", endDate: "" }); setAddWork(true); }}><Plus className="size-4" />Tambah tugas</Button>
                 </span>}
               </div>
-              <p className="text-xs text-muted">Jam standar = tetap + per peserta × peserta acuan + per hari kelas × lama kelas, dibagi rata pada hari kerja jendela tugas. Tugas manual tidak pernah ditimpa saat dihitung ulang.</p>
+              <p className="text-xs text-muted">Jam standar = tetap + per peserta × peserta acuan + per hari kelas × lama kelas, dibagi rata pada hari kerja jendela tugas. Hitung ulang <strong>tidak membuat baris ganda</strong>: baris template yang belum disentuh mengikuti template; yang sudah <strong>disesuaikan</strong> atau <strong>selesai</strong> dipertahankan; tugas manual tidak pernah ditimpa.</p>
+              {recalc && (
+                <Notice tone={recalc.warnings.length ? "warn" : "info"}>
+                  <span data-testid="recalc-result">Hasil hitung ulang: {recalc.created} baru, {recalc.updated} diperbarui, {recalc.removed} dihapus{recalc.linked ? `, ${recalc.linked} baris lama ditautkan` : ""} — total {recalc.total} baris.</span>
+                  {recalc.warnings.length > 0 && <ul className="mt-1 list-disc pl-5">{recalc.warnings.map((w2, i) => <li key={i}>{w2}</li>)}</ul>}
+                </Notice>
+              )}
+              {reviewCount > 0 && <Notice tone="warn"><span data-testid="workload-review-notice">{reviewCount} baris jam kerja lama perlu diperiksa asalnya (lihat lencana <strong>Perlu diperiksa</strong>/<strong>Kembar</strong>). Sistem tidak menebak dan tidak membuat baris pengganti diam-diam.</span></Notice>}
               {p.workload.length === 0 ? <EmptyState title="Belum ada tugas jam kerja" description="Tugas dibuat otomatis dari Tabel Jam Standar bila pemegang jabatan sudah diisi di Rumus Indikator." /> : (
                 <TableWrap>
                   <Table>
                     <thead><tr><Th>Staf</Th><Th>Tugas</Th><Th align="right">Jam</Th><Th>Jendela</Th><Th>Sumber</Th><Th>Status</Th></tr></thead>
                     <tbody>{p.workload.map((x) => (
-                      <tr key={x.id}><Td>{x.employeeName}</Td><Td>{x.name}</Td><Td align="right">{x.hours}</Td><Td>{formatDateShort(x.startDate)} – {formatDateShort(x.endDate)}</Td>
-                        <Td><Badge tone={x.source === "MANUAL" ? "blue" : "gray"}>{x.source === "MANUAL" ? "Manual" : "Template"}</Badge></Td>
+                      <tr key={x.id} data-testid="workload-row">
+                        <Td>{x.employeeName}</Td><Td>{x.name}</Td><Td align="right">{x.hours}</Td><Td>{formatDateShort(x.startDate)} – {formatDateShort(x.endDate)}</Td>
+                        <Td>
+                          <span className="flex flex-wrap items-center gap-1">
+                            <Badge tone={x.source === "MANUAL" ? "blue" : "gray"}>{x.source === "MANUAL" ? "Manual" : "Template"}</Badge>
+                            {x.adjusted && <Badge tone="amber">Disesuaikan</Badge>}
+                            {x.review === "UNLINKED" && <Badge tone="red">Perlu diperiksa</Badge>}
+                            {x.review === "DUPLICATE" && <Badge tone="red">Kembar</Badge>}
+                          </span>
+                          {x.differsFromTemplate && <span className="block text-xs text-amber-800">berbeda dari template — tidak ikut berubah</span>}
+                          {p.canManageTasks && live && (
+                            <span className="mt-1 flex flex-wrap gap-1">
+                              {x.canRevert && <Button size="sm" variant="ghost" aria-label={`Kembalikan ${x.name} ke template`} onClick={() => { reset(); setRevert({ row: x, preview: null }); void api<WorkloadRevertPreview>(`/api/training/workload/${x.id}/revert`).then((pv) => setRevert({ row: x, preview: pv })).catch(() => setRevert(null)); }}><RotateCcw className="size-3.5" />Kembalikan ke template…</Button>}
+                              {x.review === "UNLINKED" && <Button size="sm" variant="ghost" aria-label={`Tinjau asal ${x.name}`} onClick={() => { reset(); setReview({ row: x, key: "" }); }}>Tinjau asal…</Button>}
+                              {x.review === "DUPLICATE" && x.duplicateGroup && <Button size="sm" variant="ghost" aria-label={`Rapikan baris kembar ${x.name}`} onClick={() => { reset(); setMerge({ ids: x.duplicateGroup!, keep: "" }); }}>Rapikan duplikat…</Button>}
+                            </span>
+                          )}
+                        </Td>
                         <Td>{p.canManageTasks && live ? (
                           <select aria-label={`Status ${x.name}`} className="h-8 rounded-md border border-line bg-white px-2 text-sm" value={x.status} disabled={busy}
                             onChange={(e) => void run(() => api(`/api/training/workload/${x.id}`, { method: "PATCH", body: { status: e.target.value } }))}>
@@ -171,6 +202,61 @@ export function MonitoringPanel(p: Props) {
       <Dialog open={reopen !== null} onClose={() => !busy && setReopen(null)} size="md" title={`Buka kembali ${reopen?.code ?? ""}`} description={reopen?.name}
         footer={<><Button onClick={() => setReopen(null)} disabled={busy}>Batal</Button><Button variant="primary" loading={busy} disabled={reason.trim().length < 3} onClick={() => reopen && void run(() => api(`/api/training/milestones/${reopen.id}/reopen`, { body: { reason } }), "Milestone dibuka kembali.", () => setReopen(null))}>Buka kembali</Button></>}>
         <div className="space-y-4">{error && <Notice tone="danger">{error}</Notice>}<TextAreaField label="Alasan" required rows={2} maxLength={300} value={reason} onChange={(e) => setReason(e.target.value)} hint="Dicatat di riwayat aktivitas." /></div>
+      </Dialog>
+
+      {/* Kembalikan ke template: tampilkan perubahan dulu; baris selesai tidak pernah dikembalikan/dibuka kembali. */}
+      <Dialog open={revert !== null} onClose={() => !busy && setRevert(null)} size="md" title="Kembalikan ke template" description={revert?.row.name}
+        footer={<><Button onClick={() => setRevert(null)} disabled={busy}>Batal</Button>
+          <Button variant="primary" loading={busy} disabled={!revert?.preview?.canApply} onClick={() => revert && void run(() => api(`/api/training/workload/${revert.row.id}/revert`, { body: {} }), "Baris dikembalikan ke template.", () => setRevert(null))}>Kembalikan ke template</Button></>}>
+        <div className="space-y-3">{error && <Notice tone="danger">{error}</Notice>}
+          {!revert?.preview ? <p className="text-sm text-muted">Memuat pratinjau…</p> : (
+            <>
+              {revert.preview.reason && <Notice tone={revert.preview.canApply ? "info" : "warn"}>{revert.preview.reason}</Notice>}
+              {revert.preview.changes.length > 0 && (
+                <table className="w-full text-sm" data-testid="revert-changes"><thead><tr className="text-left text-xs text-muted"><th className="py-1 font-medium">Yang berubah</th><th className="py-1 font-medium">Sekarang</th><th className="py-1 font-medium">Menjadi (template)</th></tr></thead>
+                  <tbody>{revert.preview.changes.map((c) => <tr key={c.field} className="border-t border-line"><td className="py-1">{c.label}</td><td className="py-1">{String(c.current)}</td><td className="py-1 font-medium">{String(c.template)}</td></tr>)}</tbody></table>
+              )}
+              {revert.preview.canApply && <p className="text-xs text-muted">Penanda &quot;Disesuaikan&quot; dicabut dan baris kembali mengikuti template pada hitung ulang berikutnya. Dicatat di riwayat.</p>}
+            </>
+          )}
+        </div>
+      </Dialog>
+
+      {/* Tinjau baris lama yang asalnya tidak jelas: tautkan atau nyatakan berdiri sendiri — tidak ada baris yang dibuat/dihapus. */}
+      <Dialog open={review !== null} onClose={() => !busy && setReview(null)} size="md" title="Tinjau asal baris jam kerja" description={review?.row.name}
+        footer={review && <><Button onClick={() => setReview(null)} disabled={busy}>Batal</Button>
+          <Button loading={busy} onClick={() => void run(() => api(`/api/training/workload/${review.row.id}/review`, { body: { action: "STANDALONE" } }), "Baris dinyatakan berdiri sendiri.", () => setReview(null))}>Berdiri sendiri (bukan dari template)</Button>
+          <Button variant="primary" loading={busy} disabled={!review.key} onClick={() => void run(() => api(`/api/training/workload/${review.row.id}/review`, { body: { action: "LINK", templateKey: review.key } }), "Baris ditautkan ke template.", () => setReview(null))}>Tautkan</Button></>}>
+        {review && <div className="space-y-4">{error && <Notice tone="danger">{error}</Notice>}
+          <Notice tone="info">Baris ini dibuat sebelum sistem mencatat asalnya, dan asalnya tidak dapat dipastikan. Pilih: tautkan ke pekerjaan Tabel Jam Standar yang sama, atau nyatakan berdiri sendiri. Sistem tidak menebak.</Notice>
+          <SelectField label="Tautkan ke pekerjaan template" aria-label="Pekerjaan template" value={review.key} onChange={(e) => setReview({ ...review, key: e.target.value })}>
+            <option value="">— Pilih pekerjaan template —</option>
+            {(p.workloadEntries ?? []).filter((e) => !e.claimedBy).map((e) => <option key={e.key} value={e.key}>{e.roleLabel} — {e.task}</option>)}
+          </SelectField>
+        </div>}
+      </Dialog>
+
+      {/* Rapikan kembar: tampilkan semua baris dalam kelompok, pengguna memilih satu yang dipertahankan. Baris selesai tidak boleh dihapus. */}
+      <Dialog open={merge !== null} onClose={() => !busy && setMerge(null)} size="lg" title="Rapikan baris kembar" description="Satu pekerjaan template terhitung lebih dari sekali. Pilih baris yang dipertahankan; baris lainnya dihapus."
+        footer={merge && (() => {
+          const rows = p.workload.filter((x) => merge.ids.includes(x.id));
+          const gone = rows.filter((x) => x.id !== merge.keep);
+          const blocked = merge.keep !== "" && gone.some((x) => x.status !== "OPEN");
+          return <><Button onClick={() => setMerge(null)} disabled={busy}>Batal</Button>
+            <Button variant="danger" loading={busy} disabled={!merge.keep || blocked} onClick={() => void run(() => api(`/api/training/projects/${p.projectId}/workload/merge`, { body: { keepId: merge.keep, removeIds: gone.map((x) => x.id) } }), "Baris kembar dirapikan.", () => setMerge(null))}>Hapus yang lain, pertahankan yang dipilih</Button></>;
+        })()}>
+        {merge && <div className="space-y-3">{error && <Notice tone="danger">{error}</Notice>}
+          <ul className="space-y-2" data-testid="merge-rows">{p.workload.filter((x) => merge.ids.includes(x.id)).map((x) => (
+            <li key={x.id} className="rounded-md border border-line p-3">
+              <label className="flex cursor-pointer items-start gap-3">
+                <input type="radio" name="merge-keep" className="mt-1" checked={merge.keep === x.id} onChange={() => setMerge({ ...merge, keep: x.id })} aria-label={`Pertahankan baris ${x.name} (${x.hours} jam, ${x.source === "MANUAL" ? "manual" : "template"})`} />
+                <span className="text-sm"><span className="font-medium">{x.name}</span> · {x.employeeName} · <strong>{x.hours} jam</strong> · {formatDateShort(x.startDate)} – {formatDateShort(x.endDate)}
+                  <span className="mt-1 flex flex-wrap gap-1"><Badge tone={x.source === "MANUAL" ? "blue" : "gray"}>{x.source === "MANUAL" ? "Manual" : "Template"}</Badge>{x.adjusted && <Badge tone="amber">Disesuaikan</Badge>}<Badge tone={x.status === "OPEN" ? "green" : "gray"}>{x.status === "OPEN" ? "Terbuka" : x.status === "DONE" ? "Selesai" : "Dibatalkan"}</Badge></span></span>
+              </label>
+            </li>))}</ul>
+          {merge.keep !== "" && p.workload.filter((x) => merge.ids.includes(x.id) && x.id !== merge.keep).some((x) => x.status !== "OPEN") && <Notice tone="warn">Baris yang sudah selesai/dibatalkan tidak dapat dihapus (riwayatnya dijaga). Pertahankan baris itu.</Notice>}
+          <p className="text-xs text-muted">Dicatat di riwayat: siapa yang merapikan, baris mana yang dipertahankan dan yang dihapus (beserta jam dan tanggalnya).</p>
+        </div>}
       </Dialog>
 
       <Dialog open={addWork} onClose={() => !busy && setAddWork(false)} size="md" title="Tambah tugas jam kerja" description="Tugas manual (di luar Tabel Jam Standar) dihitung pada beban staf."

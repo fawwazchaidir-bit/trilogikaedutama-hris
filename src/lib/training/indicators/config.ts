@@ -57,7 +57,13 @@ export const itemTemplateSchema = z.object({
 export type ItemTemplate = z.infer<typeof itemTemplateSchema>;
 
 const anchorDays = z.object({ anchor: z.enum(["H", "H_END", "T"]), days: int(-730, 730) });
+/**
+ * ID TETAP baris tabel jam standar (identitas "asal template" sebuah tugas jam kerja). Tidak diturunkan dari nama, urutan, jam, atau pemegang jabatan —
+ * semuanya boleh berubah tanpa mengganti ID. Baris baru di editor diberi ID acak sekali dan dibawa terus pada setiap versi konfigurasi.
+ */
+export const HOUR_ID_RE = /^[A-Za-z0-9_-]{1,60}$/;
 export const hourRowSchema = z.object({
+  id: z.string().trim().regex(HOUR_ID_RE, "ID baris jam: huruf, angka, - dan _ (maks. 60)"),
   roleKey: text(40), task: text(200),
   tracks: z.array(z.enum(TRACKS)).min(1),
   /** Jam tetap per program, menurut jenis program (Reguler / Kerjasama). */
@@ -176,8 +182,42 @@ const ms = (code: string, name: string, anchor: Anchor, days: number, work: bool
   ({ code, name, anchor, days, work, ref: null, roleKey, weight, critical, bnspOnly: false, reference, ...extra });
 const it = (component: ItemTemplate["component"], name: string, anchor: Anchor, days: number, roleKey: string, critical = false, extra: Partial<ItemTemplate> = {}): ItemTemplate =>
   ({ component, name, anchor, days, work: false, ref: null, roleKey, critical, bnspOnly: false, ...extra });
-const hr = (roleKey: string, task: string, tracks: Track[], fixedR: number, fixedP: number, perParticipant: number, perClassDay: number, start: HourRow["start"], end: HourRow["end"], modes: HourRow["modes"] = []): HourRow =>
-  ({ roleKey, task, tracks, fixed: { REGULAR: fixedR, PARTNER: fixedP }, perParticipant, perClassDay, modes, start, end });
+const hr = (id: string, roleKey: string, task: string, tracks: Track[], fixedR: number, fixedP: number, perParticipant: number, perClassDay: number, start: HourRow["start"], end: HourRow["end"], modes: HourRow["modes"] = []): HourRow =>
+  ({ id, roleKey, task, tracks, fixed: { REGULAR: fixedR, PARTNER: fixedP }, perParticipant, perClassDay, modes, start, end });
+
+/** ID baru untuk baris tabel jam yang ditambahkan di editor (acak, dibuat SEKALI). */
+export function newHourRowId(): string {
+  const c = (globalThis as { crypto?: { randomUUID?: () => string } }).crypto;
+  return `h-${(c?.randomUUID?.() ?? `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`).replace(/[^A-Za-z0-9]/g, "").slice(0, 24)}`;
+}
+
+const fnv1a = (str: string): string => {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; }
+  return h.toString(36);
+};
+
+/**
+ * Lengkapi ID pada baris tabel jam yang belum punya (konfigurasi tersimpan SEBELUM ada ID, atau dikirim klien lama). Baris yang cocok dengan baris bawaan
+ * (jabatan + nama tugas yang sama) memakai ID bawaannya; sisanya mendapat ID turunan isi (stabil selama belum diedit) — setelah disimpan, ID itulah yang
+ * dibawa terus. Fungsi murni; tidak mengubah baris yang sudah punya ID.
+ */
+export function fillHourIds<T>(rawConfig: T): T {
+  const cfg = rawConfig as { hourTable?: unknown } | null;
+  if (!cfg || typeof cfg !== "object" || !Array.isArray(cfg.hourTable)) return rawConfig;
+  const defaults = new Map(defaultIndicatorConfig().hourTable.map((h) => [`${h.roleKey}|${h.task}`, h.id]));
+  const used = new Set<string>(cfg.hourTable.map((r) => (r as { id?: unknown })?.id).filter((x): x is string => typeof x === "string" && x.length > 0));
+  const rows = cfg.hourTable.map((r) => {
+    const row = r as { id?: unknown; roleKey?: unknown; task?: unknown };
+    if (!row || typeof row !== "object" || (typeof row.id === "string" && row.id.length > 0)) return r;
+    const k = `${String(row.roleKey)}|${String(row.task)}`;
+    let id = defaults.get(k) ?? `legacy-${fnv1a(k)}`;
+    for (let n = 2; used.has(id); n++) id = `${defaults.get(k) ?? `legacy-${fnv1a(k)}`}-${n}`;
+    used.add(id);
+    return { ...(r as object), id };
+  });
+  return { ...(rawConfig as object), hourTable: rows } as T;
+}
 
 export function defaultIndicatorConfig(): IndicatorConfig {
   return {
@@ -255,16 +295,16 @@ export function defaultIndicatorConfig(): IndicatorConfig {
       },
     },
     hourTable: [
-      hr("MANAGER_MARKETING", "Kampanye program reguler", ["REGULAR"], 3, 0, 0, 0, { anchor: "H", days: -60 }, { anchor: "H", days: -10 }),
-      hr("MANAGER_MARKETING", "Negosiasi dan kontrak program kerjasama", ["PARTNER"], 0, 6, 0, 0, { anchor: "H", days: -60 }, { anchor: "H", days: -10 }),
-      hr("STAFF_SOCIAL", "Materi promosi dan iklan", ["REGULAR"], 8, 0, 0, 0, { anchor: "H", days: -60 }, { anchor: "H", days: -7 }),
-      hr("STAFF_ADMISI_2", "Tanya-jawab, follow-up, pendaftaran", ["REGULAR"], 2, 0, 0.5, 0, { anchor: "H", days: -45 }, { anchor: "H", days: -3 }),
-      hr("STAFF_ADMISI_1", "Proposal, koordinasi klien, daftar peserta", ["PARTNER"], 0, 8, 0.1, 0, { anchor: "T", days: 0 }, { anchor: "H", days: -1 }),
-      hr("SPV_CURRICULUM", "Instruktur, pemeriksaan, laporan, sertifikat", ["REGULAR", "PARTNER"], 6, 6, 0.1, 1, { anchor: "H", days: -30 }, { anchor: "H_END", days: 7 }),
-      hr("STAFF_CURRICULUM", "Materi, halaman program; Fasilitator Kelas", ["REGULAR", "PARTNER"], 6, 6, 0, 9, { anchor: "H", days: -30 }, { anchor: "H_END", days: 1 }),
-      hr("STAFF_GENERAL", "Registrasi, logistik, berkas, verifikasi pembayaran", ["REGULAR", "PARTNER"], 4, 4, 0.3, 2, { anchor: "H", days: -14 }, { anchor: "H_END", days: 1 }),
-      hr("STAFF_FINANCE", "Invoice, kwitansi, honorarium", ["REGULAR", "PARTNER"], 2, 2, 0.2, 0, { anchor: "H", days: -30 }, { anchor: "H_END", days: 14 }),
-      hr("SPV_IT", "Platform daring dan hybrid", ["REGULAR", "PARTNER"], 0, 0, 0, 2, { anchor: "H", days: -3 }, { anchor: "H", days: 0 }, ["ONLINE", "HYBRID"]),
+      hr("kampanye-reguler", "MANAGER_MARKETING", "Kampanye program reguler", ["REGULAR"], 3, 0, 0, 0, { anchor: "H", days: -60 }, { anchor: "H", days: -10 }),
+      hr("negosiasi-kerjasama", "MANAGER_MARKETING", "Negosiasi dan kontrak program kerjasama", ["PARTNER"], 0, 6, 0, 0, { anchor: "H", days: -60 }, { anchor: "H", days: -10 }),
+      hr("materi-promosi", "STAFF_SOCIAL", "Materi promosi dan iklan", ["REGULAR"], 8, 0, 0, 0, { anchor: "H", days: -60 }, { anchor: "H", days: -7 }),
+      hr("admisi-b2c", "STAFF_ADMISI_2", "Tanya-jawab, follow-up, pendaftaran", ["REGULAR"], 2, 0, 0.5, 0, { anchor: "H", days: -45 }, { anchor: "H", days: -3 }),
+      hr("proposal-b2b", "STAFF_ADMISI_1", "Proposal, koordinasi klien, daftar peserta", ["PARTNER"], 0, 8, 0.1, 0, { anchor: "T", days: 0 }, { anchor: "H", days: -1 }),
+      hr("spv-kurikulum", "SPV_CURRICULUM", "Instruktur, pemeriksaan, laporan, sertifikat", ["REGULAR", "PARTNER"], 6, 6, 0.1, 1, { anchor: "H", days: -30 }, { anchor: "H_END", days: 7 }),
+      hr("staf-kurikulum", "STAFF_CURRICULUM", "Materi, halaman program; Fasilitator Kelas", ["REGULAR", "PARTNER"], 6, 6, 0, 9, { anchor: "H", days: -30 }, { anchor: "H_END", days: 1 }),
+      hr("admin-umum", "STAFF_GENERAL", "Registrasi, logistik, berkas, verifikasi pembayaran", ["REGULAR", "PARTNER"], 4, 4, 0.3, 2, { anchor: "H", days: -14 }, { anchor: "H_END", days: 1 }),
+      hr("keuangan", "STAFF_FINANCE", "Invoice, kwitansi, honorarium", ["REGULAR", "PARTNER"], 2, 2, 0.2, 0, { anchor: "H", days: -30 }, { anchor: "H_END", days: 14 }),
+      hr("platform-daring", "SPV_IT", "Platform daring dan hybrid", ["REGULAR", "PARTNER"], 0, 0, 0, 2, { anchor: "H", days: -3 }, { anchor: "H", days: 0 }, ["ONLINE", "HYBRID"]),
     ],
     roles: [
       { key: "MANAGER_MARKETING", label: "Manajer Pemasaran dan Kerjasama" }, { key: "MANAGER_OPS", label: "Manajer Operasional dan Keuangan" },
@@ -340,5 +380,7 @@ export function checkIndicatorConfig(c: IndicatorConfig): ConfigCheck {
   }
   for (const k of e.marketingRoleKeys) if (!roleKeys.has(k)) errors.push(`Eskalasi: jabatan pemasaran/klien tidak ada (${k}).`);
   for (const h of c.hourTable) if (!roleKeys.has(h.roleKey)) errors.push(`Tabel jam standar memakai jabatan yang tidak ada (${h.roleKey}).`);
+  const seenHour = new Set<string>();
+  for (const h of c.hourTable) { if (seenHour.has(h.id)) errors.push(`Tabel jam standar: ID baris kembar (${h.id}). Setiap baris harus punya ID sendiri.`); seenHour.add(h.id); }
   return { errors, warnings };
 }

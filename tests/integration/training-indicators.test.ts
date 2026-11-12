@@ -397,7 +397,9 @@ describe("perubahan data program memperbarui hitungan", () => {
   it("hitung ulang tugas jam kerja manual oleh pengelola; Pemantau tidak boleh", async () => {
     await setConfig();
     const id = await mkProject(fx.mgr, { participantsMin: 15, startDate: inDays(20), endDate: inDays(21) });
-    expect((await regenerateProjectWorkload(fx.mgr, id)).created).toBeGreaterThan(5);
+    // Idempoten: baris sudah dibuat saat proyek dibuat, jadi hitung ulang tidak membuat apa pun (total tetap) — lihat training-workload-sync.test.ts.
+    expect(await regenerateProjectWorkload(fx.mgr, id)).toMatchObject({ created: 0, updated: 0, removed: 0 });
+    expect((await regenerateProjectWorkload(fx.mgr, id)).total).toBeGreaterThan(5);
     expect((await fail(regenerateProjectWorkload(fx.viewer, id)))?.status).toBe(403);
   });
 });

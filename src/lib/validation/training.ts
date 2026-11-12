@@ -294,6 +294,13 @@ export const workloadUpdateSchema = z.object({
   name: requiredText(3, 200, "Nama tugas").optional(), hours: z.number().min(0).max(2000).optional(), startDate: isoDate.optional(), endDate: isoDate.optional(),
   status: z.enum(["OPEN", "DONE", "CANCELLED"]).optional(),
 });
+/** Tinjau baris jam kerja LAMA yang asalnya belum jelas: tautkan ke pekerjaan template (ID baris tabel jam) atau nyatakan berdiri sendiri. */
+export const workloadReviewSchema = z.discriminatedUnion("action", [
+  z.object({ action: z.literal("LINK"), templateKey: z.string().trim().min(1, "Pilih pekerjaan template").max(60) }),
+  z.object({ action: z.literal("STANDALONE") }),
+]);
+/** Rapikan baris kembar: pertahankan satu, hapus sisanya (semua baris lain dalam kelompok yang sama). */
+export const workloadMergeSchema = z.object({ keepId: uuid, removeIds: z.array(uuid).min(1, "Pilih baris yang dihapus").max(10) });
 export const staffCapacitySchema = z.object({
   hoursPerDay: z.number({ error: "Harus berupa angka" }).gt(0).max(24).nullish().transform((v) => v ?? null),
   workDays: z.array(z.number().int().min(1).max(7)).min(1, "Pilih minimal satu hari kerja").max(7), note: optionalText(200, "Catatan"),
