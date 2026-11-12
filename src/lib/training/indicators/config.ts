@@ -125,6 +125,12 @@ export const indicatorConfigSchema = z.object({
     readiness: z.object({ greenMin: finite(-100, 100), yellowMin: finite(-100, 100) }),
     /** Beban (% dibulatkan): ≤ roomyMax "ada ruang"; ≤ greenMax Hijau; ≤ yellowMax Kuning; selain itu Merah (overload). */
     load: z.object({ roomyMax: finite(0, 500), greenMax: finite(0, 500), yellowMax: finite(0, 500) }),
+    /**
+     * Penanda "Perlu dicek" pada peta beban: beban jam standar minggu ini masih "Ada ruang", tetapi staf punya ≥ `openMin` tugas operasional terbuka ATAU ≥ `overdueMin` tugas terlambat.
+     * Angka awal hanyalah usulan (ditinjau setelah 1–2 bulan pemakaian). Penanda hanya meminta PIC/atasan memeriksa — tidak mengubah status program dan bukan penilaian kinerja.
+     * Konfigurasi tersimpan sebelum ada bagian ini memakai nilai bawaan.
+     */
+    operational: z.object({ openMin: int(1, 100), overdueMin: int(1, 100) }).default({ openMin: 5, overdueMin: 1 }),
     /** Rasio proyeksi peserta (reguler). */
     projection: z.object({
       greenMin: finite(0, 10), yellowMin: finite(0, 10),
@@ -225,6 +231,7 @@ export function defaultIndicatorConfig(): IndicatorConfig {
       spi: { greenMin: 0.95, yellowMin: 0.85 },
       readiness: { greenMin: 0, yellowMin: -15 },
       load: { roomyMax: 70, greenMax: 90, yellowMax: 110 },
+      operational: { openMin: 5, overdueMin: 1 },
       projection: { greenMin: 1.0, yellowMin: 0.8, windowDays: 14, defaultCloseDaysBeforeH: 3, triggerDaysBeforeH: 4 },
       parallelDensityMax: 1.0,
       imbalanceMax: 1.5,

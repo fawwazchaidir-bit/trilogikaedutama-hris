@@ -10,14 +10,15 @@ import {
   parallelDensity, participantRamp, programLoad, resolveDueMap, resolveOffset, taskHoursInWeek, weekCapacity,
   type Color, type ItemIn, type LoadBand, type MilestoneIn, type ProjectionResult, type ReadinessResult, type TimelinessResult, type TriggerCode, type WorkCal, type WorkTaskIn,
 } from "@/lib/training/indicators/engine";
-import type { ProjectStatus } from "@/lib/training/types";
+import type { ProjectStatus, TaskStatus } from "@/lib/training/types";
 import { parseInput } from "../../validate";
 import { densityQuerySchema, heatmapQuerySchema } from "@/lib/validation/training";
 import { accessibleProjectWhere, loadProjectAccess, requireModule } from "./access";
 import { loadConfig } from "./indicator-config";
 import { dateCtx, loadCal, specOf, toProgramRow, type ProgramRow } from "./indicator-data";
 import { statusRun, type SnapshotIn, type StatusRun } from "@/lib/training/indicators/escalation";
-import { today } from "./shared";
+import { liveTaskWhere, today } from "./shared";
+import { countOperational, operationalMarker, type OperationalCounts } from "@/lib/training/operational-load";
 
 type Db = Tx | typeof prisma;
 
@@ -329,9 +330,14 @@ export async function listProgramCards(actor: Actor): Promise<{ cards: ProgramIn
 
 // ═════════════════════════ Peta beban tim ═════════════════════════
 
+/** Tugas operasional satu staf SAAT INI (bukan per minggu) + penanda "Perlu dicek". Lihat `lib/training/operational-load` untuk definisinya. */
+export interface OperationalLoad extends OperationalCounts { needsCheck: boolean; reason: string | null }
+
 export interface HeatmapRow {
   employeeId: string; name: string; division: string | null; weeks: (WeekLoad & { items: { projectCode: string; projectName: string; task: string; hours: number }[] })[];
   peak: number; peakBand: LoadBand;
+  /** Tugas operasional terbuka saat ini — DISAJIKAN TERPISAH dari jam standar (tidak dijumlahkan, agar pekerjaan yang sama tidak terhitung dua kali). */
+  operational: OperationalLoad;
   /** Beban melewati batas Overload pada dua minggu berturut-turut (pemicu eskalasi ke Manajer Operasional dan Keuangan). */
   overloadStreak: boolean;
 }
@@ -339,6 +345,31 @@ export interface HeatmapDto {
   today: string; weekStarts: string[]; scope: "all" | "self"; rows: HeatmapRow[];
   divisions: { name: string; members: number; index: number | null; flagged: boolean }[];
   thresholds: IndicatorConfig["thresholds"]["load"];
+  /** Ambang penanda "Perlu dicek" (dapat diubah di Rumus Indikator). */
+  operationalThresholds: IndicatorConfig["thresholds"]["operational"];
+}
+
+/**
+ * Tugas operasional terbuka per karyawan SAAT INI: tugas "hidup" (proyek belum final, atau tindak lanjut pada proyek Selesai) yang penanggung jawabnya karyawan aktif
+ * DAN masih anggota aktif proyek itu — sama dengan yang ia lihat di "Tugas Saya" dan lencana. `employeeIds` kosong/undefined = semua penanggung jawab.
+ */
+export async function loadOperationalLoad(db: Db, todayIso: string, employeeIds?: string[]): Promise<Map<string, OperationalCounts>> {
+  const rows = await db.trainingTask.findMany({
+    where: { AND: [liveTaskWhere, { status: { in: ["TODO", "IN_PROGRESS", "IN_REVIEW"] }, assignee: { isActive: true }, assigneeId: employeeIds ? { in: employeeIds } : { not: null } }] },
+    select: { assigneeId: true, projectId: true, status: true, dueDate: true },
+  });
+  const members = rows.length
+    ? await db.trainingProjectMember.findMany({ where: { endedAt: null, employeeId: { in: [...new Set(rows.map((r) => r.assigneeId!))] }, projectId: { in: [...new Set(rows.map((r) => r.projectId))] } }, select: { projectId: true, employeeId: true } })
+    : [];
+  const active = new Set(members.map((m) => `${m.projectId}:${m.employeeId}`));
+  const by = new Map<string, { status: TaskStatus; dueDate: string | null }[]>();
+  for (const r of rows) {
+    if (!active.has(`${r.projectId}:${r.assigneeId}`)) continue;
+    const list = by.get(r.assigneeId!) ?? [];
+    list.push({ status: r.status, dueDate: r.dueDate ? dateToIso(r.dueDate) : null });
+    by.set(r.assigneeId!, list);
+  }
+  return new Map([...by].map(([id, list]) => [id, countOperational(list, todayIso)]));
 }
 
 /** Peta beban per staf per minggu. Semua pengguna modul yang boleh melihat semua proyek melihat seluruh tim; lainnya hanya barisnya sendiri. */
@@ -358,6 +389,9 @@ export async function getTeamHeatmap(actor: Actor, raw: unknown = {}): Promise<H
     const d = env.person(id)?.divisionId;
     if (d) divisionIds.add(d);
   }
+  // Tugas operasional terbuka (saat ini). Staf yang hanya punya tugas operasional (tanpa jam kerja template) tetap tampil agar penandanya tidak terlewat.
+  const operational = await loadOperationalLoad(prisma, today(), all ? undefined : actor.employeeId ? [actor.employeeId] : []);
+  if (all) for (const id of operational.keys()) withTasks.add(id);
   let people: Person[] = [];
   if (all) {
     const emps = await prisma.employee.findMany({
@@ -389,6 +423,10 @@ export async function getTeamHeatmap(actor: Actor, raw: unknown = {}): Promise<H
         return { ...w, items };
       }),
       peak, peakBand: loadBand(peak, th), overloadStreak: overloaded.some((v, i) => v && overloaded[i + 1] === true),
+      operational: (() => {
+        const c = operational.get(p.id) ?? { open: 0, overdue: 0, inReview: 0 };
+        return { ...c, ...operationalMarker(weeks[0]!.band, c, th.operational) };   // beban jam MINGGU INI vs tugas terbuka SAAT INI
+      })(),
     };
   });
 
@@ -410,7 +448,7 @@ export async function getTeamHeatmap(actor: Actor, raw: unknown = {}): Promise<H
     divisions.sort((a, b) => a.name.localeCompare(b.name));
   }
   rows.sort((a, b) => b.peak - a.peak || a.name.localeCompare(b.name));
-  return { today: env.today, weekStarts: env.weeks, scope: all ? "all" : "self", rows, divisions, thresholds: th.load };
+  return { today: env.today, weekStarts: env.weeks, scope: all ? "all" : "self", rows, divisions, thresholds: th.load, operationalThresholds: th.operational };
 
   async function taskHolderIds(): Promise<string[]> {
     const grouped = await prisma.trainingWorkloadTask.groupBy({ by: ["employeeId"], where: { status: "OPEN", project: { status: { notIn: ["COMPLETED", "CANCELLED"] } }, employee: { isActive: true } } });

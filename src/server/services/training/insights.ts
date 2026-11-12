@@ -40,7 +40,8 @@ export interface DashboardDto {
   myTasks: TaskDto[];
   myChecklist: MyChecklistItemDto[];
   /** Ringkasan penugasan tim: JUMLAH tugas terbuka/terlambat per orang — bukan persentase beban. */
-  teamLoad: { employeeId: string; name: string; openTasks: number; overdueTasks: number }[];
+  /** Tugas terbuka per orang (termasuk yang menunggu pemeriksaan, yang ditampilkan terpisah); terlambat ⊆ terbuka. */
+  teamLoad: { employeeId: string; name: string; openTasks: number; overdueTasks: number; inReviewTasks: number }[];
   upcoming: ScheduleDto[];
   risks: { overdueTasks: number; requiredChecklistNearStart: number; noPic: number; pastEndNotClosed: number; orphanTasks: number };
 }
@@ -104,14 +105,16 @@ export async function getTrainingDashboard(actor: Actor): Promise<DashboardDto> 
 
   let teamLoad: DashboardDto["teamLoad"] = [];
   if (variant === "manager" || variant === "admin") {
-    const [open, late] = await Promise.all([
+    const [open, late, review] = await Promise.all([
       prisma.trainingTask.groupBy({ by: ["assigneeId"], where: taskScope({ status: OPEN, assigneeId: { not: null } }), _count: { _all: true } }),
       prisma.trainingTask.groupBy({ by: ["assigneeId"], where: taskScope({ status: OPEN, assigneeId: { not: null }, dueDate: { lt: td } }), _count: { _all: true } }),
+      prisma.trainingTask.groupBy({ by: ["assigneeId"], where: taskScope({ status: "IN_REVIEW", assigneeId: { not: null } }), _count: { _all: true } }),
     ]);
     const names = await prisma.employee.findMany({ where: { id: { in: open.map((o) => o.assigneeId!) } }, select: { id: true, fullName: true } });
     const nm = new Map(names.map((e) => [e.id, e.fullName]));
     const lm = new Map(late.map((l) => [l.assigneeId, l._count._all]));
-    teamLoad = open.map((o) => ({ employeeId: o.assigneeId!, name: nm.get(o.assigneeId!) ?? "—", openTasks: o._count._all, overdueTasks: lm.get(o.assigneeId) ?? 0 }))
+    const rm = new Map(review.map((r) => [r.assigneeId, r._count._all]));
+    teamLoad = open.map((o) => ({ employeeId: o.assigneeId!, name: nm.get(o.assigneeId!) ?? "—", openTasks: o._count._all, overdueTasks: lm.get(o.assigneeId) ?? 0, inReviewTasks: rm.get(o.assigneeId) ?? 0 }))
       .sort((a, b) => b.overdueTasks - a.overdueTasks || b.openTasks - a.openTasks).slice(0, 10);
   }
 

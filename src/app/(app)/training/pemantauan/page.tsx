@@ -66,10 +66,17 @@ export default async function MonitoringPage({ searchParams }: { searchParams: S
             <div className="flex flex-wrap gap-2 text-xs"><span className="text-muted">Pita:</span>
               <Badge tone="blue">Ada ruang ≤ {h.thresholds.roomyMax}%</Badge><Badge tone="green">Ideal ≤ {h.thresholds.greenMax}%</Badge><Badge tone="amber">Padat ≤ {h.thresholds.yellowMax}%</Badge><Badge tone="red">Overload &gt; {h.thresholds.yellowMax}%</Badge>
             </div>
+            <Notice tone="info">
+              <div className="space-y-1 text-xs" data-testid="heatmap-legend">
+                <p><strong>Beban jam standar</strong> (kolom persen, per minggu) adalah <strong>estimasi berdasarkan template dan penyesuaian</strong>, bukan catatan waktu kerja aktual. Angka ini tidak dijumlahkan dengan jumlah tugas, karena satu pekerjaan bisa sudah terwakili jam standar.</p>
+                <p><strong>Tugas operasional</strong> = seluruh tugas terbuka <em>saat ini</em> (termasuk yang menunggu pemeriksaan, yang ditampilkan terpisah); <strong>terlambat</strong> adalah bagian dari tugas terbuka. Tindak lanjut pada proyek Selesai dihitung; tugas terkunci pada proyek Selesai/Dibatalkan tidak.</p>
+                <p><strong>Perlu dicek</strong> muncul bila beban jam minggu ini masih “Ada ruang” tetapi staf punya ≥ {h.operationalThresholds.openMin} tugas terbuka atau ≥ {h.operationalThresholds.overdueMin} tugas terlambat (ambang awal, dapat diubah di Rumus Indikator). Penanda hanya meminta PIC atau atasan memeriksa keadaan — tidak mengubah status program dan bukan penilaian kinerja.</p>
+              </div>
+            </Notice>
             {h.rows.length === 0 ? <Card><EmptyState title="Belum ada data beban" description="Beban dihitung dari tugas jam kerja program (template atau manual) dan pemegang jabatan yang sudah diisi di Rumus Indikator." /></Card> : (
               <TableWrap>
                 <Table>
-                  <thead><tr><Th>Staf</Th>{h.weekStarts.map((w, i) => <Th key={w} align="center">{i === 0 ? "Minggu ini" : formatDateShort(w)}</Th>)}<Th>Catatan</Th></tr></thead>
+                  <thead><tr><Th>Staf</Th>{h.weekStarts.map((w, i) => <Th key={w} align="center">{i === 0 ? "Jam standar: minggu ini" : formatDateShort(w)}</Th>)}<Th>Tugas operasional (saat ini)</Th><Th>Catatan</Th></tr></thead>
                   <tbody>{h.rows.map((r) => (
                     <tr key={r.employeeId}>
                       <Td><p className="font-medium text-ink">{r.name}</p>{r.division && <p className="text-xs text-muted">{r.division}</p>}</Td>
@@ -81,7 +88,18 @@ export default async function MonitoringPage({ searchParams }: { searchParams: S
                           <span className="sr-only"> {LOAD_BAND_LABEL[w.band]}, {w.hours} jam dari {w.capacity} jam</span>
                         </Td>
                       ))}
-                      <Td>{r.overloadStreak ? <Badge tone="red">Overload 2 minggu berturut-turut</Badge> : <span className="text-xs text-muted">{LOAD_BAND_LABEL[r.peakBand]}</span>}</Td>
+                      <Td>
+                        <div data-testid={`operational-${r.employeeId}`} className="text-xs">
+                          <p><strong>{r.operational.open}</strong> terbuka</p>
+                          <p className={r.operational.overdue ? "font-medium text-brand-700" : "text-muted"}>{r.operational.overdue} terlambat <span className="font-normal text-muted">(dari {r.operational.open})</span></p>
+                          <p className="text-muted">{r.operational.inReview} menunggu pemeriksaan</p>
+                        </div>
+                      </Td>
+                      <Td>
+                        {r.operational.needsCheck && <p title={r.operational.reason ?? undefined}><Badge tone="amber">Perlu dicek</Badge></p>}
+                        {r.operational.needsCheck && r.operational.reason && <p className="mt-0.5 max-w-56 text-xs text-muted">{r.operational.reason}</p>}
+                        {r.overloadStreak ? <Badge tone="red">Overload 2 minggu berturut-turut</Badge> : <span className="text-xs text-muted">{LOAD_BAND_LABEL[r.peakBand]}</span>}
+                      </Td>
                     </tr>))}</tbody>
                 </Table>
               </TableWrap>

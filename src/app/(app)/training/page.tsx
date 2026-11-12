@@ -96,8 +96,8 @@ export default async function TrainingDashboardPage() {
       )}
 
       {(d.variant === "manager" || d.variant === "admin") && d.teamLoad.length > 0 && (
-        <Card className="mt-6"><CardHeader title="Ringkasan penugasan tim" description="Jumlah tugas terbuka per orang (angka, bukan persentase beban)." />
-          <TableWrap><Table><thead><tr><Th>Nama</Th><Th align="right">Tugas terbuka</Th><Th align="right">Terlambat</Th></tr></thead><tbody>{d.teamLoad.map((m) => <tr key={m.employeeId}><Td>{m.name}</Td><Td align="right">{m.openTasks}</Td><Td align="right" className={m.overdueTasks ? "font-medium text-brand-700" : ""}>{m.overdueTasks}</Td></tr>)}</tbody></Table></TableWrap></Card>
+        <Card className="mt-6"><CardHeader title="Ringkasan penugasan tim" description="Jumlah tugas terbuka saat ini per orang (angka, bukan persentase beban jam). Terbuka sudah termasuk yang menunggu pemeriksaan; terlambat adalah bagian dari terbuka. Beban jam standar ada di Pemantauan → Peta beban tim." />
+          <TableWrap><Table><thead><tr><Th>Nama</Th><Th align="right">Tugas terbuka</Th><Th align="right">Terlambat (dari terbuka)</Th><Th align="right">Menunggu pemeriksaan (dari terbuka)</Th></tr></thead><tbody>{d.teamLoad.map((m) => <tr key={m.employeeId}><Td>{m.name}</Td><Td align="right">{m.openTasks}</Td><Td align="right" className={m.overdueTasks ? "font-medium text-brand-700" : ""}>{m.overdueTasks}</Td><Td align="right">{m.inReviewTasks}</Td></tr>)}</tbody></Table></TableWrap></Card>
       )}
 
       {(d.variant === "director" || d.variant === "manager") && (

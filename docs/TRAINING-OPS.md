@@ -197,6 +197,23 @@ Tugas jam kerja (sumber indikator **Beban Tim**) disinkronkan dengan Tabel Jam S
 - **Data lama (sebelum ada ID) tidak ditebak.** Baris lama yang berjabatan (bukti asal-template) dan cocok **pasti** (nama sama dengan tepat satu baris tabel, atau jabatannya hanya punya satu pekerjaan) ditautkan otomatis saat dihitung ulang — yang berstatus Manual dianggap *disesuaikan*. Bila **meragukan** → lencana **Perlu diperiksa** (pengguna menautkan ke pekerjaan template atau menyatakan berdiri sendiri); bila ada **dua baris untuk pekerjaan yang sama** (warisan bug) → lencana **Kembar**: pengguna melihat kedua baris dan memilih satu yang dipertahankan ("Rapikan duplikat"; baris selesai tak boleh dihapus; tercatat siapa, baris mana yang dipertahankan/dihapus beserta nilainya). Selama belum ditinjau, baris itu tidak diubah dan **tidak dibuatkan baris pengganti diam-diam** (pekerjaan jabatan terkait ditunda dengan peringatan).
 - Migrasi: `20261111210000_workload_template_key` (aditif; tidak mengubah baris lama).
 
+### Tugas operasional pada peta beban (`lib/training/operational-load.ts`, `loadOperationalLoad`)
+
+Beban **jam standar** (estimasi dari template + penyesuaian) dan jumlah **tugas operasional** sengaja **tidak dijumlahkan** menjadi satu angka: satu pekerjaan (mis. "Susun modul") bisa sudah terwakili jam standar, sehingga menambahkannya lagi menciptakan hitung ganda baru. Peta beban tim menampilkan keduanya berdampingan dengan periode tertulis:
+
+| Kolom | Isi | Periode |
+|---|---|---|
+| Jam standar | persen terhadap kapasitas — **estimasi berdasarkan template dan penyesuaian, bukan catatan waktu kerja aktual** | per minggu (kolom pertama = minggu ini) |
+| Tugas operasional | **terbuka** · **terlambat** (bagian dari terbuka) · **menunggu pemeriksaan** (bagian dari terbuka, ditampilkan terpisah) | seluruh tugas terbuka **saat ini** |
+
+Definisi (satu tempat; dasbor "Ringkasan penugasan tim" memakai definisi yang sama):
+- **Terbuka** = Belum + Proses + Menunggu pemeriksaan. **Terlambat** = terbuka dengan tenggat < hari ini (WIB). **Menunggu pemeriksaan** ⊆ terbuka, ditampilkan terpisah agar tidak dianggap masih menunggu pekerjaan pelaksana.
+- Hanya tugas **hidup** (`liveTaskWhere`): **tindak lanjut** pada proyek Selesai dihitung selama masih aktif; tugas terkunci pada proyek Selesai/Dibatalkan tidak. Hanya tugas di proyek tempat staf masih **anggota aktif** (sama dengan "Tugas Saya" dan lencana) dan karyawan aktif.
+- Staf yang **tidak punya tugas jam kerja** (beban jam 0%) tetap tampil di peta bila punya tugas terbuka, agar penandanya tidak terlewat.
+
+**Penanda "Perlu dicek"** — beban jam standar **minggu ini** masih "Ada ruang" (≤ `thresholds.load.roomyMax`) **dan** (tugas terbuka ≥ `thresholds.operational.openMin` **atau** tugas terlambat ≥ `overdueMin`). Awal: 5 dan 1 — **usulan awal, bukan ukuran baku**; dapat diubah Direktur di Rumus Indikator (berversi; konfigurasi lama tanpa bagian ini memakai nilai bawaan). Tinjau setelah 1–2 bulan: apakah terlalu sering muncul atau melewatkan kondisi yang perlu diperhatikan, dan apakah informasi terpisah sudah cukup atau perlu estimasi jam langsung pada tugas.
+Penanda **hanya meminta PIC atau atasan memeriksa keadaan** — tidak mengubah status program, tidak memicu eskalasi/notifikasi, dan bukan penilaian kinerja staf. Anggota biasa hanya melihat barisnya sendiri (scope `self`).
+
 ### 3b. Otomasi: snapshot harian, eskalasi, pengingat tenggat
 
 **Pekerja harian** (`src/server/services/training/automation.ts`) berjalan di dalam aplikasi tiap jam (`TRAINING_WORKER`, bawaan menyala bila modul menyala; 5 menit setelah start untuk pertama kali) atau dipicu penjadwal eksternal:
@@ -300,6 +317,7 @@ Mengaktifkan flag tidak memberi siapa pun akses otomatis: Super Admin harus memb
 | Unit (logika murni: akses, status, indikator dashboard, validasi, usulan level) | `tests/unit/training-access.test.ts`, `training-rules.test.ts` | 32 |
 | Integrasi — gerbang akses, IDOR, tim, penjaga DB, aturan akses untuk pekerja latar belakang | `tests/integration/training-access.test.ts` | 27 |
 | Integrasi — alur bisnis (proyek→penutupan, dashboard, jadwal, peserta, dokumen, referensi) | `tests/integration/training-flow.test.ts` | 35 |
+| Unit + integrasi — penanda tugas operasional pada peta beban (definisi, ambang, cakupan, tidak memengaruhi status program) | `tests/unit/training-operational-load.test.ts`, `tests/integration/training-operational-load.test.ts` | 13 + 11 |
 | Unit + integrasi — jam kerja tanpa hitung ganda (idempoten, disesuaikan/selesai/manual, ganti pemegang jabatan, serentak, data lama, kembalikan ke template, rapikan kembar, ID konfigurasi) | `tests/unit/training-workload-sync.test.ts`, `tests/integration/training-workload-sync.test.ts` | 22 + 21 |
 | Unit + integrasi — penutupan: keputusan tugas terbuka, tindak lanjut hidup, tugas yatim tidak dihitung, pelonggaran checklist wajib & pengakuan | `tests/unit/training-closure.test.ts`, `tests/integration/training-closure.test.ts` | 13 + 20 |
 | Integrasi — modul dimatikan | `tests/integration/training-flag.test.ts` | 3 |

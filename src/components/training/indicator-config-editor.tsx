@@ -177,6 +177,8 @@ export function IndicatorConfigEditor({ initial }: { initial: IndicatorConfigDto
             <Num label="Pemeriksaan pendaftar mulai (H-n)" step="1" value={cfg.thresholds.projection.triggerDaysBeforeH} onChange={(n) => edit((c) => { c.thresholds.projection.triggerDaysBeforeH = Math.trunc(n); })} />
             <Num label="Kepadatan kelas (KP) maksimum" value={cfg.thresholds.parallelDensityMax} onChange={(n) => edit((c) => { c.thresholds.parallelDensityMax = n; })} hint="Di atas ini = kelas tanpa pendamping (Merah)." />
             <Num label="Indeks ketimpangan divisi maksimum" value={cfg.thresholds.imbalanceMax} onChange={(n) => edit((c) => { c.thresholds.imbalanceMax = n; })} />
+            <Num label="Perlu dicek — tugas terbuka ≥" value={cfg.thresholds.operational.openMin} onChange={(n) => edit((c) => { c.thresholds.operational.openMin = Math.max(1, Math.round(n)); })} />
+            <Num label="Perlu dicek — tugas terlambat ≥" value={cfg.thresholds.operational.overdueMin} onChange={(n) => edit((c) => { c.thresholds.operational.overdueMin = Math.max(1, Math.round(n)); })} />
             <Num label="Eskalasi bila milestone terlambat > (hari)" step="1" value={cfg.thresholds.overdueEscalationDays} onChange={(n) => edit((c) => { c.thresholds.overdueEscalationDays = Math.trunc(n); })} />
           </div>
         </Section>
