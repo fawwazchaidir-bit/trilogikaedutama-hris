@@ -293,6 +293,25 @@ describe("data LAMA — tidak ditebak", () => {
     expect(await prisma.trainingWorkloadTask.findUniqueOrThrow({ where: { id: t.id } })).toMatchObject({ status: "DONE", templateKey: "admin-umum" });
   });
 
+  it("jabatan kini hanya punya SATU pekerjaan tetapi NAMA baris lama berbeda: TIDAK ditautkan otomatis (itu menebak) — isinya tidak ditulis ulang; muncul 'perlu diperiksa' dengan SARAN; baru berubah setelah pengguna menautkan (butir 4c)", async () => {
+    await setConfig();
+    const id = await program();
+    const n = (await rowsOf(id)).length;
+    const k = await byKey(id, "kampanye-reguler");
+    await legacyState(id);
+    // Pekerjaan lama yang sudah diganti orang: nama berbeda, jam berbeda (bukan sekadar berganti nama)
+    await prisma.trainingWorkloadTask.update({ where: { id: k.id }, data: { name: "Menyusun materi ajar", hours: k.hours + 7, source: "TEMPLATE" } });
+    const r = await regenerateProjectWorkload(fx.mgr, id);
+    expect(r).toMatchObject({ created: 0, removed: 0, updated: 0, review: 1, linked: n - 1 });
+    expect(await prisma.trainingWorkloadTask.findUniqueOrThrow({ where: { id: k.id } })).toMatchObject({ templateKey: null, name: "Menyusun materi ajar", hours: k.hours + 7 });   // TIDAK ditulis ulang
+    const dto = (await listWorkloadTasks(fx.mgr, id)).find((x) => x.id === k.id)!;
+    expect(dto).toMatchObject({ review: "UNLINKED", reviewSuggestion: { key: "kampanye-reguler", task: "Kampanye program reguler" } });
+    // Pengguna memastikan: tautkan ke saran → kini tertaut; isinya dijaga sebagai "disesuaikan" (nama/jam berbeda dari template), tidak ditimpa
+    await reviewWorkloadRow(fx.mgr, k.id, { action: "LINK", templateKey: "kampanye-reguler" });
+    expect(await prisma.trainingWorkloadTask.findUniqueOrThrow({ where: { id: k.id } })).toMatchObject({ templateKey: "kampanye-reguler", adjusted: true, name: "Menyusun materi ajar", hours: k.hours + 7 });
+    expect((await rowsOf(id)).length).toBe(n);
+  });
+
   it("asal MERAGUKAN (nama diubah, jabatan punya beberapa pekerjaan): 'perlu diperiksa', tidak ditebak; pekerjaan jabatan itu tidak dibuat diam-diam; tinjau → tautkan / berdiri sendiri", async () => {
     await setConfig((c) => { c.hourTable.push({ ...c.hourTable.find((h) => h.id === "spv-kurikulum")!, id: "spv-tambahan", task: "Pekerjaan SPV tambahan" }); });
     const id = await program();
@@ -411,5 +430,57 @@ describe("DTO untuk yang tidak berwenang", () => {
     expect(mine.every((x) => x.employeeId === fx.empIds[2])).toBe(true);
     expect(mine.every((x) => x.review === null && !x.canRevert)).toBe(true);
     expect(isoToDate("2027-01-01")).toBeTruthy();
+  });
+});
+
+describe("pemegang jabatan NONAKTIF: baris estimasi jam TIDAK hilang (butir 4a)", () => {
+  it("menonaktifkan pemegang jabatan lalu menghitung ulang: jumlah baris & total jam tetap, baris tetap atas nama pemegang lama dan ditandai 'nonaktif — alihkan'; peringatan menyebutnya dipertahankan; idempoten", async () => {
+    await setConfig();
+    const id = await program();
+    const before = await rowsOf(id);
+    const holder = fx.empIds[1]!;                                                   // MANAGER_MARKETING (+ fasilitator)
+    const held = before.filter((r) => r.employeeId === holder);
+    expect(held.length).toBeGreaterThan(0);
+    await prisma.employee.update({ where: { id: holder }, data: { isActive: false } });
+    for (let i = 0; i < 2; i++) {                                                   // hitung ulang berulang kali: tidak ada yang berubah
+      const r = await regenerateProjectWorkload(fx.mgr, id);
+      expect(r).toMatchObject({ removed: 0, created: 0, updated: 0 });
+      expect(r.warnings.join(" ")).toMatch(/DIPERTAHANKAN \(tidak dihapus\): pemegang jabatannya belum aktif/);
+    }
+    const after = await rowsOf(id);
+    expect(after.length).toBe(before.length);
+    expect(totalHours(after)).toBe(totalHours(before));                             // estimasi beban TIDAK berkurang sebelum pekerjaan benar-benar dialihkan
+    expect(idsAndHours(after)).toEqual(idsAndHours(before));
+    expect(after.filter((r) => r.employeeId === holder).length).toBe(held.length);
+    const dto = await listWorkloadTasks(fx.mgr, id);
+    expect(dto.filter((x) => x.employeeInactive && x.status === "OPEN").map((x) => x.id).sort()).toEqual(held.map((x) => x.id).sort());
+    expect(dto.filter((x) => !x.employeeInactive).every((x) => x.employeeId !== holder)).toBe(true);
+  });
+
+  it("pemegang jabatan BARU ditetapkan lalu dihitung ulang: baris yang sama PINDAH ke staf baru (tidak dibuat ganda) dan penanda nonaktif hilang", async () => {
+    await setConfig();
+    const id = await program();
+    const holder = fx.empIds[1]!;
+    const campaign = (await rowsOf(id)).find((r) => r.templateKey === "kampanye-reguler")!;
+    expect(campaign.employeeId).toBe(holder);
+    await prisma.employee.update({ where: { id: holder }, data: { isActive: false } });
+    await regenerateProjectWorkload(fx.mgr, id);
+    expect((await byKey(id, "kampanye-reguler")).employeeId).toBe(holder);          // dipertahankan
+    await setConfig((c) => { c.roleHolders.MANAGER_MARKETING = fx.admEmp; c.roleHolders.FACILITATOR = fx.empIds[0]; c.facilitators = [fx.empIds[0]]; });   // konfigurasi menolak pemegang nonaktif: SEMUA jabatannya diganti (pemegang baru aktif)
+    const r = await regenerateProjectWorkload(fx.mgr, id);
+    expect(r).toMatchObject({ created: 0, removed: 0 });
+    expect(r.updated).toBeGreaterThanOrEqual(1);
+    const moved = await byKey(id, "kampanye-reguler");
+    expect(moved).toMatchObject({ id: campaign.id, employeeId: fx.admEmp });        // baris yang SAMA, kini atas nama pemegang baru
+    expect((await rowsOf(id)).filter((x) => x.templateKey === "kampanye-reguler")).toHaveLength(1);
+  });
+
+  it("pekerjaan yang sungguh TIDAK BERLAKU lagi tetap dihapus (pembeda: dipertahankan hanya bila 'belum dapat dihitung')", async () => {
+    await setConfig();
+    const id = await program();
+    await setConfig((c) => { c.hourTable = c.hourTable.filter((h) => h.id !== "kampanye-reguler"); });   // pekerjaan dihapus dari Tabel Jam Standar
+    const r = await regenerateProjectWorkload(fx.mgr, id);
+    expect(r.removed).toBe(1);
+    expect((await rowsOf(id)).some((x) => x.templateKey === "kampanye-reguler")).toBe(false);
   });
 });

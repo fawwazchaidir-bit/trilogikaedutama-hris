@@ -14,14 +14,14 @@ import { offsetLabel } from "@/lib/training/indicators/format";
 import { assigneeUnavailableReason, type AssigneeUnavailable } from "@/lib/training/availability";
 import { COMPONENT_LABEL, type Anchor, type IndicatorConfig, type ItemComponent, type Track } from "@/lib/training/indicators/config";
 import {
-  classifyLegacy, isLegacyUnresolved, planWorkloadSync, revertChanges, valueChanges, type DesiredRow, type ExistingRow, type RevertChange, type SyncPlan, type TemplateEntry,
+  classifyLegacy, isLegacyUnresolved, planWorkloadSync, revertChanges, valueChanges, type DesiredRow, type ExistingRow, type RevertChange, type SyncPlan, type TemplateEntry, type UnresolvedReason,
 } from "@/lib/training/workload-sync";
 import {
   milestoneAddSchema, milestoneCompleteSchema, milestoneUpdateSchema, readinessAddSchema, readinessStatusSchema, staffCapacitySchema, workloadMergeSchema, workloadReviewSchema, workloadSchema, workloadUpdateSchema,
 } from "@/lib/validation/training";
 import { assertEditable, assertEditableLocked, getModuleContext, loadProjectAccess, requireAbility, assertModuleEnabled } from "./access";
 import { loadConfig } from "./indicator-config";
-import { assertUuid, auditProject, today } from "./shared";
+import { assertAccountActive, assertUuid, auditProject, today } from "./shared";
 
 type Db = Tx | typeof prisma;
 
@@ -75,18 +75,19 @@ const applicableHourRows = (p: ProgramRow, cfg: IndicatorConfig) => cfg.hourTabl
 const entriesOf = (p: ProgramRow, cfg: IndicatorConfig): TemplateEntry[] => applicableHourRows(p, cfg).map((h) => ({ key: h.id, roleKey: h.roleKey, task: h.task }));
 
 /** Hitungan template (apa yang SEHARUSNYA ada) — tiap baris membawa ID tetap baris tabel jam. Baris yang tak dapat dihitung dilewati dengan peringatan. */
-function buildDesiredRows(p: ProgramRow, cfg: IndicatorConfig, cal: WorkCal, holders: Map<string, string>, warnings: string[]): DesiredRow[] {
+/** `unresolved` (opsional) menampung pekerjaan yang BERLAKU tetapi belum dapat dihitung (tanpa pemegang aktif / tanggal belum lengkap) — dipakai agar barisnya tidak dihapus. */
+function buildDesiredRows(p: ProgramRow, cfg: IndicatorConfig, cal: WorkCal, holders: Map<string, string>, warnings: string[], unresolved?: Map<string, UnresolvedReason>): DesiredRow[] {
   const ctx = dateCtx(p);
   const roleLabel = new Map(cfg.roles.map((r) => [r.key, r.label]));
   const rows: DesiredRow[] = [];
   for (const h of applicableHourRows(p, cfg)) {
     const emp = holders.get(h.roleKey);
-    if (!emp) { warnings.push(`Jam kerja "${h.task}" dilewati: jabatan ${roleLabel.get(h.roleKey) ?? h.roleKey} belum memiliki pemegang aktif.`); continue; }
+    if (!emp) { warnings.push(`Jam kerja "${h.task}" dilewati: jabatan ${roleLabel.get(h.roleKey) ?? h.roleKey} belum memiliki pemegang aktif.`); unresolved?.set(h.id, "NO_HOLDER"); continue; }
     const hours = standardHours({ fixed: h.fixed[p.track], perParticipant: h.perParticipant, perClassDay: h.perClassDay }, p.participantsMin ?? 0, classDaysOf(p));
     if (hours <= 0) continue;
     const start = resolveOffset({ anchor: h.start.anchor, days: h.start.days, work: false }, ctx, () => null, cal);
     const end = resolveOffset({ anchor: h.end.anchor, days: h.end.days, work: false }, ctx, () => null, cal);
-    if (!start || !end || end < start) { warnings.push(`Jam kerja "${h.task}" dilewati: tanggal acuan (H/T) belum lengkap atau jendela waktu terbalik.`); continue; }
+    if (!start || !end || end < start) { warnings.push(`Jam kerja "${h.task}" dilewati: tanggal acuan (H/T) belum lengkap atau jendela waktu terbalik.`); unresolved?.set(h.id, "NO_DATES"); continue; }
     rows.push({ templateKey: h.id, roleKey: h.roleKey, name: h.task, employeeId: emp, hours, startDate: start, endDate: end });
   }
   return rows;
@@ -112,9 +113,10 @@ export async function syncWorkloadTx(tx: Tx, actor: Actor, p: ProgramRow, cfg: I
   await lockWorkload(tx, p.id);
   const warnings: string[] = [];
   const holders = await activeHolders(tx, cfg);
-  const desired = buildDesiredRows(p, cfg, await loadCal(tx, cfg), holders, warnings);
+  const unresolved = new Map<string, UnresolvedReason>();
+  const desired = buildDesiredRows(p, cfg, await loadCal(tx, cfg), holders, warnings, unresolved);
   const rows = await tx.trainingWorkloadTask.findMany({ where: { projectId: p.id } });
-  const plan = planWorkloadSync({ entries: entriesOf(p, cfg), desired, existing: rows.map(toExisting), skipWarnings: warnings });
+  const plan = planWorkloadSync({ entries: entriesOf(p, cfg), desired, existing: rows.map(toExisting), skipWarnings: warnings, unresolved });
   // Urutan: hapus → tautkan → perbarui → buat (agar kunci unik (proyek, ID) tidak pernah bertabrakan).
   if (plan.remove.length) await tx.trainingWorkloadTask.deleteMany({ where: { id: { in: plan.remove.map((x) => x.id) } } });
   for (const l of plan.link) await tx.trainingWorkloadTask.update({ where: { id: l.id }, data: { templateKey: l.templateKey, adjusted: l.adjusted, adjustedAt: l.adjusted ? new Date() : null } });
@@ -293,7 +295,7 @@ export async function updateMilestone(actor: Actor, id: string, raw: unknown): P
   if (input.notApplicable && m.doneAt) throw Errors.conflict("Milestone yang sudah selesai tidak dapat ditandai Tidak berlaku.");
   await transaction(async (tx) => {
     await assertEditableLocked(tx, m.projectId);   // kunci bersama proyek (langkah PERTAMA): status dibaca ulang segar — tidak lolos bila penutupan/pembatalan commit lebih dulu
-    if (input.assigneeId) { const e = await tx.employee.count({ where: { id: input.assigneeId, isActive: true } }); if (!e) throw Errors.validation("PIC harus karyawan aktif.", { assigneeId: "Tidak valid" }); }
+    if (input.assigneeId) { const e = await tx.employee.count({ where: { id: input.assigneeId, isActive: true } }); if (!e) throw Errors.validation("PIC harus karyawan aktif.", { assigneeId: "Tidak valid" }); if (input.assigneeId !== m.assigneeId) await assertAccountActive(tx, input.assigneeId); }
     const data: Prisma.TrainingMilestoneUncheckedUpdateInput = {};
     for (const k of ["name", "weight", "critical", "assigneeId", "notApplicable", "reference"] as const) if (k in input) (data as Record<string, unknown>)[k] = input[k];
     if ("manualDate" in input) data.manualDate = input.manualDate ? isoToDate(input.manualDate) : null;
@@ -311,6 +313,7 @@ export async function addMilestone(actor: Actor, projectId: string, raw: unknown
   return transaction(async (tx) => {
     await assertEditableLocked(tx, projectId);   // kunci bersama proyek (langkah PERTAMA): status dibaca ulang segar — tidak lolos bila penutupan/pembatalan commit lebih dulu
     if (input.assigneeId && !(await tx.employee.count({ where: { id: input.assigneeId, isActive: true } }))) throw Errors.validation("PIC harus karyawan aktif.", { assigneeId: "Tidak valid" });
+    if (input.assigneeId) await assertAccountActive(tx, input.assigneeId);
     if (input.anchor === "MILESTONE" && (!input.ref || !(await tx.trainingMilestone.count({ where: { projectId, code: input.ref } })))) throw Errors.validation("Milestone acuan tidak ditemukan.", { ref: "Tidak ditemukan" });
     const max = await tx.trainingMilestone.aggregate({ where: { projectId }, _max: { sortOrder: true } });
     try {
@@ -394,6 +397,7 @@ export async function addReadinessItem(actor: Actor, projectId: string, raw: unk
   return transaction(async (tx) => {
     await assertEditableLocked(tx, projectId);   // kunci bersama proyek (langkah PERTAMA): status dibaca ulang segar — tidak lolos bila penutupan/pembatalan commit lebih dulu
     if (input.assigneeId && !(await tx.employee.count({ where: { id: input.assigneeId, isActive: true } }))) throw Errors.validation("Penanggung jawab harus karyawan aktif.", { assigneeId: "Tidak valid" });
+    if (input.assigneeId) await assertAccountActive(tx, input.assigneeId);
     if (input.anchor === "MILESTONE" && (!input.ref || !(await tx.trainingMilestone.count({ where: { projectId, code: input.ref } })))) throw Errors.validation("Milestone acuan tidak ditemukan.", { ref: "Tidak ditemukan" });
     const max = await tx.trainingReadinessItem.aggregate({ where: { projectId, component: input.component }, _max: { sortOrder: true } });
     const it = await tx.trainingReadinessItem.create({ data: { projectId, component: input.component, name: input.name, critical: input.critical, anchor: input.anchor, offsetDays: input.days, offsetWork: input.work, refCode: input.ref, manualDate: input.manualDate ? isoToDate(input.manualDate) : null, assigneeId: input.assigneeId, sortOrder: (max._max.sortOrder ?? -1) + 1 } });
@@ -421,6 +425,8 @@ export async function removeReadinessItem(actor: Actor, id: string): Promise<voi
 
 export interface WorkloadTaskDto {
   id: string; employeeId: string; employeeName: string; name: string; hours: number; startDate: string; endDate: string; status: "OPEN" | "DONE" | "CANCELLED";
+  /** Staf pada baris ini sudah NONAKTIF (berhenti): barisnya dipertahankan sampai pekerjaannya dialihkan (bukan dihapus), jadi perlu ditandai. */
+  employeeInactive: boolean;
   /** ASAL baris (tidak berubah karena diedit). */
   source: "TEMPLATE" | "MANUAL"; roleKey: string | null; canManage: boolean;
   /** ID tetap baris Tabel Jam Standar asal (null = manual dari awal atau baris lama yang belum ditinjau). */
@@ -433,6 +439,8 @@ export interface WorkloadTaskDto {
   canRevert: boolean;
   /** Baris LAMA yang tidak dapat ditentukan asalnya ("UNLINKED") atau kembar dengan baris lain untuk pekerjaan yang sama ("DUPLICATE"); null = jelas. */
   review: "UNLINKED" | "DUPLICATE" | null;
+  /** Untuk "UNLINKED": SARAN pekerjaan template (jabatannya kini hanya punya satu pekerjaan) — bukan keputusan; pengguna memastikan lewat "Tinjau asal". */
+  reviewSuggestion: { key: string; task: string } | null;
   /** Untuk "DUPLICATE": semua baris dalam kelompok kembar yang sama (termasuk baris ini). */
   duplicateGroup: string[] | null;
 }
@@ -442,7 +450,7 @@ export async function listWorkloadTasks(actor: Actor, projectId: string): Promis
   // Jam kerja per orang = data beban kerja rekan: hanya pengelola tugas proyek atau yang melihat semua proyek yang melihat seluruh baris; anggota biasa hanya barisnya sendiri.
   const canManage = access.abilities.has("manage_tasks");
   const seeAll = canManage || access.module.caps.viewAll;
-  const all = await prisma.trainingWorkloadTask.findMany({ where: { projectId }, orderBy: [{ startDate: "asc" }, { name: "asc" }], include: { employee: { select: { fullName: true } } } });
+  const all = await prisma.trainingWorkloadTask.findMany({ where: { projectId }, orderBy: [{ startDate: "asc" }, { name: "asc" }], include: { employee: { select: { fullName: true, isActive: true } } } });
   const rows = seeAll ? all : all.filter((r) => r.employeeId === (actor.employeeId ?? "00000000-0000-0000-0000-000000000000"));
   // Status "perlu diperiksa"/"kembar"/"berbeda dari template" dihitung dari seluruh baris proyek (bukan hanya yang terlihat) dan hanya diperlihatkan pada yang melihat semua.
   let desired = new Map<string, DesiredRow>();
@@ -464,11 +472,12 @@ export async function listWorkloadTasks(actor: Actor, projectId: string): Promis
     const adjusted = r.adjusted || (legacy?.state === "LINK" && legacy.adjusted);
     const dup = groupOf.get(r.id) ?? null;
     return {
-      id: r.id, employeeId: r.employeeId, employeeName: r.employee.fullName, name: r.name, hours: r.hours, startDate: dateToIso(r.startDate), endDate: dateToIso(r.endDate), status: r.status,
+      id: r.id, employeeId: r.employeeId, employeeName: r.employee.fullName, employeeInactive: !r.employee.isActive, name: r.name, hours: r.hours, startDate: dateToIso(r.startDate), endDate: dateToIso(r.endDate), status: r.status,
       source: r.source === "MANUAL" ? "MANUAL" as const : "TEMPLATE" as const, roleKey: r.roleKey, canManage,
       templateKey: r.templateKey, adjusted, differsFromTemplate: adjusted && r.status === "OPEN" && diff.length > 0,
       canRevert: canManage && r.status === "OPEN" && !!r.templateKey && !!tpl && (r.adjusted || diff.length > 0),
       review: legacy && legacy.state !== "LINK" ? (legacy.state === "DUPLICATE" ? "DUPLICATE" as const : "UNLINKED" as const) : dup ? "DUPLICATE" as const : null,
+      reviewSuggestion: legacy?.state === "UNLINKED" ? legacy.suggestion : null,
       duplicateGroup: dup,
     };
   });
@@ -629,7 +638,9 @@ export async function reviewWorkloadRow(actor: Actor, id: string, raw: unknown):
     const entry = entriesOf(p, cfg).find((e) => e.key === input.templateKey);
     if (!entry) throw Errors.validation("Pekerjaan template itu tidak berlaku untuk jenis/moda program ini.", { templateKey: "Tidak valid" });
     if (await tx.trainingWorkloadTask.count({ where: { projectId: w.projectId, templateKey: entry.key } })) throw Errors.conflict("Pekerjaan template itu sudah punya baris. Jika keduanya untuk pekerjaan yang sama, gunakan \"Rapikan duplikat\".");
-    const adjusted = cur.source === "MANUAL" || cur.adjusted;
+    // Nama berbeda dari pekerjaan template yang dipilih pengguna = isi baris ini sudah bukan hasil template: dijaga sebagai "disesuaikan" agar hitung ulang berikutnya tidak menimpanya diam-diam
+    // (pengguna dapat memakai "Kembalikan ke template" bila memang ingin mengikuti template).
+    const adjusted = cur.source === "MANUAL" || cur.adjusted || cur.name !== entry.task;
     await tx.trainingWorkloadTask.update({ where: { id }, data: { templateKey: entry.key, adjusted, adjustedAt: adjusted ? now : null, originReviewedAt: now } });
     await auditProject(tx, actor, w.projectId, {
       action: "training.workload.review", summary: `Tugas jam kerja lama "${cur.name}" ditautkan ke pekerjaan template "${entry.task}"${adjusted ? " (sebagai baris yang disesuaikan)" : ""}`,

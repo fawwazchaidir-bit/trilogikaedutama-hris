@@ -139,7 +139,7 @@ export function MonitoringPanel(p: Props) {
                     <thead><tr><Th>Staf</Th><Th>Tugas</Th><Th align="right">Jam</Th><Th>Jendela</Th><Th>Sumber</Th><Th>Status</Th></tr></thead>
                     <tbody>{p.workload.map((x) => (
                       <tr key={x.id} data-testid="workload-row">
-                        <Td>{x.employeeName}</Td><Td>{x.name}</Td><Td align="right">{x.hours}</Td><Td>{formatDateShort(x.startDate)} – {formatDateShort(x.endDate)}</Td>
+                        <Td>{x.employeeName}{x.employeeInactive && x.status === "OPEN" && <span className="block text-xs font-medium text-brand-700" data-testid="workload-inactive">nonaktif — alihkan pemegang jabatan</span>}</Td><Td>{x.name}</Td><Td align="right">{x.hours}</Td><Td>{formatDateShort(x.startDate)} – {formatDateShort(x.endDate)}</Td>
                         <Td>
                           <span className="flex flex-wrap items-center gap-1">
                             <Badge tone={x.source === "MANUAL" ? "blue" : "gray"}>{x.source === "MANUAL" ? "Manual" : "Template"}</Badge>
@@ -229,6 +229,16 @@ export function MonitoringPanel(p: Props) {
           <Button variant="primary" loading={busy} disabled={!review.key} onClick={() => void run(() => api(`/api/training/workload/${review.row.id}/review`, { body: { action: "LINK", templateKey: review.key } }), "Baris ditautkan ke template.", () => setReview(null))}>Tautkan</Button></>}>
         {review && <div className="space-y-4">{error && <Notice tone="danger">{error}</Notice>}
           <Notice tone="info">Baris ini dibuat sebelum sistem mencatat asalnya, dan asalnya tidak dapat dipastikan. Pilih: tautkan ke pekerjaan Tabel Jam Standar yang sama, atau nyatakan berdiri sendiri. Sistem tidak menebak.</Notice>
+          {review.row.reviewSuggestion && (() => {
+            const sg = review.row.reviewSuggestion!;
+            const available = (p.workloadEntries ?? []).some((e) => e.key === sg.key && !e.claimedBy);
+            return (
+              <div className="rounded-md border border-line bg-canvas p-3 text-sm" data-testid="review-suggestion">
+                <p><strong>Saran (belum diterapkan):</strong> mungkin ini pekerjaan <strong>{sg.task}</strong>, karena jabatannya kini hanya punya satu pekerjaan di Tabel Jam Standar. Itu bisa benar bila pekerjaannya hanya berganti nama — tetapi bisa juga pekerjaan lama sudah diganti dengan yang lain. Periksa nama, jam, dan tanggal baris ini sebelum menautkan.</p>
+                <Button size="sm" className="mt-2" disabled={!available || review.key === sg.key} onClick={() => setReview({ ...review, key: sg.key })}>{review.key === sg.key ? "Saran dipilih" : available ? "Pakai saran ini" : "Pekerjaan itu sudah punya baris"}</Button>
+              </div>
+            );
+          })()}
           <SelectField label="Tautkan ke pekerjaan template" aria-label="Pekerjaan template" value={review.key} onChange={(e) => setReview({ ...review, key: e.target.value })}>
             <option value="">— Pilih pekerjaan template —</option>
             {(p.workloadEntries ?? []).filter((e) => !e.claimedBy).map((e) => <option key={e.key} value={e.key}>{e.roleLabel} — {e.task}</option>)}

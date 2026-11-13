@@ -23,7 +23,7 @@ import {
 import {
   assertEditable, assertEditableLocked, getModuleContext, loadProjectAccess, lockProjectShared, requireAbility, requireGlobalCap, requireModule, accessibleProjectWhere, type ProjectAccess,
 } from "./access";
-import { assertUuid, auditProject, iso, liveTaskWhere, today } from "./shared";
+import { assertAccountActive, assertUuid, auditProject, iso, liveTaskWhere, today } from "./shared";
 
 // ═════════════════════════════ Tugas ═════════════════════════════
 
@@ -233,6 +233,7 @@ async function assertAssigneeInTeam(tx: Tx | typeof prisma, projectId: string, e
   // Karyawan yang sudah berhenti tidak boleh diberi tugas/checklist BARU (pekerjaan lama miliknya ditandai "alihkan", bukan ditambah).
   const e = await tx.employee.findUnique({ where: { id: employeeId }, select: { isActive: true } });
   if (!e?.isActive) throw Errors.validation("Karyawan ini sudah nonaktif (berhenti). Pilih penanggung jawab lain.", { assigneeId: "Karyawan nonaktif" });
+  await assertAccountActive(tx, employeeId);                      // urutan prioritas pesan: berhenti > akun nonaktif > di luar tim (lib/training/availability)
   const m = await tx.trainingProjectMember.count({ where: { projectId, employeeId, endedAt: null } });
   if (m === 0) throw Errors.validation("Penanggung jawab harus anggota aktif proyek. Tambahkan dulu pada tab Tim.", { assigneeId: "Bukan anggota proyek" });
 }

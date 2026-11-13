@@ -152,7 +152,7 @@ export interface ClosurePreviewDto {
   missingRecommendedDocuments: DocCategory[];
   canCloseClean: boolean;
   /** Tugas yang masih terbuka: SETIAP tugas harus diputuskan saat menutup (tindak lanjut atau batal). */
-  openTasks: { id: string; title: string; status: TaskStatus; assigneeId: string | null; assigneeName: string | null; assigneeUnavailable: AssigneeUnavailable | null; dueDate: string | null; overdue: boolean; requiresReview: boolean }[];
+  openTasks: { id: string; title: string; status: TaskStatus; assigneeId: string | null; assigneeName: string | null; assigneeUnavailable: AssigneeUnavailable | null; assigneeNoAccount: boolean; dueDate: string | null; overdue: boolean; requiresReview: boolean }[];
   /** Tugas tindak lanjut (dibuat saat penutupan) — tampil pada proyek yang sudah Selesai. */
   followUps: { id: string; title: string; status: TaskStatus; assigneeName: string | null; dueDate: string | null; overdue: boolean }[];
   /** Milestone KRITIS yang belum selesai (informasi untuk Koordinator Program; tidak memblokir). */
@@ -178,7 +178,7 @@ export async function getClosurePreview(actor: Actor, projectId: string): Promis
       select: { id: true, title: true, status: true, assigneeId: true, dueDate: true, requiresReview: true, isFollowUp: true, assignee: { select: { fullName: true, isActive: true, user: { select: { isActive: true } } } } },
     }),
     prisma.trainingChecklistRelaxation.findMany({ where: { projectId }, orderBy: { createdAt: "asc" } }),
-    prisma.trainingProjectMember.findMany({ where: { projectId, endedAt: null }, select: { employeeId: true, employee: { select: { fullName: true, isActive: true } } } }),
+    prisma.trainingProjectMember.findMany({ where: { projectId, endedAt: null }, select: { employeeId: true, employee: { select: { fullName: true, isActive: true, user: { select: { isActive: true } } } } } }),
     listMilestones(actor, projectId),
   ]);
   const actorNames = relaxRows.length ? new Map((await prisma.user.findMany({ where: { id: { in: [...new Set(relaxRows.map((r) => r.actorId))] } }, select: { id: true, name: true } })).map((u) => [u.id, u.name])) : new Map<string, string>();
@@ -203,13 +203,16 @@ export async function getClosurePreview(actor: Actor, projectId: string): Promis
     openTasks: taskRows.filter((x) => isOpenTask(x.status)).map((x) => ({
       id: x.id, title: x.title, status: x.status, assigneeId: x.assigneeId, assigneeName: x.assignee?.fullName ?? null,
       assigneeUnavailable: x.assigneeId && x.assignee ? assigneeUnavailableReason({ activeMember: activeIds.has(x.assigneeId), employeeActive: x.assignee.isActive, accountActive: x.assignee.user?.isActive ?? null }) : null,
+      /** Penanggung jawab aktif tetapi SAMA SEKALI tanpa akun login: tidak dianggap tidak tersedia, tetapi layak diketahui sebelum menjadikannya tindak lanjut. */
+      assigneeNoAccount: !!x.assignee && x.assignee.isActive && !x.assignee.user,
       dueDate: x.dueDate ? dateToIso(x.dueDate) : null, overdue: x.dueDate !== null && dateToIso(x.dueDate) < t, requiresReview: x.requiresReview,
     })),
     followUps: taskRows.filter((x) => x.isFollowUp).map((x) => ({ id: x.id, title: x.title, status: x.status, assigneeName: x.assignee?.fullName ?? null, dueDate: x.dueDate ? dateToIso(x.dueDate) : null, overdue: isOpenTask(x.status) && x.dueDate !== null && dateToIso(x.dueDate) < t })),
     criticalMilestones: milestones.filter((m) => m.critical && !m.notApplicable && m.doneAt === null).map((m) => ({ id: m.id, code: m.code, name: m.name, due: m.due, overdue: m.overdue, assigneeName: m.assigneeName })),
     relaxations: relaxRows.map((r) => ({ id: r.id, title: r.itemTitle, kind: r.kind, reason: r.reason, byName: actorNames.get(r.actorId) ?? null, at: r.createdAt.toISOString(), acknowledged: r.acknowledgedAt !== null })),
     unacknowledgedRelaxations: relaxRows.filter((r) => r.acknowledgedAt === null).length,
-    assignees: memberRows.filter((m) => m.employee.isActive).map((m) => ({ employeeId: m.employeeId, name: m.employee.fullName })).sort((a, b) => a.name.localeCompare(b.name)),
+    // Calon penanggung jawab tindak lanjut: karyawan aktif DAN akun login tidak nonaktif (yang TANPA akun sama sekali tetap boleh; ditandai di tugas) — sama dengan gerbang server.
+    assignees: memberRows.filter((m) => m.employee.isActive && m.employee.user?.isActive !== false).map((m) => ({ employeeId: m.employeeId, name: m.employee.fullName })).sort((a, b) => a.name.localeCompare(b.name)),
   };
 }
 

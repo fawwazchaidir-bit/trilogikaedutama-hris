@@ -100,7 +100,7 @@ export function ClosurePanel({ project, preview, canClose }: { project: ProjectD
                     <p className="text-sm font-medium text-ink">{x.title}</p><TaskStatusBadge status={x.status} />
                     {x.overdue && <Badge tone="red">Terlambat</Badge>}
                     {x.requiresReview && <Badge tone="amber">Perlu diperiksa</Badge>}
-                    <span className="text-xs text-muted">{x.assigneeName ?? "Belum ada penanggung jawab"}{x.assigneeUnavailable && <span className="font-medium text-brand-700"> ({UNAVAILABLE_LABEL[x.assigneeUnavailable]})</span>}{x.dueDate && <> · tenggat {formatDateShort(x.dueDate)}</>}</span>
+                    <span className="text-xs text-muted">{x.assigneeName ?? "Belum ada penanggung jawab"}{x.assigneeUnavailable && <span className="font-medium text-brand-700"> ({UNAVAILABLE_LABEL[x.assigneeUnavailable]})</span>}{x.assigneeNoAccount && <span className="text-muted" data-testid="no-account-note"> (tanpa akun login — tidak dapat masuk sendiri; pastikan ada yang memantau)</span>}{x.dueDate && <> · tenggat {formatDateShort(x.dueDate)}</>}</span>
                   </div>
                   {canClose ? (
                     <div className="grid gap-3 sm:grid-cols-3">

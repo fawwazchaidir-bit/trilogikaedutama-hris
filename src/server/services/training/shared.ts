@@ -8,12 +8,26 @@ import type { Actor } from "../../actor";
 import { writeAudit, type AuditEntry } from "../../audit";
 import { todayIso } from "@/lib/time";
 import { SENSITIVE_DOC_CATEGORIES } from "@/lib/training/types";
+import { assigneeUnavailableReason } from "@/lib/training/availability";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /** ID di URL/body yang bukan UUID = "tidak ada" (404), bukan 500 dari database. Mencegah enumerasi lewat galat. */
 export function assertUuid(id: string, what: string): void {
   if (typeof id !== "string" || !UUID_RE.test(id)) throw Errors.notFound(what);
+}
+
+/**
+ * Gerbang PENUGASAN BARU (tugas, checklist, PIC milestone, penanggung jawab item kesiapan, tindak lanjut saat menutup proyek): akun login karyawan tidak boleh NONAKTIF — orang itu
+ * tidak dapat masuk untuk mengerjakan apa yang diberikan. Memakai SATU definisi "tidak tersedia" (`lib/training/availability`, juga dipakai penanda di layar, pengingat, dan dasbor).
+ * Karyawan yang sama sekali TIDAK punya akun login tidak dianggap tidak tersedia (tidak ada akun yang bisa nonaktif). Dipanggil hanya saat penanggung jawab DIGANTI/BARU, sehingga
+ * menyunting kolom lain pada pekerjaan yang sudah atas nama orang berakun nonaktif tidak terkunci (pekerjaan lamanya ditandai "alihkan", bukan ditambah).
+ */
+export async function assertAccountActive(db: Tx | typeof prisma, employeeId: string, field = "assigneeId"): Promise<void> {
+  const e = await db.employee.findUnique({ where: { id: employeeId }, select: { user: { select: { isActive: true } } } });
+  if (assigneeUnavailableReason({ activeMember: true, employeeActive: true, accountActive: e?.user?.isActive ?? null }) === "ACCOUNT_INACTIVE") {
+    throw Errors.validation("Akun login karyawan ini nonaktif sehingga ia tidak dapat masuk untuk mengerjakan pekerjaan yang diberikan. Pilih penanggung jawab lain, atau minta HR mengaktifkan kembali akunnya.", { [field]: "Akun login nonaktif" });
+  }
 }
 
 /** Tanggal "hari ini" menurut APP_TIMEZONE (WIB) — satu-satunya sumber untuk indikator terlambat/jatuh tempo. */
