@@ -88,4 +88,4 @@ Kebijakan cuti per karyawan = kolom `leaveQuotaDays` / `leaveEligibleFrom` / `le
 Pesan trigger diawali `HRIS-GUARD:` dan ditampilkan apa adanya ke pengguna.
 
 ## Konkurensi
-Satu catatan absensi per karyawan-hari dijaga `UNIQUE`; `check-out` memakai `UPDATE … WHERE checkOutAt IS NULL`. Pengajuan/persetujuan cuti memakai kunci advisory per karyawan; pembuatan periode gaji dan penugasan jadwal memakai kunci advisory global — semuanya diuji dengan permintaan paralel.
+Satu catatan absensi per karyawan-hari dijaga `UNIQUE`; `check-out` memakai `UPDATE … WHERE checkOutAt IS NULL`. Pengajuan/persetujuan cuti memakai kunci advisory per karyawan; pembuatan periode gaji dan penugasan jadwal memakai kunci advisory global; uang harian (bukti penerimaan, penyelesaian akhir, pembatalan surat tugas) memakai kunci advisory per surat tugas yang sama di semua jalur dan di trigger database — semuanya diuji dengan permintaan paralel.

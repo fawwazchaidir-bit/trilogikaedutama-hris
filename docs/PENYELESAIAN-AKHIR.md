@@ -57,7 +57,25 @@ Uang harian dinas bisa dibayar lewat **dua jalur**: Bukti Penerimaan Uang Harian
 
 Di **Persuratan → Surat Tugas & Uang Harian**, penerima yang uangnya masuk penyelesaian akhir ditandai *Termasuk penyelesaian akhir · \<status\>* (atau *Dibayar lewat penyelesaian akhir · \<tanggal\>*) dengan tautan ke penyelesaiannya; tombol Terbitkan bukti tidak muncul. Penerima itu **tidak dihitung** pada lencana/filter "menunggu bukti penerimaan" maupun sinyal checklist berhenti. **Tidak ada Bukti Penerimaan yang dibuat otomatis** — pembayaran dicatat di penyelesaian akhir.
 
-**Audit data lama** (baca-saja, pimpinan `payroll:approve`): `GET /api/final-settlements/audit-allowance` mendaftar uang harian yang **sudah terlanjur tercatat dua kali** (ada di penyelesaian yang belum dibatalkan *dan* punya Bukti Penerimaan aktif). Migrasi menautkan baris lama bila kecocokannya tunggal (karyawan sama, nominal sama, nomor surat tugas ada pada rumus baris); yang meragukan atau sudah diubah manual dibiarkan dan tidak muncul di audit. Koreksi dilakukan secara sah: batalkan bukti (Super Admin) atau kembalikan/batalkan penyelesaian akhir.
+### Dua jalur yang berjalan BERSAMAAN (kunci per surat tugas)
+
+Pemeriksaan di atas hanya **membaca**. Pada READ COMMITTED sebuah pembacaan tidak melihat transaksi lawan yang belum commit, sehingga dua jalur yang tumpang-tindih sama-sama lolos: bukti ditahan di tengah transaksinya sementara penyelesaian akhir dihitung → diajukan → disetujui → dibayar, lalu bukti ikut tersimpan (satu baris Dibayar + satu bukti aktif); begitu pula pembatalan surat tugas yang bersamaan dengan persetujuan/pembayaran (baris Dibayar untuk surat yang dibatalkan). Terbukti dengan tes serentak pada kode sebelumnya (uji `pg_sleep` pada tiga titik transaksi bukti dan pada pembatalan surat).
+
+**Satu aturan penguncian** (`src/server/services/allowance-lock.ts`): kunci advisory **per surat tugas** — `pg_advisory_xact_lock(hashtext('assign:<id surat>'))` — diambil oleh **semua** jalur uang harian, lalu pemeriksaan **dibaca ulang** (pernyataan baru → melihat commit transaksi yang tadi memegang kunci):
+
+| Jalur | Kapan kunci diambil |
+|---|---|
+| Terbitkan Bukti Penerimaan · batalkan bukti · **batalkan surat tugas** | langkah pertama transaksi (satu surat) |
+| Buat · ubah · hitung ulang penyelesaian akhir | setelah kunci baris penyelesaian: **semua surat tugas karyawan itu**, terurut; usulan uang harian dihitung **di dalam kunci** (bukan sebelum transaksi) |
+| Ajukan · setujui · catat dibayar | setelah kunci baris penyelesaian: semua surat pada baris uang harian, terurut |
+
+Siapa yang lebih dulu memegang kunci menang, yang lain **menunggu** lalu melihat hasilnya: bukti menang → usulan tidak memuat uang harian itu; penyelesaian menang → bukti ditolak ("sudah termasuk penyelesaian akhir"); pembatalan surat menang → penyelesaian menolak diajukan/disetujui/dibayar; persetujuan menang → pembatalan surat ditolak. **Bebas deadlock:** beberapa surat selalu dikunci terurut menurut ID dan kunci surat diambil sesudah kunci baris penyelesaian; jalur bukti/pembatalan hanya memegang satu kunci surat (diuji: dua penyelesaian pada surat yang sama dihitung ulang berulang kali bersama bukti).
+
+**Jaring pengaman database** (migrasi `20261113120000_allowance_two_path_locks`, aditif — hanya mengganti isi dua fungsi trigger dan menambah dua trigger): trigger mengambil **kunci yang sama** sebelum memeriksa — INSERT bukti, INSERT baris penyelesaian berpenerima, perubahan **status** penyelesaian ke Menunggu/Disetujui/Dibayar (menolak bila ada baris yang kini punya bukti aktif atau surat tugasnya dibatalkan), dan **pembatalan surat tugas** (menolak bila uangnya sudah di penyelesaian Disetujui/Dibayar atau masih ada bukti aktif). Jadi invarian tetap terjaga untuk jalur baru atau SQL langsung.
+
+**Pengujian** (`tests/integration/allowance-two-path-concurrency.test.ts`): tujuh skenario dengan koneksi benar-benar serentak dan penahan `pg_sleep` di titik berbeda, dijalankan pada dua lapisan — *aplikasi saja* (trigger penjaga dimatikan) dan *lengkap* — dengan invarian: tidak ada bukti aktif + baris penyelesaian berlaku untuk uang harian yang sama; tidak ada baris Disetujui/Dibayar untuk surat dibatalkan; tidak ada deadlock. Ditambah uji bahwa tiap trigger **menunggu** kunci yang dipegang transaksi lain, dan uji penolakannya. Mutasi sengaja (melepas kunci di jalur penyelesaian, di jalur bukti/pembatalan, dan di fungsi trigger) menggagalkan tes yang relevan.
+
+**Audit data lama** (baca-saja, pimpinan `payroll:approve`): `GET /api/final-settlements/audit-allowance` mendaftar uang harian pada penyelesaian yang belum dibatalkan yang bermasalah: `problem = ACTIVE_RECEIPT` (**sudah terlanjur tercatat dua kali** — punya Bukti Penerimaan aktif) atau `LETTER_CANCELLED` (surat tugasnya sudah dibatalkan, barisnya masih ada). Keduanya tidak seharusnya terjadi lagi sejak kunci per surat tugas, tetapi data lama atau kejadian sebelum perbaikan perlu dikenali. Migrasi menautkan baris lama bila kecocokannya tunggal (karyawan sama, nominal sama, nomor surat tugas ada pada rumus baris); yang meragukan atau sudah diubah manual dibiarkan dan tidak muncul di audit. Koreksi dilakukan secara sah: batalkan bukti (Super Admin) atau kembalikan/batalkan penyelesaian akhir.
 
 ## Peringatan (dihitung langsung dari data terkini)
 

@@ -18,6 +18,7 @@ import { isoDate, optionalText, requiredText, rupiah, uuid } from "@/lib/validat
 import type { Paged } from "@/lib/types";
 import { SETTLEMENT_STATUS_LABEL, type SettlementStatusValue } from "@/lib/final-settlement";
 import { stampCancelledCopy } from "@/lib/documents/cancelled-stamp";
+import { lockAllowanceLetters } from "./allowance-lock";
 import { renderAssignmentPdf } from "../pdf/render";
 
 export type AssignmentStatus = "ISSUED" | "CANCELLED";
@@ -308,7 +309,7 @@ export async function cancelAssignment(actor: Actor, id: string, raw: unknown): 
 
 /** Inti pembatalan (dipakai jalur lama dan mesin dokumen saat INT-002 dibatalkan). */
 export async function cancelAssignmentIn(tx: Prisma.TransactionClient, actor: Actor, id: string, reason: string): Promise<AssignmentDto> {
-  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${"assign:" + id}))`;
+  await lockAllowanceLetters(tx, [id]);                   // kunci bersama uang harian (juga dipakai penyelesaian akhir) — lihat allowance-lock.ts
   const letter = await tx.assignmentLetter.findUnique({ where: { id }, include });
   if (!letter) throw Errors.notFound("Surat tugas");
   if (letter.status === "CANCELLED") throw Errors.conflict("Surat tugas sudah dibatalkan.");
@@ -454,7 +455,7 @@ export async function issueReceipt(actor: Actor, raw: unknown): Promise<ReceiptD
       include: { letter: true, employee: { select: { id: true, employeeNo: true, fullName: true, position: true, userId: true, bankName: true, bankAccountLast4: true, division: { select: { name: true } } } } },
     });
     if (!a) throw Errors.notFound("Penerima tugas");
-    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${"assign:" + a.letterId})) `;
+    await lockAllowanceLetters(tx, [a.letterId]);          // kunci bersama uang harian (juga dipakai penyelesaian akhir) — lihat allowance-lock.ts
     if (actor.role !== "SUPER_ADMIN" && actor.employeeId && a.employeeId === actor.employeeId) {
       throw Errors.forbidden("Anda tidak dapat menerbitkan bukti penerimaan uang harian untuk diri Anda sendiri. Minta Super Admin menerbitkannya.");
     }
@@ -507,7 +508,7 @@ export async function voidReceipt(actor: Actor, id: string, raw: unknown): Promi
   await transaction(async (tx) => {
     const r = await tx.dailyAllowanceReceipt.findUnique({ where: { id }, include: { employee: { select: { fullName: true, userId: true } } } });
     if (!r) throw Errors.notFound("Bukti penerimaan");
-    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${"assign:" + r.letterId}))`;
+    await lockAllowanceLetters(tx, [r.letterId]);
     if (r.status === "VOIDED") throw Errors.conflict("Bukti penerimaan sudah dibatalkan.");
     await tx.dailyAllowanceReceipt.update({ where: { id }, data: { status: "VOIDED", voidedAt: new Date(), voidedById: actor.userId, voidReason: reason } });
     await writeAudit(tx, actor, { action: "allowance.void", entityType: "DailyAllowanceReceipt", entityId: id, summary: `Bukti Penerimaan ${r.number} (${r.employee.fullName}) dibatalkan`, before: { status: "ACTIVE" }, after: { status: "VOIDED" }, reason });

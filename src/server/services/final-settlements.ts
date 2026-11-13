@@ -21,6 +21,7 @@ import { employeeLite, loadRangeContext } from "./context";
 import { balanceOf } from "./leave";
 import { assetSignalData } from "./assets";
 import { notifyUsers, superAdminUserIds } from "./notifications";
+import { lettersOfAssignees, lettersOfEmployee, lettersOfSettlement, lockAllowanceLetters } from "./allowance-lock";
 
 /**
  * PENYELESAIAN AKHIR (final settlement) saat karyawan berhenti. Sistem mengusulkan yang dapat dihitung dari data (gaji prorata bulan terakhir, uang harian
@@ -82,8 +83,8 @@ const cancelSchema = z.object({ reason: requiredText(5, 300, "Alasan") });
 
 interface Suggestions { lines: DraftLine[]; warnings: string[] }
 
-/** Usulan baris SISTEM dan peringatan untuk satu karyawan pada tanggal terakhir bekerja tertentu. Hanya BACA. */
-async function computeSuggestions(employeeId: string, lastWorkDate: string, basis: SettlementBasisValue, leaveDivisor: number | null): Promise<Suggestions> {
+/** Usulan baris SISTEM dan peringatan untuk satu karyawan pada tanggal terakhir bekerja tertentu. Hanya BACA. Bagian uang harian dibaca lewat `allowanceDb` (transaksi pemegang kunci pada jalur tulis). */
+async function computeSuggestions(employeeId: string, lastWorkDate: string, basis: SettlementBasisValue, leaveDivisor: number | null, allowanceDb: Db = prisma): Promise<Suggestions> {
   const emp = await prisma.employee.findUniqueOrThrow({ where: { id: employeeId } });
   const month = { start: monthRange(lastWorkDate.slice(0, 7)).from, end: monthRange(lastWorkDate.slice(0, 7)).to };
   const join = dateToIso(emp.joinDate);
@@ -124,7 +125,9 @@ async function computeSuggestions(employeeId: string, lastWorkDate: string, basi
   }
 
   // 3) Uang harian dinas yang belum diterbitkan bukti penerimaannya.
-  const allowances = await prisma.assignmentAssignee.findMany({
+  // Dibaca lewat `allowanceDb`: pada pembuatan/hitung ulang ini transaksi yang SUDAH memegang kunci surat tugas (lihat allowance-lock.ts), sehingga bukti penerimaan
+  // atau pembatalan surat yang baru commit pasti terlihat dan tidak ada usulan basi.
+  const allowances = await allowanceDb.assignmentAssignee.findMany({
     where: { employeeId, letter: { status: "ISSUED" }, receipts: { none: { status: "ACTIVE" } } },
     include: { letter: { select: { number: true, destination: true } } }, orderBy: { createdAt: "asc" },
   });
@@ -278,24 +281,30 @@ export async function auditSettlementDuplicates(actor: Actor): Promise<Duplicate
 
 export interface AllowanceOverlapRow {
   settlementId: string; employeeName: string; employeeNo: string; settlementStatus: SettlementStatusValue; lastWorkDate: string;
-  lineName: string; lineAmount: number; letterNumber: string; receiptNumber: string; receiptTotal: number;
+  lineName: string; lineAmount: number; letterNumber: string;
+  /** ACTIVE_RECEIPT = uang harian yang sama juga punya Bukti Penerimaan aktif (tercatat dua kali); LETTER_CANCELLED = surat tugasnya sudah dibatalkan padahal barisnya masih ada pada penyelesaian yang berlaku. */
+  problem: "ACTIVE_RECEIPT" | "LETTER_CANCELLED";
+  receiptNumber: string | null; receiptTotal: number | null;
 }
 /**
- * AUDIT baca-saja: uang harian yang SEKARANG tercatat dua kali — ada pada penyelesaian akhir yang belum dibatalkan DAN sudah punya Bukti Penerimaan aktif.
- * Hanya mencakup baris yang tertaut ke penerima surat tugas (data lama ditautkan oleh migrasi bila kecocokannya tunggal). Tidak mengubah apa pun; koreksi lewat
- * pembatalan bukti (Super Admin) atau pengembalian/pembatalan penyelesaian akhir.
+ * AUDIT baca-saja: uang harian pada penyelesaian akhir yang belum dibatalkan yang bermasalah — (1) SUDAH punya Bukti Penerimaan aktif (tercatat dua kali), atau
+ * (2) surat tugasnya sudah DIBATALKAN. Keduanya tidak seharusnya terjadi lagi (kunci per surat tugas + penjaga database), tetapi data lama atau kejadian sebelum perbaikan
+ * perlu dikenali. Hanya mencakup baris yang tertaut ke penerima surat tugas (data lama ditautkan oleh migrasi bila kecocokannya tunggal). Tidak mengubah apa pun; koreksi
+ * lewat pembatalan bukti (Super Admin) atau pengembalian/pembatalan penyelesaian akhir.
  */
 export async function auditAllowanceOverlaps(actor: Actor): Promise<AllowanceOverlapRow[]> {
   assertCan(actor, "payroll:approve");
-  const rows = await prisma.finalSettlementLine.findMany({
-    where: { assigneeId: { not: null }, settlement: { status: { not: "CANCELLED" } }, assignee: { receipts: { some: { status: "ACTIVE" } } } },
-    include: { settlement: { select: { id: true, status: true, lastWorkDate: true, employee: { select: { fullName: true, employeeNo: true } } } }, assignee: { select: { letter: { select: { number: true } }, receipts: { where: { status: "ACTIVE" }, select: { number: true, total: true }, take: 1 } } } },
-    orderBy: { createdAt: "desc" }, take: 500,
-  });
-  return rows.flatMap((l) => {
-    const rc = l.assignee?.receipts[0];
-    return rc ? [{ settlementId: l.settlement.id, employeeName: l.settlement.employee.fullName, employeeNo: l.settlement.employee.employeeNo, settlementStatus: l.settlement.status, lastWorkDate: dateToIso(l.settlement.lastWorkDate), lineName: l.name, lineAmount: toSafeNumber(l.amount), letterNumber: l.assignee!.letter.number, receiptNumber: rc.number, receiptTotal: toSafeNumber(rc.total) }] : [];
-  });
+  const include = { settlement: { select: { id: true, status: true, lastWorkDate: true, employee: { select: { fullName: true, employeeNo: true } } } }, assignee: { select: { letter: { select: { number: true, status: true } }, receipts: { where: { status: "ACTIVE" as const }, select: { number: true, total: true }, take: 1 } } } };
+  const [dup, cancelled] = await Promise.all([
+    prisma.finalSettlementLine.findMany({ where: { assigneeId: { not: null }, settlement: { status: { not: "CANCELLED" } }, assignee: { receipts: { some: { status: "ACTIVE" } } } }, include, orderBy: { createdAt: "desc" }, take: 500 }),
+    prisma.finalSettlementLine.findMany({ where: { assigneeId: { not: null }, settlement: { status: { not: "CANCELLED" } }, assignee: { letter: { status: { not: "ISSUED" } } } }, include, orderBy: { createdAt: "desc" }, take: 500 }),
+  ]);
+  type L = (typeof dup)[number];
+  const base = (l: L) => ({ settlementId: l.settlement.id, employeeName: l.settlement.employee.fullName, employeeNo: l.settlement.employee.employeeNo, settlementStatus: l.settlement.status, lastWorkDate: dateToIso(l.settlement.lastWorkDate), lineName: l.name, lineAmount: toSafeNumber(l.amount), letterNumber: l.assignee!.letter.number });
+  const out: AllowanceOverlapRow[] = [];
+  for (const l of dup) { const rc = l.assignee?.receipts[0]; if (rc) out.push({ ...base(l), problem: "ACTIVE_RECEIPT", receiptNumber: rc.number, receiptTotal: toSafeNumber(rc.total) }); }
+  for (const l of cancelled) if (l.assignee) out.push({ ...base(l), problem: "LETTER_CANCELLED", receiptNumber: null, receiptTotal: null });
+  return out;
 }
 
 // ─────────────────────────── Tulis ───────────────────────────
@@ -320,6 +329,18 @@ async function replaceSystemLines(tx: Tx, id: string, lines: DraftLine[]): Promi
   await refreshTotals(tx, id);
 }
 
+/**
+ * Usulan sistem DI DALAM kunci: kunci semua surat tugas karyawan ini (terurut), baru hitung usulan (uang harian dibaca lewat transaksi ini, jadi bukti penerimaan /
+ * pembatalan yang baru commit terlihat), lalu pastikan setiap surat yang usulannya masuk sudah terkunci (mis. surat baru yang terbit di antara dua langkah itu).
+ * Harus dipanggil di awal transaksi tulis (sesudah kunci baris penyelesaian bila ada) — urutan kunci seragam, tidak ada deadlock.
+ */
+async function suggestionsUnderLock(tx: Tx, employeeId: string, lastWorkDate: string, basis: SettlementBasisValue, leaveDivisor: number | null): Promise<Suggestions> {
+  await lockAllowanceLetters(tx, await lettersOfEmployee(tx, employeeId));
+  const sug = await computeSuggestions(employeeId, lastWorkDate, basis, leaveDivisor, tx);
+  await lockAllowanceLetters(tx, await lettersOfAssignees(tx, sug.lines.flatMap((l) => (l.assigneeId ? [l.assigneeId] : []))));
+  return sug;
+}
+
 function assertDraft(r: { status: string }): void {
   if (r.status !== "DRAFT") throw Errors.conflict("Penyelesaian akhir hanya dapat diubah saat berstatus Draf. Minta pimpinan mengembalikannya ke Draf bila perlu.");
 }
@@ -334,9 +355,10 @@ export async function createSettlement(actor: Actor, raw: unknown): Promise<Sett
   if (diffDays(last, today()) > 90) throw Errors.validation("Tanggal terakhir bekerja terlalu jauh di masa depan (maksimal 90 hari dari hari ini).", { lastWorkDate: "Terlalu jauh di masa depan" });
   const live = await prisma.finalSettlement.findFirst({ where: { employeeId: emp.id, status: { not: "CANCELLED" } }, select: { id: true } });
   if (live) throw Errors.conflict("Karyawan ini sudah punya penyelesaian akhir yang berlaku. Buka atau batalkan yang lama terlebih dulu.", { settlementId: live.id });
-  const sug = await computeSuggestions(emp.id, last, input.basis, input.leaveDivisor ?? null);
+  let sug!: Suggestions;
   try {
     const id = await transaction(async (tx) => {
+      sug = await suggestionsUnderLock(tx, emp.id, last, input.basis, input.leaveDivisor ?? null);
       const s = await tx.finalSettlement.create({ data: { employeeId: emp.id, lastWorkDate: isoToDate(last), basis: input.basis, leaveDivisor: input.leaveDivisor ?? null, note: input.note, preparedById: actor.userId } });
       await replaceSystemLines(tx, s.id, sug.lines);
       await writeAudit(tx, actor, { action: "settlement.create", entityType: "FinalSettlement", entityId: s.id, summary: `Penyelesaian akhir ${emp.fullName} dibuat (terakhir bekerja ${last}, ${sug.lines.length} usulan sistem)`, after: { lastWorkDate: last, basis: input.basis, leaveDivisor: input.leaveDivisor ?? null } });
@@ -362,10 +384,11 @@ export async function updateSettlement(actor: Actor, id: string, raw: unknown): 
   if (diffDays(last, today()) > 90) throw Errors.validation("Tanggal terakhir bekerja terlalu jauh di masa depan (maksimal 90 hari dari hari ini).", { lastWorkDate: "Terlalu jauh di masa depan" });
   const basis = input.basis ?? cur.basis;
   const leaveDivisor = input.leaveDivisor === undefined ? cur.leaveDivisor : input.leaveDivisor;
-  const sug = await computeSuggestions(cur.employeeId, last, basis, leaveDivisor);
+  let sug!: Suggestions;
   await transaction(async (tx) => {
     await lockRow(tx, id);
     assertDraft(await load(tx, id));
+    sug = await suggestionsUnderLock(tx, cur.employeeId, last, basis, leaveDivisor);
     await tx.finalSettlement.update({ where: { id }, data: { lastWorkDate: isoToDate(last), basis, leaveDivisor, ...(input.note !== undefined ? { note: input.note } : {}) } });
     await replaceSystemLines(tx, id, sug.lines);
     await writeAudit(tx, actor, { action: "settlement.update", entityType: "FinalSettlement", entityId: id, summary: `Penyelesaian akhir ${cur.employee.fullName} diubah; usulan sistem dihitung ulang`, before: { lastWorkDate: dateToIso(cur.lastWorkDate), basis: cur.basis, leaveDivisor: cur.leaveDivisor }, after: { lastWorkDate: last, basis, leaveDivisor } });
@@ -379,10 +402,11 @@ export async function recomputeSettlement(actor: Actor, id: string): Promise<Set
   assertCan(actor, "payroll:prepare");
   const cur = await load(prisma, id);
   assertDraft(cur);
-  const sug = await computeSuggestions(cur.employeeId, dateToIso(cur.lastWorkDate), cur.basis, cur.leaveDivisor);
+  let sug!: Suggestions;
   await transaction(async (tx) => {
     await lockRow(tx, id);
     assertDraft(await load(tx, id));
+    sug = await suggestionsUnderLock(tx, cur.employeeId, dateToIso(cur.lastWorkDate), cur.basis, cur.leaveDivisor);
     await replaceSystemLines(tx, id, sug.lines);
     await writeAudit(tx, actor, { action: "settlement.recompute", entityType: "FinalSettlement", entityId: id, summary: `Usulan sistem penyelesaian akhir ${cur.employee.fullName} dihitung ulang` });
   });
@@ -455,6 +479,7 @@ export async function submitSettlement(actor: Actor, id: string): Promise<Settle
   assertCan(actor, "payroll:prepare");
   await transaction(async (tx) => {
     await lockRow(tx, id);
+    await lockAllowanceLetters(tx, await lettersOfSettlement(tx, id));   // kunci bersama uang harian: bukti penerimaan / pembatalan surat yang bersamaan menunggu atau sudah terlihat
     const cur = await load(tx, id);
     assertDraft(cur);
     if (cur.lines.length === 0) throw Errors.validation("Belum ada baris. Tambahkan minimal satu baris (atau hitung usulan sistem) sebelum mengajukan.");
@@ -488,6 +513,7 @@ export async function approveSettlement(actor: Actor, id: string, raw: unknown =
   const { note } = parseInput(noteOptional, raw ?? {});
   await transaction(async (tx) => {
     await lockRow(tx, id);
+    await lockAllowanceLetters(tx, await lettersOfSettlement(tx, id));   // kunci bersama uang harian: bukti penerimaan / pembatalan surat yang bersamaan menunggu atau sudah terlihat
     const cur = await load(tx, id);
     if (cur.employeeId === actor.employeeId) throw Errors.forbidden("Anda tidak dapat menyetujui penyelesaian akhir milik Anda sendiri.");
     if (cur.status === "PENDING_APPROVAL") await assertAllowancesSettleable(tx, id);
@@ -507,6 +533,7 @@ export async function markSettlementPaid(actor: Actor, id: string, raw: unknown 
   if (on > today()) throw Errors.validation("Tanggal pembayaran tidak boleh di masa depan.", { paidOn: "Tidak boleh di masa depan" });
   await transaction(async (tx) => {
     await lockRow(tx, id);
+    await lockAllowanceLetters(tx, await lettersOfSettlement(tx, id));   // kunci bersama uang harian: bukti penerimaan / pembatalan surat yang bersamaan menunggu atau sudah terlihat
     const cur = await load(tx, id);
     if (cur.status === "APPROVED") await assertAllowancesSettleable(tx, id);
     const r = await tx.finalSettlement.updateMany({ where: { id, status: "APPROVED" }, data: { status: "PAID", paidAt: new Date(), paidById: actor.userId, paidOn: isoToDate(on), payReference: input.reference } });

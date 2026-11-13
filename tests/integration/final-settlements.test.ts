@@ -513,8 +513,21 @@ describe("uang harian: penyelesaian akhir vs Bukti Penerimaan (tidak dibayar dua
     expect(await auditAllowanceOverlaps(fx.superAdmin)).toEqual([]);
     await rawReceipt(a);
     const rows = await auditAllowanceOverlaps(fx.superAdmin);
-    expect(rows).toEqual([expect.objectContaining({ settlementId: s.id, settlementStatus: "DRAFT", employeeName: "Ayu Lestari", lineAmount: 750_000, receiptTotal: 750_000, letterNumber: "001/ST/XI/2026", receiptNumber: "90/BPUH/XI/2026" })]);
+    expect(rows).toEqual([expect.objectContaining({ settlementId: s.id, settlementStatus: "DRAFT", employeeName: "Ayu Lestari", lineAmount: 750_000, receiptTotal: 750_000, letterNumber: "001/ST/XI/2026", receiptNumber: "90/BPUH/XI/2026", problem: "ACTIVE_RECEIPT" })]);
     expect((await fail(auditAllowanceOverlaps(fx.hr)))?.code).toBe("FORBIDDEN");
+    await cancelSettlement(fx.hr, s.id, { reason: "Dibuat ulang" });
+    expect(await auditAllowanceOverlaps(fx.superAdmin)).toEqual([]);
+  });
+
+  it("audit juga mendaftar baris uang harian pada penyelesaian yang berlaku untuk surat tugas yang sudah DIBATALKAN (LETTER_CANCELLED); hilang bila penyelesaian dibatalkan", async () => {
+    await salary();
+    const a = await mkAssignee();
+    const s = await mk();                                                       // penyelesaian Draf memuat uang harian
+    await cancelAssignment(fx.hr, a.letterId, { reason: "Perjalanan dibatalkan klien" });   // masih Draf → pembatalan surat diizinkan; barisnya tertinggal
+    const rows = await auditAllowanceOverlaps(fx.superAdmin);
+    expect(rows).toEqual([expect.objectContaining({ settlementId: s.id, problem: "LETTER_CANCELLED", lineAmount: 750_000, letterNumber: "001/ST/XI/2026", receiptNumber: null, receiptTotal: null })]);
+    // dan penyelesaian itu tidak dapat diajukan selama barisnya masih ada (pesan layanan menyebut surat dibatalkan)
+    expect((await fail(submitSettlement(fx.hr, s.id)))?.message).toMatch(/dibatalkan/);
     await cancelSettlement(fx.hr, s.id, { reason: "Dibuat ulang" });
     expect(await auditAllowanceOverlaps(fx.superAdmin)).toEqual([]);
   });
