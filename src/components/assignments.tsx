@@ -65,11 +65,16 @@ export function AssignmentList({ items, today, canManage, canRevoke, selfEmploye
                 <p className="mt-1 text-base font-medium">{l.purpose}</p>
                 <p className="text-sm text-muted">{l.destination} · {formatDateRange(l.startDate, l.endDate)} ({l.tripDays} hari) · diterbitkan {formatDateLong(l.issueDate)} oleh {l.issuedBy}</p>
                 {l.details && <p className="mt-1 text-sm text-muted">{l.details}</p>}
-                {l.status === "CANCELLED" && <p className="mt-1 text-sm text-brand-700">Dibatalkan: {l.cancelReason}</p>}
+                {l.status === "CANCELLED" && (
+                  <div className="mt-1 space-y-0.5" data-testid="assignment-cancelled-notice">
+                    <p className="text-sm text-brand-700">Dibatalkan: {l.cancelReason}</p>
+                    <p className="text-xs text-muted">Unduhan PDF untuk surat yang dibatalkan adalah <strong>salinan status bertanda DIBATALKAN</strong>; PDF asli tetap tersimpan sebagai arsip. PDF yang sudah terlanjur dikirim tidak berubah — beritahukan pembatalan kepada penerima sesuai prosedur.</p>
+                  </div>
+                )}
               </div>
               <div className="flex flex-wrap gap-2">
                 <DiscussButton type="ASSIGNMENT_LETTER" id={l.id} />
-                <a href={`/api/assignments/${l.id}/pdf`} className={btn}><Download className="size-4" />Surat Tugas (PDF)</a>
+                <a href={`/api/assignments/${l.id}/pdf`} className={btn}><Download className="size-4" />{l.status === "CANCELLED" ? "Salinan status (DIBATALKAN)" : "Surat Tugas (PDF)"}</a>
                 {l.letterDocumentId ? <Link href={`/persuratan/${l.letterDocumentId}`} className={btn}><FileText className="size-4" />Dokumen surat</Link> : canManage && l.status === "ISSUED" && <Button size="sm" variant="danger" onClick={() => setDlg({ kind: "CANCEL", letter: l })}><Ban className="size-3.5" />Batalkan</Button>}
               </div>
             </header>
@@ -130,6 +135,7 @@ export function AssignmentList({ items, today, canManage, canRevoke, selfEmploye
             </>
           )}
           {dlg && dlg.kind !== "ISSUE" && <TextAreaField label="Alasan pembatalan (wajib)" rows={3} value={note} onChange={(e) => setNote(e.target.value)} error={fe.reason} />}
+          {dlg?.kind === "CANCEL" && <Notice tone="warn">Unduhan baru diberi tanda <strong>DIBATALKAN</strong>, tetapi PDF yang sudah terlanjur dikirim kepada penerima <strong>tidak ikut berubah</strong>. Beritahukan pembatalan kepada penerima sesuai prosedur Trilogika; penerima tugas juga mendapat pemberitahuan di aplikasi.</Notice>}
           {dlg?.kind === "VOID" && <Notice tone="warn">Bukti yang dibatalkan tetap tersimpan (berwatermark “DIBATALKAN”) dan dapat diterbitkan ulang.</Notice>}
         </div>
       </Dialog>
@@ -151,8 +157,9 @@ export function MyAssignments({ items }: { items: MyAssignmentDto[] }) {
               <p className="text-sm text-muted">{a.destination} · {formatDateRange(a.startDate, a.endDate)} ({a.tripDays} hari){a.colleagues.length ? ` · bersama ${a.colleagues.join(", ")}` : ""}</p>
               {a.details && <p className="mt-1 text-sm text-muted">{a.details}</p>}
             </div>
-            <div className="flex flex-wrap gap-2"><DiscussButton type="ASSIGNMENT_LETTER" id={a.id} /><a href={`/api/assignments/${a.id}/pdf`} className={btn}><FilePlus2 className="size-4" />Surat Tugas (PDF)</a></div>
+            <div className="flex flex-wrap gap-2"><DiscussButton type="ASSIGNMENT_LETTER" id={a.id} /><a href={`/api/assignments/${a.id}/pdf`} className={btn}><FilePlus2 className="size-4" />{a.status === "CANCELLED" ? "Salinan status (DIBATALKAN)" : "Surat Tugas (PDF)"}</a></div>
           </div>
+          {a.status === "CANCELLED" && <p className="border-t border-line bg-canvas/50 px-5 py-2 text-xs text-muted" data-testid="my-assignment-cancelled-notice">Surat Tugas ini <strong>dibatalkan</strong>. PDF yang diunduh adalah salinan status bertanda DIBATALKAN. Hentikan penggunaan salinan PDF yang sudah Anda terima sebelumnya.</p>}
           {a.status === "ISSUED" && (
             <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line bg-canvas/50 px-5 py-3 text-sm">
               <p>Uang harian Anda: <strong>{a.mine.days} hari × {formatRupiah(a.mine.dailyRate)} = {formatRupiah(a.mine.total)}</strong></p>

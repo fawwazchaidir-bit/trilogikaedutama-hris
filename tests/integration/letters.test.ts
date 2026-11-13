@@ -464,3 +464,81 @@ describe("divisi penandatangan & ambil alih Direktur", () => {
     expect((await verifyByToken(row.verifyToken))?.signerName).toBe("Direktur Uji");
   });
 });
+
+describe("keamanan dokumen terbit: verifikasi publik tanpa kebocoran & PDF dibatalkan", () => {
+  const SECRET_NOTE = "Dibatalkan karena evaluasi kinerja Budi Santoso salah kirim";
+  const pdfMeta = async (bytes: Uint8Array | Buffer) => { const d = await PDFDocument.load(bytes); return { subject: d.getSubject() ?? "", keywords: d.getKeywords() ?? "", pages: d.getPageCount() }; };
+
+  async function issuedWithAttachments(t: { series: "EKS" | "INT"; code: number }, titles: [string, string], names: [string, string]) {
+    const d = await draftReady(staf, manajer, t);
+    await updateLetter(staf, d.id, { body: doc(p("Isi surat dengan lampiran.")) });
+    await uploadAttachment(staf, d.id, { title: titles[0], mode: "MERGED", name: names[0], bytes: await pdfOf(2) });
+    await uploadAttachment(staf, d.id, { title: titles[1], mode: "SEPARATE", name: names[1], bytes: await pdfOf(1) });
+    await submitLetter(staf, d.id); await approveLetter(manajer, d.id);
+    return prisma.letterDocument.findUniqueOrThrow({ where: { id: d.id } });
+  }
+
+  it("surat RAHASIA dibatalkan: halaman publik tidak memuat alasan pembatalan, nama file, maupun judul lampiran; hash & status tetap; pengguna berwenang tetap melihat rinciannya", async () => {
+    const row = await issuedWithAttachments({ series: "INT", code: 9 }, ["Daftar Penilaian Rahasia Budi", "Surat Peringatan Pertama"], ["penilaian-rahasia-budi.pdf", "sp1-budi-santoso.pdf"]);
+    await cancelLetter(direktur, row.id, { note: SECRET_NOTE });
+    const v = await verifyByToken(row.verifyToken);
+    const json = JSON.stringify(v);
+    expect(v).toMatchObject({ state: "CANCELLED", subject: null });
+    for (const leak of [SECRET_NOTE, "Budi", "penilaian-rahasia", "sp1-budi", "Daftar Penilaian", "Surat Peringatan", "fileName", "cancelledNote"]) expect(json, leak).not.toContain(leak);
+    expect(v!.attachments.map((a) => a.title)).toEqual(["Lampiran 1", "Lampiran 2"]);          // judul disamarkan; hash tetap untuk pencocokan
+    expect(v!.attachments.every((a) => /^[0-9a-f]{64}$/.test(a.sha256))).toBe(true);
+    // pengguna berwenang (pembuat) tetap melihat semuanya
+    const d = await getLetter(staf, row.id);
+    expect(d.cancelNote).toBe(SECRET_NOTE);
+    expect(d.attachments.map((a) => [a.title, a.fileName])).toEqual([["Daftar Penilaian Rahasia Budi", "penilaian-rahasia-budi.pdf"], ["Surat Peringatan Pertama", "sp1-budi-santoso.pdf"]]);
+  });
+
+  it("surat BIASA dibatalkan: alasan pembatalan & nama file juga tidak tampil di halaman publik (judul lampiran boleh, bukan nama file)", async () => {
+    const row = await issuedWithAttachments({ series: "EKS", code: 3 }, ["Proposal Lengkap", "Profil Lembaga"], ["proposal-pt-klien-rahasia.pdf", "profil-final.pdf"]);
+    await cancelLetter(direktur, row.id, { note: SECRET_NOTE });
+    const v = await verifyByToken(row.verifyToken);
+    const json = JSON.stringify(v);
+    expect(v!.state).toBe("CANCELLED");
+    for (const leak of [SECRET_NOTE, "proposal-pt-klien", "profil-final", "fileName", "cancelledNote"]) expect(json, leak).not.toContain(leak);
+    expect(v!.attachments.map((a) => a.title)).toEqual(["Proposal Lengkap", "Profil Lembaga"]);
+  });
+
+  it("surat terbit (belum batal) tetap memuat hash lampiran; tidak ada nama file di data publik", async () => {
+    const row = await issuedWithAttachments({ series: "EKS", code: 3 }, ["Proposal Lengkap", "Profil Lembaga"], ["a-rahasia.pdf", "b-rahasia.pdf"]);
+    const v = await verifyByToken(row.verifyToken);
+    expect(v!.state).toBe("VALID");
+    expect(JSON.stringify(v)).not.toContain("rahasia.pdf");
+    expect(v!.attachments).toHaveLength(2);
+  });
+
+  it("PDF surat dibatalkan: unduhan bawaan = SALINAN STATUS bertanda DIBATALKAN; arsip asli tidak berubah dan hanya diberikan bila diminta eksplisit (tercatat); yang tak berhak 404", async () => {
+    const d = await draftReady(staf, manajer);
+    await updateLetter(staf, d.id, { body: doc(p("Isi final surat.")) }); await submitLetter(staf, d.id); await approveLetter(manajer, d.id);
+    const row = await prisma.letterDocument.findUniqueOrThrow({ where: { id: d.id } });
+    const stored = async () => Buffer.from((await prisma.storedFile.findUniqueOrThrow({ where: { id: row.pdfFileId! } })).data);
+    // sebelum dibatalkan: berkas asli apa adanya
+    const live = await letterPdf(staf, d.id);
+    expect(live).toMatchObject({ cancelled: false, original: false });
+    expect(sha(live.bytes)).toBe(row.pdfSha256);
+    expect((await pdfMeta(live.bytes)).subject).not.toContain("DIBATALKAN");
+
+    await cancelLetter(direktur, d.id, { note: "Salah penerima" });
+    const copy = await letterPdf(staf, d.id);
+    expect(copy).toMatchObject({ cancelled: true, original: false });
+    expect(copy.name).toMatch(/-DIBATALKAN\.pdf$/);
+    expect(sha(copy.bytes)).not.toBe(row.pdfSha256);
+    expect(await pdfMeta(copy.bytes)).toMatchObject({ pages: (await pdfMeta(live.bytes)).pages });
+    expect((await pdfMeta(copy.bytes)).subject).toContain("DIBATALKAN");
+    expect(await prisma.auditLog.count({ where: { action: "letter.pdf_original_cancelled", entityId: d.id } })).toBe(0);
+
+    const orig = await letterPdf(staf, d.id, { original: true });
+    expect(orig).toMatchObject({ cancelled: true, original: true });
+    expect(orig.name).toMatch(/-ASLI-ARSIP\.pdf$/);
+    expect(sha(orig.bytes)).toBe(row.pdfSha256);                                         // arsip asli utuh
+    expect(await prisma.auditLog.count({ where: { action: "letter.pdf_original_cancelled", entityId: d.id } })).toBe(1);
+    expect(sha(await stored())).toBe(row.pdfSha256);                                     // tidak ada yang menimpa berkas tersimpan
+
+    expect(await fail(letterPdf(staf2, d.id))).toMatchObject(NOT_FOUND);
+    expect(await fail(letterPdf(staf2, d.id, { original: true }))).toMatchObject(NOT_FOUND);
+  });
+});

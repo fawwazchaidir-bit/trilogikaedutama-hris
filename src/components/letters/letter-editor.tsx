@@ -149,7 +149,14 @@ export function LetterEditor({ initial, signers, people, employees = [], me }: {
 
       {d.status === "RETURNED" && d.returnNote && <Notice tone="warn"><strong>Dikembalikan:</strong> {d.returnNote}</Notice>}
       {d.status === "REJECTED" && d.rejectNote && <Notice tone="danger"><strong>Ditolak:</strong> {d.rejectNote}</Notice>}
-      {d.status === "CANCELLED" && d.cancelNote && <Notice tone="danger"><strong>Dibatalkan:</strong> {d.cancelNote}</Notice>}
+      {d.status === "CANCELLED" && (
+        <Notice tone="danger">
+          <div className="space-y-1" data-testid="cancelled-notice">
+            <p>{d.cancelNote ? <><strong>Dibatalkan:</strong> {d.cancelNote}</> : <strong>Surat ini DIBATALKAN.</strong>}</p>
+            <p className="text-xs">PDF yang tampil dan diunduh di sini adalah <strong>salinan status bertanda DIBATALKAN</strong>. PDF asli tetap tersimpan sebagai arsip{d.hasPdf ? <> — <a className="font-medium underline" href={`/api/letters/${d.id}/pdf?asli=1`} download>unduh arsip asli</a> (pengambilannya tercatat)</> : null}. PDF yang sudah terlanjur dikirim <strong>tidak ikut berubah</strong>: beritahukan pembatalan ini kepada penerima sesuai prosedur Trilogika.</p>
+          </div>
+        </Notice>
+      )}
       {d.can.takeOver && <Notice tone="info">Surat ini sudah menunggu penandatangan lebih dari batas eskalasi. Sebagai Direktur Anda dapat mengambil alih.</Notice>}
       {Object.keys(errors).length > 0 && <Notice tone="danger">{Object.values(errors).join(" · ")}</Notice>}
 
@@ -259,7 +266,7 @@ export function LetterEditor({ initial, signers, people, employees = [], me }: {
 
       <Dialog open={dialog !== null} onClose={() => setDialog(null)} size="sm"
         title={dialog === "return" ? "Kembalikan untuk revisi" : dialog === "reject" ? "Tolak surat" : "Batalkan surat terbit"}
-        description={dialog === "cancel" ? "Nomor tetap tercatat dan halaman verifikasi akan menampilkan status Dibatalkan." : dialog === "reject" ? "Penolakan bersifat final; pembuat dapat membuat surat baru." : "Pembuat akan menyunting dan mengajukan ulang."}
+        description={dialog === "cancel" ? "Nomor tetap tercatat dan halaman verifikasi akan menampilkan status Dibatalkan (alasan tidak ditampilkan di halaman publik). Unduhan baru diberi tanda DIBATALKAN, tetapi PDF yang sudah terlanjur dikirim tidak berubah — beritahukan pembatalan kepada penerima sesuai prosedur Trilogika." : dialog === "reject" ? "Penolakan bersifat final; pembuat dapat membuat surat baru." : "Pembuat akan menyunting dan mengajukan ulang."}
         footer={<><Button onClick={() => setDialog(null)}>Batal</Button><Button variant="primary" disabled={note.trim().length < 3} loading={busy === dialog} onClick={() => dialog && void act(dialog, true)}>Kirim</Button></>}>
         <TextAreaField label="Catatan / alasan" rows={4} value={note} onChange={(e) => setNote(e.target.value)} required />
       </Dialog>

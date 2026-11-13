@@ -11,7 +11,9 @@ import { addDays, todayIso } from "@/lib/time";
 import { resetDb, makeUser } from "../helpers/db";
 import { createLetter, updateLetter, submitLetter, approveLetter, cancelLetter, getLetter } from "@/server/services/letters/documents";
 import { listTypes } from "@/server/services/letters/types";
-import { cancelAssignment, getAssignmentForPdf, issueReceipt, listAssignments, listMyAssignments, voidReceipt } from "@/server/services/assignments";
+import { assignmentPdfFile, cancelAssignment, getAssignmentForPdf, issueReceipt, listAssignments, listMyAssignments, voidReceipt } from "@/server/services/assignments";
+import { PDFDocument } from "pdf-lib";
+import { createHash } from "node:crypto";
 
 let direktur: Actor, hr: Actor, manajer: Actor, staf: Actor;
 let stafEmp = "", hrEmp = "";
@@ -110,5 +112,40 @@ describe("Surat Tugas via Persuratan (INT-002)", () => {
     await prisma.user.update({ where: { id: hr.userId }, data: { role: "HR_ADMIN" } });
     expect((await approveLetter(manajer, d.id)).number).toMatch(/^001\//);
     expect(await prisma.assignmentLetter.count()).toBe(1);
+  });
+});
+
+describe("PDF Surat Tugas dibatalkan: salinan status bertanda DIBATALKAN", () => {
+  const sha = (b: Uint8Array) => createHash("sha256").update(b).digest("hex");
+  it("sebelum dibatalkan = PDF resmi apa adanya; sesudah dibatalkan (lewat Persuratan) unduhan penerima & HR = salinan bertanda, arsip asli utuh, penerima diberi tahu untuk menghentikan pemakaian salinan lama", async () => {
+    const out = await issued();
+    const a = await prisma.assignmentLetter.findUniqueOrThrow({ where: { letterDocumentId: out.id } });
+    const row = await prisma.letterDocument.findUniqueOrThrow({ where: { id: out.id } });
+    const live = await assignmentPdfFile(staf, a.id);
+    expect(live.cancelled).toBe(false);
+    expect(live.fileName).toBe(`Surat_Tugas_${a.number}`.replace(/[^0-9A-Za-z]+/g, "_") + ".pdf");
+    expect(sha(live.bytes)).toBe(row.pdfSha256);
+
+    await cancelLetter(direktur, out.id, { note: "Penugasan dibatalkan klien" });
+    for (const who of [staf, hr]) {
+      const f = await assignmentPdfFile(who, a.id);
+      expect(f.cancelled).toBe(true);
+      expect(f.fileName).toMatch(/_DIBATALKAN\.pdf$/);
+      expect(sha(f.bytes)).not.toBe(row.pdfSha256);                                   // BUKAN PDF asli tanpa tanda
+      const meta = await PDFDocument.load(f.bytes);
+      expect(meta.getSubject()).toContain("DIBATALKAN");
+      expect(meta.getPageCount()).toBe((await PDFDocument.load(live.bytes)).getPageCount());
+    }
+    // arsip asli tidak berubah
+    const stored = Buffer.from((await prisma.storedFile.findUniqueOrThrow({ where: { id: row.pdfFileId! } })).data);
+    expect(sha(stored)).toBe(row.pdfSha256);
+    // tercatat & hak akses tetap: hanya penerima/pengelola
+    expect((await prisma.auditLog.findMany({ where: { action: "assignment.download", entityId: a.id }, orderBy: { id: "desc" }, take: 1 }))[0]!.summary).toContain("salinan status DIBATALKAN");
+    const other = await makeUser("lain@uji.test", "Staf Lain", "EMPLOYEE", (await emp("S-9", "Staf Lain")).id);
+    expect(await fail(assignmentPdfFile(other, a.id))).toMatchObject({ code: "NOT_FOUND" });
+    // penerima diberi tahu, termasuk agar menghentikan pemakaian salinan PDF yang sudah dimiliki
+    const n = await prisma.notification.findFirstOrThrow({ where: { userId: staf.userId, type: "assignment.cancelled" } });
+    expect(n.body).toContain("Penugasan dibatalkan klien");
+    expect(n.body).toContain("Hentikan penggunaan salinan PDF");
   });
 });

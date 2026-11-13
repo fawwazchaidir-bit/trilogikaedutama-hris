@@ -17,6 +17,8 @@ import { formatRupiah } from "@/lib/money";
 import { isoDate, optionalText, requiredText, rupiah, uuid } from "@/lib/validation/common";
 import type { Paged } from "@/lib/types";
 import { SETTLEMENT_STATUS_LABEL, type SettlementStatusValue } from "@/lib/final-settlement";
+import { stampCancelledCopy } from "@/lib/documents/cancelled-stamp";
+import { renderAssignmentPdf } from "../pdf/render";
 
 export type AssignmentStatus = "ISSUED" | "CANCELLED";
 export type AllowanceMethod = "CASH" | "TRANSFER";
@@ -319,7 +321,8 @@ export async function cancelAssignmentIn(tx: Prisma.TransactionClient, actor: Ac
   await writeAudit(tx, actor, { action: "assignment.cancel", entityType: "AssignmentLetter", entityId: id, summary: `Surat Tugas ${letter.number} dibatalkan`, before: { status: "ISSUED" }, after: { status: "CANCELLED" }, reason });
   const owners = await tx.employee.findMany({ where: { id: { in: letter.assignees.map((a) => a.employeeId) } }, select: { userId: true } });
   await notifyUsers(tx, owners.map((o) => o.userId).filter((x): x is string => !!x), {
-    type: "assignment.cancelled", title: `Surat Tugas ${letter.number} dibatalkan`, body: reason, href: "/surat-tugas-saya",
+    type: "assignment.cancelled", title: `Surat Tugas ${letter.number} dibatalkan`,
+    body: `${reason} — Hentikan penggunaan salinan PDF Surat Tugas ini yang sudah Anda terima; unduhan baru bertanda DIBATALKAN.`, href: "/surat-tugas-saya",
   });
   return (await toDtos([await tx.assignmentLetter.findUniqueOrThrow({ where: { id }, include })]))[0]!;
 }
@@ -401,9 +404,28 @@ export async function getAssignmentForPdf(actor: Actor, id: string): Promise<{ n
   const row = await prisma.assignmentLetter.findUnique({ where: { id }, include: { assignees: { select: { employeeId: true } } } });
   const admin = actorCan(actor, "assignment:view_all");
   if (!row || (!admin && !(actor.employeeId && row.assignees.some((a) => a.employeeId === actor.employeeId)))) throw Errors.notFound("Surat tugas");
-  await writeAudit(prisma, actor, { action: "assignment.download", entityType: "AssignmentLetter", entityId: id, summary: `Surat Tugas ${row.number} diunduh` });
+  await writeAudit(prisma, actor, { action: "assignment.download", entityType: "AssignmentLetter", entityId: id, summary: `Surat Tugas ${row.number} diunduh${row.status === "CANCELLED" ? " (salinan status DIBATALKAN)" : ""}` });
   const engine = row.letterDocumentId ? await prisma.letterDocument.findUnique({ where: { id: row.letterDocumentId }, select: { pdfFileId: true } }) : null;
   return { number: row.number, status: row.status, snapshot: row.snapshot as unknown as AssignmentSnapshot, engineFileId: engine?.pdfFileId ?? null };
+}
+
+export interface AssignmentPdfFile { bytes: Buffer; fileName: string; cancelled: boolean }
+
+/**
+ * PDF Surat Tugas untuk diunduh. Surat yang DIBATALKAN tidak pernah mengeluarkan PDF asli tanpa tanda: unduhan adalah SALINAN STATUS bertanda DIBATALKAN (berkas asli
+ * dari Persuratan tidak diubah dan tetap tersimpan sebagai arsip; surat lama dirender ulang dengan watermark). PDF yang sudah terlanjur dikirim tidak berubah —
+ * pembatalan tetap perlu diberitahukan kepada penerima sesuai prosedur.
+ */
+export async function assignmentPdfFile(actor: Actor, id: string): Promise<AssignmentPdfFile> {
+  const a = await getAssignmentForPdf(actor, id);
+  const cancelled = a.status === "CANCELLED";
+  // Diterbitkan lewat Persuratan: PDF resmi = PDF dokumen (nomor master, QR, tanda tangan & cap); surat lama dirender dari snapshot-nya.
+  const engine = a.engineFileId ? await prisma.storedFile.findUnique({ where: { id: a.engineFileId }, select: { data: true } }) : null;
+  let bytes: Buffer;
+  if (engine) bytes = cancelled ? await stampCancelledCopy(Buffer.from(engine.data), { number: a.number }) : Buffer.from(engine.data);
+  else bytes = await renderAssignmentPdf(a.snapshot, cancelled);
+  const fileName = `${`Surat_Tugas_${a.number}`.replace(/[^0-9A-Za-z]+/g, "_")}${cancelled ? "_DIBATALKAN" : ""}.pdf`;
+  return { bytes, fileName, cancelled };
 }
 
 // ─────────────────────────── Bukti Penerimaan Uang Harian ───────────────────────────

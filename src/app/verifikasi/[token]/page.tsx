@@ -26,7 +26,7 @@ export default async function VerifyPage({ params }: { params: Promise<{ token: 
             <div className="text-center">
               {v.state === "VALID" ? <CheckCircle2 className="mx-auto size-12 text-emerald-600" aria-hidden /> : <ShieldAlert className="mx-auto size-12 text-amber-600" aria-hidden />}
               <h1 className="mt-3 text-lg font-semibold text-ink">{v.state === "VALID" ? "Dokumen sah dan terdaftar" : "Dokumen telah DIBATALKAN"}</h1>
-              {v.state === "CANCELLED" && <p className="mt-1 text-sm text-amber-800">Dokumen ini pernah diterbitkan namun sudah tidak berlaku.{v.cancelledNote ? ` Alasan: ${v.cancelledNote}` : ""}</p>}
+              {v.state === "CANCELLED" && <p className="mt-1 text-sm text-amber-800">Dokumen ini pernah diterbitkan namun sudah tidak berlaku. Mohon tidak menggunakan salinan yang Anda miliki; alasan pembatalan hanya diberikan kepada pihak berwenang.</p>}
             </div>
             <dl className="mt-5 divide-y divide-line text-sm">
               <Row k="Nomor" v={v.number} mono />
@@ -45,7 +45,7 @@ export default async function VerifyPage({ params }: { params: Promise<{ token: 
                   {v.attachments.map((a, i) => (
                     <li key={i} className="rounded-lg border border-line p-3 text-sm">
                       <p className="font-medium text-ink">{a.title} <span className="ml-1 rounded bg-canvas px-1.5 py-0.5 text-[11px] font-normal text-ink-soft">{a.mode === "MERGED" ? "digabung ke PDF surat" : "berkas terpisah"}</span></p>
-                      <p className="mt-0.5 text-xs text-muted">{a.fileName}{a.pages ? ` · ${a.pages} hlm` : ""}</p>
+                      {a.pages ? <p className="mt-0.5 text-xs text-muted">{a.pages} hlm</p> : null}
                       <p className="mt-1 break-all font-mono text-[11px] text-ink-soft">{a.sha256}</p>
                       {a.mode === "SEPARATE" && <HashCheck expected={a.sha256} label={`Cocokkan berkas lampiran: ${a.title}`} compact />}
                     </li>
@@ -53,7 +53,7 @@ export default async function VerifyPage({ params }: { params: Promise<{ token: 
                 </ul>
               </section>
             )}
-            <p className="mt-4 text-xs text-muted">Halaman ini hanya menampilkan data pengenal. Isi surat tidak ditampilkan; mintalah salinan resmi kepada pihak yang menerbitkan.</p>
+            <p className="mt-4 text-xs text-muted">Halaman ini hanya menampilkan data pengenal. Isi surat, alasan pembatalan, dan nama berkas tidak ditampilkan; mintalah salinan resmi kepada pihak yang menerbitkan.</p>
           </section>
         )}
       </div>

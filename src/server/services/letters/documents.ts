@@ -13,6 +13,7 @@ import { notifyUsers } from "../notifications";
 import { hasPlaceholder, normalizeDoc, validateDoc, type PmDoc } from "@/lib/documents/content";
 import { canSignOwn, canTakeOver, isEditable, isEligibleSigner, LETTER_STATUS_LABEL, type LetterStatus } from "@/lib/documents/policy";
 import { formatDocNumber } from "@/lib/documents/text";
+import { stampCancelledCopy } from "@/lib/documents/cancelled-stamp";
 import { requiredText, uuid } from "@/lib/validation/common";
 import { doc, p } from "@/lib/documents/builders";
 import type { Paged } from "@/lib/types";
@@ -252,19 +253,35 @@ export async function pendingReviewCount(actor: Actor): Promise<number> {
 }
 
 /** PDF pratinjau (draf berwatermark) atau PDF terbit tersimpan. */
-export async function letterPdf(actor: Actor, id: string): Promise<{ bytes: Buffer; name: string }> {
+export interface LetterPdfFile { bytes: Buffer; name: string; /** Surat sudah dibatalkan: berkas ini SALINAN STATUS bertanda DIBATALKAN (kecuali `original`). */ cancelled: boolean; /** Berkas ASLI arsip (hanya diminta eksplisit; tercatat). */ original: boolean }
+
+/**
+ * PDF surat: pratinjau draf (watermark) atau berkas terbit. Surat yang DIBATALKAN secara bawaan diberikan sebagai SALINAN STATUS bertanda DIBATALKAN supaya PDF asli
+ * tanpa tanda tidak beredar lewat unduhan/pratinjau; PDF asli tetap tersimpan sebagai arsip dan hanya diberikan bila diminta eksplisit (`opts.original`) oleh yang berhak
+ * melihat surat — pengambilannya tercatat di audit. PDF yang sudah terlanjur dikirim tidak berubah; pembatalan tetap perlu diberitahukan kepada penerima.
+ */
+export async function letterPdf(actor: Actor, id: string, opts: { original?: boolean } = {}): Promise<LetterPdfFile> {
   const d = await loadVisible(actor, id);
   if (d.status === "ISSUED" || d.status === "CANCELLED") {
     if (d.pdfFileId) {
       const f = await prisma.storedFile.findUnique({ where: { id: d.pdfFileId }, select: { data: true } });
-      if (f) return { bytes: Buffer.from(f.data), name: `${(d.number ?? "surat").replace(/\//g, "-")}.pdf` };
+      if (f) {
+        const base = (d.number ?? "surat").replace(/\//g, "-");
+        const bytes = Buffer.from(f.data);
+        if (d.status === "ISSUED") return { bytes, name: `${base}.pdf`, cancelled: false, original: false };
+        if (opts.original) {
+          await writeAudit(prisma, actor, { action: "letter.pdf_original_cancelled", entityType: "LetterDocument", entityId: id, summary: `PDF asli surat dibatalkan ${d.number ?? ""} diambil sebagai arsip` });
+          return { bytes, name: `${base}-ASLI-ARSIP.pdf`, cancelled: true, original: true };
+        }
+        return { bytes: await stampCancelledCopy(bytes, { number: d.number }), name: `${base}-DIBATALKAN.pdf`, cancelled: true, original: false };
+      }
     }
   }
   const signerUserId = d.signerId ?? actor.userId;
   const today = new Date().toISOString().slice(0, 10);
   if (d.archiveOnly) throw Errors.conflict("Surat arsip-saja tidak memiliki pratinjau; unggah PDF pindaian setelah terbit.");
   const { bytes } = await renderLetterPdf(d, { number: null, date: today, signerUserId, draft: true });
-  return { bytes, name: "pratinjau-draf.pdf" };
+  return { bytes, name: "pratinjau-draf.pdf", cancelled: false, original: false };
 }
 
 // ───────────────────────── Siklus ─────────────────────────
