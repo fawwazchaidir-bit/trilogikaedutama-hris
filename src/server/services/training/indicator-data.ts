@@ -240,20 +240,28 @@ async function loadMilestone(actor: Actor, id: string) {
 
 /** Selesaikan milestone. PIC (penanggung jawab) atau pengelola tugas; wajib bukti (tautan/rujukan dokumen) bila konfigurasi mewajibkan. */
 export async function completeMilestone(actor: Actor, id: string, raw: unknown): Promise<void> {
-  const { m, access } = await loadMilestone(actor, id);
+  const { m: stale, access } = await loadMilestone(actor, id);           // bacaan AWAL: hanya akses & gagal-cepat; keputusan otoritatif memakai baris yang dibaca ulang di dalam kunci
   assertEditable(access.project);
   const input = parseInput(milestoneCompleteSchema, raw);
-  const isPic = !!actor.employeeId && m.assigneeId === actor.employeeId;
-  if (!isPic && !access.abilities.has("manage_tasks")) throw Errors.forbidden("Hanya PIC milestone atau pengelola tugas yang dapat menyelesaikannya.");
   const cfg = (await loadConfig()).config;
-  const p = await loadProgramRow(prisma, m.projectId);
-  if (m.notApplicable || (m.bnspOnly && !p.bnsp)) throw Errors.conflict("Milestone ini berstatus Tidak berlaku.");
-  if (m.doneAt) throw Errors.conflict("Milestone sudah selesai.");
+  const p = await loadProgramRow(prisma, stale.projectId);
+  /** Penilaian hak & keadaan atas SATU baris milestone — dipanggil dua kali: bacaan awal (pesan cepat) dan baris segar di dalam transaksi (yang menentukan). */
+  const evaluate = (m: typeof stale) => {
+    const isPic = !!actor.employeeId && m.assigneeId === actor.employeeId;
+    if (!isPic && !access.abilities.has("manage_tasks")) throw Errors.forbidden("Hanya PIC milestone atau pengelola tugas yang dapat menyelesaikannya.");
+    if (m.notApplicable || (m.bnspOnly && !p.bnsp)) throw Errors.conflict("Milestone ini berstatus Tidak berlaku.");
+    if (m.doneAt) throw Errors.conflict("Milestone sudah selesai.");
+  };
+  evaluate(stale);
   if (cfg.requireEvidence && (!input.evidence || input.evidence.trim().length < 3)) throw Errors.validation("Milestone tidak dianggap selesai tanpa bukti: isi tautan atau rujukan dokumen (Berita Acara, Form Serah Terima, Checklist Kesiapan Kelas, dst.).", { evidence: "Bukti wajib diisi" });
   const t = today();
   const doneAt = input.doneAt ?? t;
   if (doneAt > t) throw Errors.validation("Tanggal selesai tidak boleh di masa depan.", { doneAt: "Di masa depan" });
   await transaction(async (tx) => {
+    await tx.$queryRaw`SELECT "id" FROM "training_milestones" WHERE "id" = ${id}::uuid FOR UPDATE`;
+    const m = await tx.trainingMilestone.findUnique({ where: { id } });   // baris dikunci & dibaca ULANG: PIC / status terkini
+    if (!m) throw Errors.notFound("Milestone");
+    evaluate(m);
     const r = await tx.trainingMilestone.updateMany({ where: { id, doneAt: null }, data: { doneAt: isoToDate(doneAt), doneById: actor.userId, evidence: input.evidence } });
     if (r.count === 0) throw Errors.conflict("Milestone baru saja diselesaikan pengguna lain.");
     await auditProject(tx, actor, m.projectId, { action: "training.milestone.complete", summary: `Milestone ${m.code} "${m.name}" diselesaikan (${doneAt})`, after: { milestoneId: id, code: m.code, doneAt } });
@@ -346,17 +354,26 @@ export async function listReadiness(actor: Actor, projectId: string): Promise<Re
 
 export async function setReadinessStatus(actor: Actor, id: string, raw: unknown): Promise<void> {
   assertUuid(id, "Item kesiapan");
-  const item = await prisma.trainingReadinessItem.findUnique({ where: { id } });
-  if (!item) throw Errors.notFound("Item kesiapan");
-  const access = await loadProjectAccess(actor, item.projectId);
+  const stale = await prisma.trainingReadinessItem.findUnique({ where: { id } });     // bacaan AWAL: hanya akses & gagal-cepat; keputusan otoritatif memakai baris yang dibaca ulang di dalam kunci
+  if (!stale) throw Errors.notFound("Item kesiapan");
+  const access = await loadProjectAccess(actor, stale.projectId);
   assertEditable(access.project);
   const { status } = parseInput(readinessStatusSchema, raw);
-  const isPic = !!actor.employeeId && item.assigneeId === actor.employeeId;
-  if (!isPic && !access.abilities.has("manage_checklist")) throw Errors.forbidden("Hanya penanggung jawab item atau pengelola checklist yang dapat mengubah status item kesiapan.");
-  if (status === item.status) return;
-  // "Tidak berlaku" mengeluarkan item dari IKP: hanya pengelola checklist (bukan PIC sendiri) agar item kritikal tidak dibuang sepihak.
-  if (status === "NOT_APPLICABLE" && !access.abilities.has("manage_checklist")) throw Errors.forbidden("Hanya pengelola checklist yang dapat menandai item Tidak berlaku.");
+  /** Penilaian hak atas SATU baris item — dipanggil dua kali: bacaan awal (pesan cepat) dan baris segar di dalam transaksi (yang menentukan). "SAME" = tidak ada yang berubah. */
+  const evaluate = (item: typeof stale): "SAME" | "CHANGE" => {
+    const isPic = !!actor.employeeId && item.assigneeId === actor.employeeId;
+    if (!isPic && !access.abilities.has("manage_checklist")) throw Errors.forbidden("Hanya penanggung jawab item atau pengelola checklist yang dapat mengubah status item kesiapan.");
+    if (status === item.status) return "SAME";
+    // "Tidak berlaku" mengeluarkan item dari IKP: hanya pengelola checklist (bukan PIC sendiri) agar item kritikal tidak dibuang sepihak.
+    if (status === "NOT_APPLICABLE" && !access.abilities.has("manage_checklist")) throw Errors.forbidden("Hanya pengelola checklist yang dapat menandai item Tidak berlaku.");
+    return "CHANGE";
+  };
+  if (evaluate(stale) === "SAME") return;
   await transaction(async (tx) => {
+    await tx.$queryRaw`SELECT "id" FROM "training_readiness_items" WHERE "id" = ${id}::uuid FOR UPDATE`;
+    const item = await tx.trainingReadinessItem.findUnique({ where: { id } });        // baris dikunci & dibaca ULANG: penanggung jawab / status terkini
+    if (!item) throw Errors.notFound("Item kesiapan");
+    if (evaluate(item) === "SAME") return;
     await tx.trainingReadinessItem.update({ where: { id }, data: { status, updatedById: actor.userId } });
     await auditProject(tx, actor, item.projectId, { action: "training.readiness.status", summary: `Item kesiapan "${item.name}"${item.critical ? " (kritikal)" : ""}: ${item.status} → ${status}`, before: { itemId: id, status: item.status }, after: { itemId: id, status } });
   });
@@ -462,24 +479,38 @@ export async function addWorkloadTask(actor: Actor, projectId: string, raw: unkn
   });
 }
 
+/**
+ * Ubah satu baris jam kerja. BARIS DIBACA DI DALAM KUNCI (kunci advisory proyek + kunci baris) dan HANYA kolom yang benar-benar berubah yang ditulis: bacaan di awal hanya untuk akses,
+ * sedangkan membaca baris SEBELUM kunci lalu menulis semua kolom dari nilai lama membuat perubahan jam (mis. 11 → 13) tertimpa penandaan Selesai yang bersamaan. "Disesuaikan" dinilai
+ * dari baris segar.
+ */
 export async function updateWorkloadTask(actor: Actor, id: string, raw: unknown): Promise<void> {
   assertUuid(id, "Tugas jam kerja");
-  const w = await prisma.trainingWorkloadTask.findUnique({ where: { id } });
-  if (!w) throw Errors.notFound("Tugas jam kerja");
-  const access = await loadProjectAccess(actor, w.projectId);
+  const head = await prisma.trainingWorkloadTask.findUnique({ where: { id }, select: { projectId: true } });   // hanya untuk akses; projectId tidak pernah berubah
+  if (!head) throw Errors.notFound("Tugas jam kerja");
+  const access = await loadProjectAccess(actor, head.projectId);
   requireAbility(access, "manage_tasks");
   assertEditable(access.project);
   const input = parseInput(workloadUpdateSchema, raw);
-  const start = input.startDate ?? dateToIso(w.startDate), end = input.endDate ?? dateToIso(w.endDate);
-  if (end < start) throw Errors.validation("Tanggal selesai tidak boleh sebelum tanggal mulai.", { endDate: "Sebelum tanggal mulai" });
-  const newName = input.name ?? w.name, newHours = input.hours ?? w.hours;
-  // "Disesuaikan" = nama/jam/tanggal berbeda dari sebelumnya. Mengganti STATUS saja (mis. Selesai) bukan penyesuaian. ASAL baris (`source`) tidak pernah berubah karena diedit.
-  const adjustedNow = newName !== w.name || Math.abs(newHours - w.hours) > 1e-9 || start !== dateToIso(w.startDate) || end !== dateToIso(w.endDate);
   await transaction(async (tx) => {
-    await lockWorkload(tx, w.projectId);
-    await tx.trainingWorkloadTask.update({
-      where: { id }, data: { name: newName, hours: newHours, startDate: isoToDate(start), endDate: isoToDate(end), ...(input.status ? { status: input.status } : {}), ...(adjustedNow ? { adjusted: true, adjustedAt: new Date() } : {}) },
-    });
+    await lockWorkload(tx, head.projectId);
+    await tx.$queryRaw`SELECT "id" FROM "training_workload_tasks" WHERE "id" = ${id}::uuid FOR UPDATE`;
+    const w = await tx.trainingWorkloadTask.findUnique({ where: { id } });     // baris dibaca ULANG di dalam kunci
+    if (!w) throw Errors.notFound("Tugas jam kerja");
+    const start = input.startDate ?? dateToIso(w.startDate), end = input.endDate ?? dateToIso(w.endDate);
+    if (end < start) throw Errors.validation("Tanggal selesai tidak boleh sebelum tanggal mulai.", { endDate: "Sebelum tanggal mulai" });
+    const newName = input.name ?? w.name, newHours = input.hours ?? w.hours;
+    // "Disesuaikan" = nama/jam/tanggal berbeda dari baris SEGAR. Mengganti STATUS saja (mis. Selesai) bukan penyesuaian. ASAL baris (`source`) tidak pernah berubah karena diedit.
+    const adjustedNow = newName !== w.name || Math.abs(newHours - w.hours) > 1e-9 || start !== dateToIso(w.startDate) || end !== dateToIso(w.endDate);
+    const data: Prisma.TrainingWorkloadTaskUncheckedUpdateInput = {};
+    if (newName !== w.name) data.name = newName;
+    if (Math.abs(newHours - w.hours) > 1e-9) data.hours = newHours;
+    if (start !== dateToIso(w.startDate)) data.startDate = isoToDate(start);
+    if (end !== dateToIso(w.endDate)) data.endDate = isoToDate(end);
+    if (input.status !== undefined && input.status !== w.status) data.status = input.status;
+    if (adjustedNow) { data.adjusted = true; data.adjustedAt = new Date(); }
+    if (Object.keys(data).length === 0) return;                                // tidak ada yang berubah: tidak menulis, tidak mencatat
+    await tx.trainingWorkloadTask.update({ where: { id }, data });
     await auditProject(tx, actor, w.projectId, {
       action: "training.workload.update", summary: `Tugas jam kerja "${w.name}" diubah${adjustedNow && w.source === "TEMPLATE" ? " (disesuaikan dari template)" : ""}`,
       before: { taskId: id, name: w.name, hours: w.hours, status: w.status, adjusted: w.adjusted }, after: { taskId: id, ...input, adjusted: w.adjusted || adjustedNow },

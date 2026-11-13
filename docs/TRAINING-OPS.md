@@ -132,6 +132,17 @@ Aturan pakai: kunci diambil sebagai **hal pertama** di transaksi (sebelum menuli
 **Belum tercakup** (sengaja, tidak memengaruhi keputusan penutupan): penulisan dokumen, peserta, jadwal, instruktur, rujukan, milestone, item kesiapan, tugas jam kerja, dan catatan pemulihan masih memakai pemeriksaan awal service sehingga sangat jarang dapat lolos dalam jendela milidetik saat penutupan; dapat dipasangi `assertEditableLocked` dengan pola yang sama.
 Pengujian: `tests/integration/training-closure-concurrency.test.ts` memakai koneksi basis data yang benar-benar serentak; jendela balapan dilebarkan dengan trigger uji dan tiap skenario dijalankan pada lima selisih waktu mulai.
 
+#### Hak "pemilik" dan nilai yang ditulis: baca ULANG di dalam kunci
+
+Kunci proyek di atas tidak membuat sesama penulis saling menunggu (kunci bersama), dan bacaan di awal service (`loadTask`, `loadItem`, `loadMilestone`, …) terjadi **sebelum** transaksi. Bila hak "penanggung jawab" (atau "PIC") dinilai dari bacaan itu, pengalihan yang commit di antaranya terlewat: terbukti dengan dua koneksi serentak — tugas dialihkan dari Budi ke Citra, hampir bersamaan Budi mengubah status; keduanya berhasil, tugas milik Citra tetapi status diubah Budi (dan, pada kirim-ke-pemeriksaan, "pelaksana saat kirim" tercatat Budi yang basi). Aturan sekarang:
+
+- **Bacaan awal hanya untuk akses (404/IDOR) dan gagal-cepat.** Penilaian hak ditulis sebagai fungsi atas *satu baris* dan dipanggil **dua kali**: pada bacaan awal (pesan cepat) dan pada baris yang dibaca **ulang di dalam transaksi** (yang menentukan).
+- **Di dalam transaksi:** kunci proyek (bersama) → **kunci BARIS** (`SELECT … FOR UPDATE`) → baca segar → nilai ulang hak & transisi → tulis. Dua penulis pada baris yang sama bergantian; yang kedua melihat hasil yang pertama (READ COMMITTED: pernyataan baru melihat commit terakhir). Urutan kunci seragam (proyek → satu baris), jadi tidak ada deadlock.
+- **Jalur yang tercakup:** ubah status tugas (`changeTaskStatus`), ubah tugas (`updateTask` — termasuk status yang basi pada "matikan kewajiban periksa"), ubah item checklist (`updateChecklistItem`), selesaikan milestone (`completeMilestone`, PIC), ubah status item kesiapan (`setReadinessStatus`, PIC). Nilai yang dicatat ikut segar (mis. pelaksana-saat-kirim = penanggung jawab saat itu).
+- **Jam kerja** (`updateWorkloadTask`): baris dibaca di dalam kunci advisory proyek + kunci baris, dan **hanya kolom yang benar-benar berubah yang ditulis** — sebelumnya baris dibaca sebelum kunci lalu semua kolom ditulis dari nilai lama, sehingga mengubah jam (mis. 11 → 13) tertimpa penandaan Selesai yang bersamaan (hasil akhir 11 jam + Selesai). "Disesuaikan" dinilai dari baris segar; permintaan yang tidak mengubah apa pun tidak menulis dan tidak mencatat. (Kembalikan-ke-template, tinjau baris lama, dan rapikan kembar sudah membaca ulang di dalam kunci.)
+
+Pengujian: `tests/integration/training-stale-read-concurrency.test.ts` — transaksi pembantu mengunci baris lalu, setelah aktor uji selesai membaca dan menunggu, mengubah baris dan COMMIT (deterministik; aktor lalu harus menolak / menyimpan nilai segar), ditambah lima selisih waktu mulai tanpa penahan. Mutasi sengaja (kembali menilai dari bacaan awal di tiap jalur; jam kerja dengan perilaku lama) menggagalkan tes yang relevan.
+
 ### Definisi indikator dashboard (`src/lib/training/indicators.ts`)
 
 | Indikator | Definisi |
@@ -196,7 +207,7 @@ Efek perubahan: ambang/bobot/kapasitas/proyeksi/KP/wajib-bukti **langsung** berl
 Tugas jam kerja (sumber indikator **Beban Tim**) disinkronkan dengan Tabel Jam Standar tanpa membuat satu pekerjaan terhitung dua kali.
 
 - **ID tetap.** Setiap baris Tabel Jam Standar punya `id` (mis. `kampanye-reguler`) yang **tidak diturunkan dari nama, urutan, jam, atau pemegang jabatan** — semuanya boleh berubah tanpa mengganti ID. Baris baru di editor diberi ID acak sekali. ID kembar ditolak saat simpan. Konfigurasi tersimpan sebelum ada ID dilengkapi saat dibaca (cocok dengan baris bawaan → ID bawaan; lainnya → ID turunan isi yang stabil sampai disimpan).
-- **Asal ≠ disesuaikan.** `source` = asal baris (`TEMPLATE`/`MANUAL`) dan **tidak berubah karena diedit**; `templateKey` = ID baris tabel jam asal (unik per proyek: `UNIQUE(projectId, templateKey)`); `adjusted` = sudah disesuaikan manual (nama/jam/tanggal diubah; mengganti status saja bukan penyesuaian).
+- **Asal ≠ disesuaikan.** `source` = asal baris (`TEMPLATE`/`MANUAL`) dan **tidak berubah karena diedit**; `templateKey` = ID baris tabel jam asal (unik per proyek: `UNIQUE(projectId, templateKey)`); `adjusted` = sudah disesuaikan manual (nama/jam/tanggal diubah; mengganti status saja bukan penyesuaian; dinilai dari baris yang dibaca di dalam kunci).
 - **Hitung ulang idempoten** (saat template diterapkan, tombol "Hitung ulang dari template", tanggal/peserta/moda program berubah, jenis program berganti), dalam satu transaksi dengan kunci advisory per proyek (dua orang menekan bersamaan tidak membuat salinan):
 
 | Kondisi baris | Saat dihitung ulang |

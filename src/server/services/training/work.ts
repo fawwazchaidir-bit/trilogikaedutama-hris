@@ -139,6 +139,25 @@ async function assertTaskEditableLocked(tx: Tx, projectId: string, taskId: strin
   assertTaskEditable(p, { isFollowUp: t?.isFollowUp ?? false });
 }
 
+/**
+ * BACA ULANG di dalam kunci. Bacaan di awal service (`loadTask`) hanya untuk akses (404/IDOR) dan gagal-cepat; hak "penanggung jawab/pelaksana/pemeriksa" dan nilai yang ditulis harus
+ * berasal dari baris yang dibaca DI SINI: baris dikunci (FOR UPDATE) lalu dibaca segar, sehingga pengalihan/perubahan yang commit lebih dulu pasti terlihat (READ COMMITTED: pernyataan
+ * baru melihat commit terakhir) dan penulis lain pada baris yang sama menunggu. Dipanggil SESUDAH kunci proyek (urutan kunci seragam → tidak ada deadlock).
+ */
+async function lockTaskFresh(tx: Tx, taskId: string): Promise<TaskRow> {
+  await tx.$queryRaw`SELECT "id" FROM "training_tasks" WHERE "id" = ${taskId}::uuid FOR UPDATE`;
+  const t = await tx.trainingTask.findUnique({ where: { id: taskId }, include: taskInclude });
+  if (!t) throw Errors.notFound("Tugas");
+  return t;
+}
+type ChecklistRow = Prisma.TrainingProjectChecklistItemGetPayload<object>;
+async function lockChecklistItemFresh(tx: Tx, itemId: string): Promise<ChecklistRow> {
+  await tx.$queryRaw`SELECT "id" FROM "training_project_checklist_items" WHERE "id" = ${itemId}::uuid FOR UPDATE`;
+  const it = await tx.trainingProjectChecklistItem.findUnique({ where: { id: itemId } });
+  if (!it) throw Errors.notFound("Item checklist");
+  return it;
+}
+
 async function loadTask(actor: Actor, taskId: string): Promise<{ task: TaskRow; access: ProjectAccess }> {
   assertUuid(taskId, "Tugas");
   const task = await prisma.trainingTask.findUnique({ where: { id: taskId }, include: taskInclude });
@@ -242,13 +261,14 @@ export async function createTask(actor: Actor, projectId: string, raw: unknown):
 }
 
 export async function updateTask(actor: Actor, taskId: string, raw: unknown): Promise<void> {
-  const { task, access } = await loadTask(actor, taskId);
+  const { task: stale, access } = await loadTask(actor, taskId);          // bacaan AWAL: hanya akses & gagal-cepat; keputusan di bawah memakai baris yang dibaca ulang di dalam kunci
   requireAbility(access, "manage_tasks");
-  assertTaskEditable(access.project, task);
+  assertTaskEditable(access.project, stale);
   const input = parseInput(taskUpdateSchema, raw);
   const reason = input.reason?.trim() || null;
   await transaction(async (tx) => {
-    await assertTaskEditableLocked(tx, task.projectId, taskId);
+    await assertTaskEditableLocked(tx, stale.projectId, taskId);
+    const task = await lockTaskFresh(tx, taskId);                         // baris dikunci & dibaca ULANG: penanggung jawab/status/kewajiban periksa terkini
     // Penanggung jawab divalidasi hanya bila DIGANTI: menyunting hal lain pada tugas yang masih atas nama karyawan yang sudah berhenti tidak boleh terkunci.
     if ("assigneeId" in input && (input.assigneeId ?? null) !== task.assigneeId) await assertAssigneeInTeam(tx, task.projectId, input.assigneeId);
     const data: Prisma.TrainingTaskUncheckedUpdateInput = {};
@@ -300,54 +320,61 @@ export async function updateTask(actor: Actor, taskId: string, raw: unknown): Pr
  * dokumen, pembayaran, atau status proyek.
  */
 export async function changeTaskStatus(actor: Actor, taskId: string, raw: unknown): Promise<TaskDto> {
-  const { task, access } = await loadTask(actor, taskId);
-  assertTaskEditable(access.project, task);
+  const { task: stale, access } = await loadTask(actor, taskId);          // bacaan AWAL: hanya akses & gagal-cepat; keputusan otoritatif memakai baris yang dibaca ulang di dalam kunci
+  assertTaskEditable(access.project, stale);
   const input = parseInput(taskStatusSchema, raw);
-  const named = !!actor.employeeId && task.assigneeId === actor.employeeId;
-  const isAssignee = named && access.memberRole !== null;       // pemilik SAH: tercatat sebagai penanggung jawab DAN masih anggota aktif proyek
-  const canManage = access.abilities.has("manage_tasks");
-  if (!isAssignee && !canManage) {
-    if (named) throw Errors.forbidden(NOT_MEMBER_MESSAGE);
-    throw Errors.forbidden("Hanya penanggung jawab tugas atau pengelola proyek yang dapat mengubah status tugas.");
-  }
-  // Tiga identitas pemeriksaan: pengirim hasil (akun), pelaksana (karyawan; saat dikirim atau penanggung jawab saat ini) — pemeriksa harus berbeda dari keduanya.
-  const isSubmitter = !!task.submittedById && task.submittedById === actor.userId;
-  const isExecutor = !!actor.employeeId && (task.assigneeAtSubmitId === actor.employeeId || named);
-  const allowed = allowedTaskTransitions({ status: task.status, requiresReview: task.requiresReview, isAssignee, canManage, isSubmitter, isExecutor });
-  if (!allowed.includes(input.status)) {
-    if (task.status === "IN_REVIEW" && input.status === "DONE") {
-      const why = reviewBlockReason({ isAssignee, isSubmitter, isExecutor });
-      if (why === "SUBMITTER") throw Errors.forbidden("Anda yang mengirim hasil ini ke pemeriksaan, sehingga tidak dapat memeriksanya sendiri. Minta pengelola proyek lain (mis. Koordinator Program atau Direktur) memeriksanya.");
-      if (why === "EXECUTOR") throw Errors.forbidden("Anda tidak dapat memeriksa hasil tugas Anda sendiri. Minta Project Manager atau Koordinator Program memeriksanya.");
+  /** Penilaian hak & transisi atas SATU baris tugas — dipanggil dua kali: pada bacaan awal (pesan cepat) dan pada baris segar di dalam transaksi (yang menentukan). */
+  const evaluate = (task: TaskRow): { isAssignee: boolean; canManage: boolean } => {
+    const named = !!actor.employeeId && task.assigneeId === actor.employeeId;
+    const isAssignee = named && access.memberRole !== null;       // pemilik SAH: tercatat sebagai penanggung jawab DAN masih anggota aktif proyek
+    const canManage = access.abilities.has("manage_tasks");
+    if (!isAssignee && !canManage) {
+      if (named) throw Errors.forbidden(NOT_MEMBER_MESSAGE);
+      throw Errors.forbidden("Hanya penanggung jawab tugas atau pengelola proyek yang dapat mengubah status tugas.");
     }
-    if (task.requiresReview && input.status === "DONE" && task.status !== "IN_REVIEW") throw Errors.conflict("Tugas ini perlu diperiksa: kirim dulu ke \"Menunggu pemeriksaan\".");
-    throw Errors.conflict(`Status tugas tidak dapat diubah dari "${TASK_STATUS_LABEL[task.status]}" ke "${TASK_STATUS_LABEL[input.status]}".`);
-  }
+    // Tiga identitas pemeriksaan: pengirim hasil (akun), pelaksana (karyawan; saat dikirim atau penanggung jawab saat ini) — pemeriksa harus berbeda dari keduanya.
+    const isSubmitter = !!task.submittedById && task.submittedById === actor.userId;
+    const isExecutor = !!actor.employeeId && (task.assigneeAtSubmitId === actor.employeeId || named);
+    const allowed = allowedTaskTransitions({ status: task.status, requiresReview: task.requiresReview, isAssignee, canManage, isSubmitter, isExecutor });
+    if (!allowed.includes(input.status)) {
+      if (task.status === "IN_REVIEW" && input.status === "DONE") {
+        const why = reviewBlockReason({ isAssignee, isSubmitter, isExecutor });
+        if (why === "SUBMITTER") throw Errors.forbidden("Anda yang mengirim hasil ini ke pemeriksaan, sehingga tidak dapat memeriksanya sendiri. Minta pengelola proyek lain (mis. Koordinator Program atau Direktur) memeriksanya.");
+        if (why === "EXECUTOR") throw Errors.forbidden("Anda tidak dapat memeriksa hasil tugas Anda sendiri. Minta Project Manager atau Koordinator Program memeriksanya.");
+      }
+      if (task.requiresReview && input.status === "DONE" && task.status !== "IN_REVIEW") throw Errors.conflict("Tugas ini perlu diperiksa: kirim dulu ke \"Menunggu pemeriksaan\".");
+      throw Errors.conflict(`Status tugas tidak dapat diubah dari "${TASK_STATUS_LABEL[task.status]}" ke "${TASK_STATUS_LABEL[input.status]}".`);
+    }
+    return { isAssignee, canManage };
+  };
+  evaluate(stale);
   await transaction(async (tx) => {
-    await assertTaskEditableLocked(tx, task.projectId, taskId);
-    if (isAssignee && !canManage) await assertStillActiveMember(tx, task.projectId, actor.employeeId!);   // hak lahir dari keanggotaan: baca ulang bersama kunci
+    await assertTaskEditableLocked(tx, stale.projectId, taskId);
+    const cur = await lockTaskFresh(tx, taskId);                          // baris dikunci & dibaca ULANG di dalam kunci
+    const { isAssignee, canManage } = evaluate(cur);                      // hak & transisi dinilai ulang dari data segar (pengalihan yang commit lebih dulu terlihat di sini)
+    if (isAssignee && !canManage) await assertStillActiveMember(tx, cur.projectId, actor.employeeId!);   // hak lahir dari keanggotaan: baca ulang bersama kunci
     const done = input.status === "DONE";
     const now = new Date();
     const data: Prisma.TrainingTaskUncheckedUpdateManyInput = { status: input.status, completedAt: done ? now : null, completedById: done ? actor.userId : null };
     if (input.status === "IN_REVIEW") {
       // Hasil dikirim: catat pengirim, waktu, dan pelaksana SAAT ITU (salinan — tidak ikut berubah bila penanggung jawab dialihkan/dikosongkan).
-      Object.assign(data, { submittedById: actor.userId, submittedAt: now, assigneeAtSubmitId: task.assigneeId, reviewedById: null, reviewedAt: null });
-    } else if (done && task.status === "IN_REVIEW") {
+      Object.assign(data, { submittedById: actor.userId, submittedAt: now, assigneeAtSubmitId: cur.assigneeId, reviewedById: null, reviewedAt: null });
+    } else if (done && cur.status === "IN_REVIEW") {
       Object.assign(data, { reviewedById: actor.userId, reviewedAt: now });          // pengirim & pelaksana tetap tercatat
     } else {
       // Siklus pemeriksaan berakhir (ditarik/dikembalikan/dibuka kembali/langsung selesai tanpa periksa): kosongkan; riwayat ada di audit.
       Object.assign(data, { submittedById: null, submittedAt: null, assigneeAtSubmitId: null, reviewedById: null, reviewedAt: null });
     }
-    const r = await tx.trainingTask.updateMany({ where: { id: taskId, status: task.status }, data });
+    const r = await tx.trainingTask.updateMany({ where: { id: taskId, status: cur.status }, data });
     if (r.count === 0) throw Errors.conflict("Status tugas baru saja diubah pengguna lain. Muat ulang halaman.");
-    await auditProject(tx, actor, task.projectId, {
-      action: "training.task.status", summary: `Tugas "${task.title}": ${TASK_STATUS_LABEL[task.status]} → ${TASK_STATUS_LABEL[input.status]}`,
-      before: { taskId, status: task.status }, after: { taskId, status: input.status }, reason: input.note,
+    await auditProject(tx, actor, cur.projectId, {
+      action: "training.task.status", summary: `Tugas "${cur.title}": ${TASK_STATUS_LABEL[cur.status]} → ${TASK_STATUS_LABEL[input.status]}`,
+      before: { taskId, status: cur.status }, after: { taskId, status: input.status }, reason: input.note,
     });
     if (input.note) await tx.trainingTaskComment.create({ data: { taskId, authorId: actor.userId, body: `[${TASK_STATUS_LABEL[input.status]}] ${input.note}` } });
     if (input.status === "IN_REVIEW") {
-      const pic = await tx.trainingProjectMember.findFirst({ where: { projectId: task.projectId, role: "PROJECT_MANAGER", endedAt: null }, select: { employeeId: true } });
-      await notifyEmployee(tx, actor, pic?.employeeId ?? null, { type: "training.task.review", title: "Tugas menunggu pemeriksaan", body: `${access.project.code} · ${task.title}`, href: `/training/proyek/${task.projectId}?tab=tugas` });
+      const pic = await tx.trainingProjectMember.findFirst({ where: { projectId: cur.projectId, role: "PROJECT_MANAGER", endedAt: null }, select: { employeeId: true } });
+      await notifyEmployee(tx, actor, pic?.employeeId ?? null, { type: "training.task.review", title: "Tugas menunggu pemeriksaan", body: `${access.project.code} · ${cur.title}`, href: `/training/proyek/${cur.projectId}?tab=tugas` });
     }
   });
   return getTask(actor, taskId);
@@ -455,21 +482,28 @@ export async function addChecklistItem(actor: Actor, projectId: string, raw: unk
 }
 
 export async function updateChecklistItem(actor: Actor, itemId: string, raw: unknown): Promise<void> {
-  const { item, access } = await loadItem(actor, itemId);
+  const { item: stale, access } = await loadItem(actor, itemId);         // bacaan AWAL: hanya akses & gagal-cepat; keputusan otoritatif memakai baris yang dibaca ulang di dalam kunci
   assertEditable(access.project);
   const input = parseInput(checklistItemUpdateSchema, raw);
   const canManage = access.abilities.has("manage_checklist");
-  const named = !!actor.employeeId && item.assigneeId === actor.employeeId;
-  const isOwner = named && access.memberRole !== null;           // pemilik SAH: penanggung jawab DAN masih anggota aktif proyek
-  const structural = ["phase", "title", "isRequired", "assigneeId", "note"].some((k) => k in input);
-  if (structural && !canManage) throw Errors.forbidden("Hanya pengelola checklist yang dapat mengubah isi item.");
-  if ("isDone" in input && !canManage && !isOwner) throw Errors.forbidden(named ? NOT_MEMBER_MESSAGE : "Hanya penanggung jawab item atau pengelola checklist yang dapat menandai selesai.");
-  // Melonggarkan item WAJIB (jadi tidak wajib) harus beralasan, tercatat sebagai pelonggaran, dan harus diakui saat menutup proyek.
-  const demoting = input.isRequired === false && item.isRequired;
-  const promoting = input.isRequired === true && !item.isRequired;
-  const relaxReason = demoting ? assertMayRelax(access, input.reason) : null;
+  /** Penilaian hak atas SATU baris item — dipanggil dua kali: pada bacaan awal (pesan cepat) dan pada baris segar di dalam transaksi (yang menentukan). */
+  const evaluate = (item: ChecklistRow) => {
+    const named = !!actor.employeeId && item.assigneeId === actor.employeeId;
+    const isOwner = named && access.memberRole !== null;           // pemilik SAH: penanggung jawab DAN masih anggota aktif proyek
+    const structural = ["phase", "title", "isRequired", "assigneeId", "note"].some((k) => k in input);
+    if (structural && !canManage) throw Errors.forbidden("Hanya pengelola checklist yang dapat mengubah isi item.");
+    if ("isDone" in input && !canManage && !isOwner) throw Errors.forbidden(named ? NOT_MEMBER_MESSAGE : "Hanya penanggung jawab item atau pengelola checklist yang dapat menandai selesai.");
+    // Melonggarkan item WAJIB (jadi tidak wajib) harus beralasan, tercatat sebagai pelonggaran, dan harus diakui saat menutup proyek.
+    const demoting = input.isRequired === false && item.isRequired;
+    const promoting = input.isRequired === true && !item.isRequired;
+    const relaxReason = demoting ? assertMayRelax(access, input.reason) : null;
+    return { isOwner, demoting, promoting, relaxReason };
+  };
+  evaluate(stale);
   await transaction(async (tx) => {
-    await assertEditableLocked(tx, item.projectId);
+    await assertEditableLocked(tx, stale.projectId);
+    const item = await lockChecklistItemFresh(tx, itemId);               // baris dikunci & dibaca ULANG: penanggung jawab / status / wajib terkini
+    const { isOwner, demoting, promoting, relaxReason } = evaluate(item);   // hak dinilai ulang dari data segar
     if ("isDone" in input && !canManage && isOwner) await assertStillActiveMember(tx, item.projectId, actor.employeeId!);
     if ("assigneeId" in input && (input.assigneeId ?? null) !== item.assigneeId) await assertAssigneeInTeam(tx, item.projectId, input.assigneeId);
     const data: Prisma.TrainingProjectChecklistItemUncheckedUpdateInput = {};
