@@ -6,6 +6,8 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { prisma } from "@/server/db";
 import { isoToDate } from "@/server/json";
 import { defaultIndicatorConfig } from "@/lib/training/indicators/config";
+import { weekStartOf } from "@/lib/training/indicators/engine";
+import { addDays } from "@/lib/time";
 import { resetDb } from "../helpers/db";
 import { addTeam, inDays, mkProject, seedTraining, TODAY, type TrainingFixtures } from "../helpers/training";
 import { loadConfig, saveIndicatorConfig } from "@/server/services/training/indicator-config";
@@ -110,9 +112,12 @@ describe("penanda 'Perlu dicek'", () => {
 
   it("hanya saat beban jam 'Ada ruang': beban Padat/Overload tidak ditandai walau tugas banyak", async () => {
     const id = await running();
-    await addWorkloadTask(fx.mgr, id, { employeeId: fx.empIds[BUDI], name: "Beban besar", hours: 200, startDate: TODAY(), endDate: inDays(6) });
+    // Senin–Jumat PEKAN BERJALAN (bukan "hari ini + 6"): pada Sabtu/Minggu jendela "hari ini" jatuh seluruhnya ke pekan depan dan tes ini gagal untuk alasan yang tak berkaitan.
+    const monday = weekStartOf(TODAY());
+    await addWorkloadTask(fx.mgr, id, { employeeId: fx.empIds[BUDI], name: "Beban besar", hours: 200, startDate: monday, endDate: addDays(monday, 4) });
     for (let i = 0; i < 6; i++) await task(id, `Tugas ${i}`, { dueDate: inDays(-1) });
     const row = (await budiRow())!;
+    expect(row.weeks[0]!.weekStart).toBe(monday);
     expect(row.weeks[0]!.band).not.toBe("ROOMY");
     expect(row.operational).toMatchObject({ open: 6, overdue: 6, needsCheck: false });
   });

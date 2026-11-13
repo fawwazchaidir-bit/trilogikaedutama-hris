@@ -19,7 +19,7 @@ import {
 import {
   milestoneAddSchema, milestoneCompleteSchema, milestoneUpdateSchema, readinessAddSchema, readinessStatusSchema, staffCapacitySchema, workloadMergeSchema, workloadReviewSchema, workloadSchema, workloadUpdateSchema,
 } from "@/lib/validation/training";
-import { assertEditable, getModuleContext, loadProjectAccess, requireAbility, assertModuleEnabled } from "./access";
+import { assertEditable, assertEditableLocked, getModuleContext, loadProjectAccess, requireAbility, assertModuleEnabled } from "./access";
 import { loadConfig } from "./indicator-config";
 import { assertUuid, auditProject, today } from "./shared";
 
@@ -172,6 +172,7 @@ export async function applyIndicatorTemplates(actor: Actor, projectId: string): 
   requireAbility(access, "update");
   assertEditable(access.project);
   return transaction(async (tx) => {
+    await assertEditableLocked(tx, projectId);   // kunci bersama proyek (langkah PERTAMA): status dibaca ulang segar — tidak lolos bila penutupan/pembatalan commit lebih dulu
     const p = await loadProgramRow(tx, projectId);
     if (p.indicatorsAppliedAt) throw Errors.conflict("Template pemantauan sudah diterapkan pada proyek ini.");
     const cfg = (await loadConfig(tx)).config;
@@ -185,6 +186,7 @@ export async function regenerateProjectWorkload(actor: Actor, projectId: string)
   requireAbility(access, "update");
   assertEditable(access.project);
   return transaction(async (tx) => {
+    await assertEditableLocked(tx, projectId);   // kunci bersama proyek (langkah PERTAMA): status dibaca ulang segar — tidak lolos bila penutupan/pembatalan commit lebih dulu
     const p = await loadProgramRow(tx, projectId);
     if (!p.indicatorsAppliedAt) throw Errors.conflict("Terapkan template pemantauan terlebih dulu.");
     const r = await regenerateWorkloadTx(tx, actor, p, (await loadConfig(tx)).config);
@@ -258,6 +260,7 @@ export async function completeMilestone(actor: Actor, id: string, raw: unknown):
   const doneAt = input.doneAt ?? t;
   if (doneAt > t) throw Errors.validation("Tanggal selesai tidak boleh di masa depan.", { doneAt: "Di masa depan" });
   await transaction(async (tx) => {
+    await assertEditableLocked(tx, stale.projectId);   // kunci bersama proyek (langkah PERTAMA): status dibaca ulang segar — tidak lolos bila penutupan/pembatalan commit lebih dulu
     await tx.$queryRaw`SELECT "id" FROM "training_milestones" WHERE "id" = ${id}::uuid FOR UPDATE`;
     const m = await tx.trainingMilestone.findUnique({ where: { id } });   // baris dikunci & dibaca ULANG: PIC / status terkini
     if (!m) throw Errors.notFound("Milestone");
@@ -276,6 +279,7 @@ export async function reopenMilestone(actor: Actor, id: string, raw: unknown = {
   if (reason.length < 3) throw Errors.validation("Alasan membuka kembali milestone wajib diisi.", { reason: "Wajib diisi" });
   if (!m.doneAt) throw Errors.conflict("Milestone belum selesai.");
   await transaction(async (tx) => {
+    await assertEditableLocked(tx, m.projectId);   // kunci bersama proyek (langkah PERTAMA): status dibaca ulang segar — tidak lolos bila penutupan/pembatalan commit lebih dulu
     await tx.trainingMilestone.update({ where: { id }, data: { doneAt: null, doneById: null } });
     await auditProject(tx, actor, m.projectId, { action: "training.milestone.reopen", summary: `Milestone ${m.code} dibuka kembali`, before: { doneAt: dateToIso(m.doneAt!) }, reason });
   });
@@ -288,6 +292,7 @@ export async function updateMilestone(actor: Actor, id: string, raw: unknown): P
   const input = parseInput(milestoneUpdateSchema, raw);
   if (input.notApplicable && m.doneAt) throw Errors.conflict("Milestone yang sudah selesai tidak dapat ditandai Tidak berlaku.");
   await transaction(async (tx) => {
+    await assertEditableLocked(tx, m.projectId);   // kunci bersama proyek (langkah PERTAMA): status dibaca ulang segar — tidak lolos bila penutupan/pembatalan commit lebih dulu
     if (input.assigneeId) { const e = await tx.employee.count({ where: { id: input.assigneeId, isActive: true } }); if (!e) throw Errors.validation("PIC harus karyawan aktif.", { assigneeId: "Tidak valid" }); }
     const data: Prisma.TrainingMilestoneUncheckedUpdateInput = {};
     for (const k of ["name", "weight", "critical", "assigneeId", "notApplicable", "reference"] as const) if (k in input) (data as Record<string, unknown>)[k] = input[k];
@@ -304,6 +309,7 @@ export async function addMilestone(actor: Actor, projectId: string, raw: unknown
   assertEditable(access.project);
   const input = parseInput(milestoneAddSchema, raw);
   return transaction(async (tx) => {
+    await assertEditableLocked(tx, projectId);   // kunci bersama proyek (langkah PERTAMA): status dibaca ulang segar — tidak lolos bila penutupan/pembatalan commit lebih dulu
     if (input.assigneeId && !(await tx.employee.count({ where: { id: input.assigneeId, isActive: true } }))) throw Errors.validation("PIC harus karyawan aktif.", { assigneeId: "Tidak valid" });
     if (input.anchor === "MILESTONE" && (!input.ref || !(await tx.trainingMilestone.count({ where: { projectId, code: input.ref } })))) throw Errors.validation("Milestone acuan tidak ditemukan.", { ref: "Tidak ditemukan" });
     const max = await tx.trainingMilestone.aggregate({ where: { projectId }, _max: { sortOrder: true } });
@@ -370,6 +376,7 @@ export async function setReadinessStatus(actor: Actor, id: string, raw: unknown)
   };
   if (evaluate(stale) === "SAME") return;
   await transaction(async (tx) => {
+    await assertEditableLocked(tx, stale.projectId);   // kunci bersama proyek (langkah PERTAMA): status dibaca ulang segar — tidak lolos bila penutupan/pembatalan commit lebih dulu
     await tx.$queryRaw`SELECT "id" FROM "training_readiness_items" WHERE "id" = ${id}::uuid FOR UPDATE`;
     const item = await tx.trainingReadinessItem.findUnique({ where: { id } });        // baris dikunci & dibaca ULANG: penanggung jawab / status terkini
     if (!item) throw Errors.notFound("Item kesiapan");
@@ -385,6 +392,7 @@ export async function addReadinessItem(actor: Actor, projectId: string, raw: unk
   assertEditable(access.project);
   const input = parseInput(readinessAddSchema, raw);
   return transaction(async (tx) => {
+    await assertEditableLocked(tx, projectId);   // kunci bersama proyek (langkah PERTAMA): status dibaca ulang segar — tidak lolos bila penutupan/pembatalan commit lebih dulu
     if (input.assigneeId && !(await tx.employee.count({ where: { id: input.assigneeId, isActive: true } }))) throw Errors.validation("Penanggung jawab harus karyawan aktif.", { assigneeId: "Tidak valid" });
     if (input.anchor === "MILESTONE" && (!input.ref || !(await tx.trainingMilestone.count({ where: { projectId, code: input.ref } })))) throw Errors.validation("Milestone acuan tidak ditemukan.", { ref: "Tidak ditemukan" });
     const max = await tx.trainingReadinessItem.aggregate({ where: { projectId, component: input.component }, _max: { sortOrder: true } });
@@ -403,6 +411,7 @@ export async function removeReadinessItem(actor: Actor, id: string): Promise<voi
   assertEditable(access.project);
   if (item.status === "DONE") throw Errors.conflict("Item yang sudah selesai tidak dapat dihapus. Ubah statusnya dulu bila keliru.");
   await transaction(async (tx) => {
+    await assertEditableLocked(tx, item.projectId);   // kunci bersama proyek (langkah PERTAMA): status dibaca ulang segar — tidak lolos bila penutupan/pembatalan commit lebih dulu
     await tx.trainingReadinessItem.delete({ where: { id } });
     await auditProject(tx, actor, item.projectId, { action: "training.readiness.remove", summary: `Item kesiapan "${item.name}" dihapus${item.critical ? " (kritikal)" : ""}`, before: { itemId: id, component: item.component, critical: item.critical } });
   });
@@ -471,6 +480,7 @@ export async function addWorkloadTask(actor: Actor, projectId: string, raw: unkn
   assertEditable(access.project);
   const input = parseInput(workloadSchema, raw);
   return transaction(async (tx) => {
+    await assertEditableLocked(tx, projectId);   // kunci bersama proyek (langkah PERTAMA): status dibaca ulang segar — tidak lolos bila penutupan/pembatalan commit lebih dulu
     const emp = await tx.employee.findUnique({ where: { id: input.employeeId }, select: { fullName: true, isActive: true } });
     if (!emp || !emp.isActive) throw Errors.validation("Staf harus karyawan aktif.", { employeeId: "Tidak valid" });
     const w = await tx.trainingWorkloadTask.create({ data: { projectId, employeeId: input.employeeId, name: input.name, hours: input.hours, startDate: isoToDate(input.startDate), endDate: isoToDate(input.endDate), source: "MANUAL", createdById: actor.userId } });
@@ -493,6 +503,7 @@ export async function updateWorkloadTask(actor: Actor, id: string, raw: unknown)
   assertEditable(access.project);
   const input = parseInput(workloadUpdateSchema, raw);
   await transaction(async (tx) => {
+    await assertEditableLocked(tx, head.projectId);   // kunci bersama proyek (langkah PERTAMA): status dibaca ulang segar — tidak lolos bila penutupan/pembatalan commit lebih dulu
     await lockWorkload(tx, head.projectId);
     await tx.$queryRaw`SELECT "id" FROM "training_workload_tasks" WHERE "id" = ${id}::uuid FOR UPDATE`;
     const w = await tx.trainingWorkloadTask.findUnique({ where: { id } });     // baris dibaca ULANG di dalam kunci
@@ -560,6 +571,7 @@ export async function previewWorkloadRevert(actor: Actor, id: string): Promise<W
 export async function revertWorkloadToTemplate(actor: Actor, id: string): Promise<WorkloadRevertPreview> {
   const w = await loadWorkloadForManage(actor, id);
   return transaction(async (tx) => {
+    await assertEditableLocked(tx, w.projectId);   // kunci bersama proyek (langkah PERTAMA): status dibaca ulang segar — tidak lolos bila penutupan/pembatalan commit lebih dulu
     await lockWorkload(tx, w.projectId);
     const cur = await tx.trainingWorkloadTask.findUniqueOrThrow({ where: { id } });
     if (cur.status !== "OPEN") throw Errors.conflict("Baris yang sudah selesai atau dibatalkan tidak dikembalikan ke template.");
@@ -602,6 +614,7 @@ export async function reviewWorkloadRow(actor: Actor, id: string, raw: unknown):
   const w = await loadWorkloadForManage(actor, id);
   const input = parseInput(workloadReviewSchema, raw);
   await transaction(async (tx) => {
+    await assertEditableLocked(tx, w.projectId);   // kunci bersama proyek (langkah PERTAMA): status dibaca ulang segar — tidak lolos bila penutupan/pembatalan commit lebih dulu
     await lockWorkload(tx, w.projectId);
     const cur = await tx.trainingWorkloadTask.findUniqueOrThrow({ where: { id } });
     if (!isLegacyUnresolved(toExisting(cur))) throw Errors.conflict("Baris ini tidak perlu ditinjau (asalnya sudah jelas).");
@@ -636,6 +649,7 @@ export async function mergeWorkloadDuplicates(actor: Actor, projectId: string, r
   assertEditable(access.project);
   const input = parseInput(workloadMergeSchema, raw);
   return transaction(async (tx) => {
+    await assertEditableLocked(tx, projectId);   // kunci bersama proyek (langkah PERTAMA): status dibaca ulang segar — tidak lolos bila penutupan/pembatalan commit lebih dulu
     await lockWorkload(tx, projectId);
     const rows = await tx.trainingWorkloadTask.findMany({ where: { projectId }, include: { employee: { select: { fullName: true } } } });
     const p = await loadProgramRow(tx, projectId);

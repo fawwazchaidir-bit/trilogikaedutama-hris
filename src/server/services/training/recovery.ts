@@ -5,7 +5,7 @@ import type { Actor } from "../../actor";
 import { dateToIso, isoToDate } from "../../json";
 import { RECOVERY_KIND_LABEL, type RecoveryKind } from "@/lib/training/indicators/escalation";
 import { recoveryNoteSchema } from "@/lib/validation/training";
-import { assertEditable, loadProjectAccess, requireAbility } from "./access";
+import { assertEditable, assertEditableLocked, loadProjectAccess, requireAbility } from "./access";
 import { auditProject } from "./shared";
 
 export interface RecoveryNoteDto { id: string; kind: RecoveryKind; kindLabel: string; body: string; newDate: string | null; createdByName: string | null; createdAt: string }
@@ -26,6 +26,7 @@ export async function addRecoveryNote(actor: Actor, projectId: string, raw: unkn
   assertEditable(access.project);
   const input = parseInput(recoveryNoteSchema, raw);
   return transaction(async (tx) => {
+    await assertEditableLocked(tx, projectId);   // kunci bersama proyek (langkah PERTAMA): status dibaca ulang segar — tidak lolos bila penutupan/pembatalan commit lebih dulu
     const n = await tx.trainingRecoveryNote.create({ data: { projectId, kind: input.kind, body: input.body, newDate: input.newDate ? isoToDate(input.newDate) : null, createdById: actor.userId } });
     await auditProject(tx, actor, projectId, { action: "training.recovery.add", summary: `Catatan pemulihan (${RECOVERY_KIND_LABEL[input.kind]}) ditulis di ${access.project.code}`, after: { noteId: n.id, kind: input.kind, newDate: input.newDate ?? null } });
     return { id: n.id };

@@ -16,7 +16,7 @@ import {
   instructorUpdateSchema, participantListSchema, participantSchema, participantUpdateSchema, scheduleSchema, scheduleUpdateSchema,
 } from "@/lib/validation/training";
 import type { Paged } from "@/lib/types";
-import { accessibleProjectWhere, assertEditable, loadProjectAccess, requireAbility, requireGlobalCap, requireModule, type ModuleContext } from "./access";
+import { accessibleProjectWhere, assertEditable, assertEditableLocked, loadProjectAccess, requireAbility, requireGlobalCap, requireModule, type ModuleContext } from "./access";
 import { assertUuid, auditProject, today } from "./shared";
 
 // ═════════════════════════════ Jadwal ═════════════════════════════
@@ -143,6 +143,7 @@ export async function createSchedule(actor: Actor, projectId: string, raw: unkno
   const input = parseInput(scheduleSchema, raw);
   const tz = env().APP_TIMEZONE;
   const id = await transaction(async (tx) => {
+    await assertEditableLocked(tx, projectId);   // kunci bersama proyek (langkah PERTAMA): status dibaca ulang segar — tidak lolos bila penutupan/pembatalan commit lebih dulu
     await validateScheduleRefs(tx, projectId, input.inchargeId, input.projectInstructorId);
     const s = await tx.trainingSchedule.create({
       data: {
@@ -171,6 +172,7 @@ export async function updateSchedule(actor: Actor, scheduleId: string, raw: unkn
   const endTime = input.endTime ?? localTime(cur.endAt, tz);
   if (endTime <= startTime) throw Errors.validation("Jam selesai harus setelah jam mulai (di hari yang sama).", { endTime: "Sebelum jam mulai" });
   await transaction(async (tx) => {
+    await assertEditableLocked(tx, cur.projectId);   // kunci bersama proyek (langkah PERTAMA): status dibaca ulang segar — tidak lolos bila penutupan/pembatalan commit lebih dulu
     await validateScheduleRefs(tx, cur.projectId, input.inchargeId, input.projectInstructorId);
     const data: Prisma.TrainingScheduleUncheckedUpdateInput = { startAt: zonedInstant(date, startTime, tz), endAt: zonedInstant(date, endTime, tz) };
     for (const k of ["title", "location", "room", "inchargeId", "projectInstructorId", "status", "note"] as const) if (k in input) (data as Record<string, unknown>)[k] = input[k];
@@ -241,6 +243,7 @@ export async function addParticipant(actor: Actor, projectId: string, raw: unkno
   assertEditable(access.project);
   const input = parseInput(participantSchema, raw);
   return transaction(async (tx) => {
+    await assertEditableLocked(tx, projectId);   // kunci bersama proyek (langkah PERTAMA): status dibaca ulang segar — tidak lolos bila penutupan/pembatalan commit lebih dulu
     const { confirmed, ...fields } = input;
     const p = await tx.trainingParticipant.create({ data: { projectId, ...fields, confirmedAt: confirmed ? isoToDate(today()) : null, source: "MANUAL", createdById: actor.userId } });
     // Audit tanpa kontak: hanya nama dan status.
@@ -260,6 +263,7 @@ export async function updateParticipant(actor: Actor, participantId: string, raw
   const { confirmed, ...fields } = input;
   const confirmedAt = confirmed === undefined ? undefined : confirmed ? cur.confirmedAt ?? isoToDate(today()) : null;
   await transaction(async (tx) => {
+    await assertEditableLocked(tx, cur.projectId);   // kunci bersama proyek (langkah PERTAMA): status dibaca ulang segar — tidak lolos bila penutupan/pembatalan commit lebih dulu
     await tx.trainingParticipant.update({ where: { id: participantId }, data: { ...fields, ...(confirmedAt !== undefined ? { confirmedAt } : {}) } });
     if (confirmed !== undefined && (cur.confirmedAt !== null) !== confirmed) {
       await auditProject(tx, actor, cur.projectId, { action: "training.participant.confirm", summary: `Peserta "${cur.fullName}" ${confirmed ? "dikonfirmasi" : "dibatalkan konfirmasinya"}`, before: { participantId, confirmed: cur.confirmedAt !== null }, after: { participantId, confirmed } });
@@ -354,6 +358,7 @@ export async function assignInstructor(actor: Actor, projectId: string, raw: unk
   assertEditable(access.project);
   const input = parseInput(instructorAssignSchema, raw);
   return transaction(async (tx) => {
+    await assertEditableLocked(tx, projectId);   // kunci bersama proyek (langkah PERTAMA): status dibaca ulang segar — tidak lolos bila penutupan/pembatalan commit lebih dulu
     const ins = await tx.trainingInstructor.findUnique({ where: { id: input.instructorId }, select: { name: true, isActive: true } });
     if (!ins || !ins.isActive) throw Errors.validation("Instruktur / asesor tidak ditemukan atau nonaktif.", { instructorId: "Tidak valid" });
     try {
@@ -374,6 +379,7 @@ export async function updateProjectInstructor(actor: Actor, projectId: string, a
   assertUuid(assignmentId, "Penugasan");
   const input = parseInput(instructorAssignUpdateSchema, raw);
   await transaction(async (tx) => {
+    await assertEditableLocked(tx, projectId);   // kunci bersama proyek (langkah PERTAMA): status dibaca ulang segar — tidak lolos bila penutupan/pembatalan commit lebih dulu
     const cur = await tx.trainingProjectInstructor.findFirst({ where: { id: assignmentId, projectId }, include: { instructor: { select: { name: true } } } });
     if (!cur) throw Errors.notFound("Penugasan");
     await tx.trainingProjectInstructor.update({ where: { id: assignmentId }, data: input });
@@ -387,6 +393,7 @@ export async function removeProjectInstructor(actor: Actor, projectId: string, a
   assertEditable(access.project);
   assertUuid(assignmentId, "Penugasan");
   await transaction(async (tx) => {
+    await assertEditableLocked(tx, projectId);   // kunci bersama proyek (langkah PERTAMA): status dibaca ulang segar — tidak lolos bila penutupan/pembatalan commit lebih dulu
     const cur = await tx.trainingProjectInstructor.findFirst({ where: { id: assignmentId, projectId }, include: { instructor: { select: { name: true } }, _count: { select: { schedules: true } } } });
     if (!cur) throw Errors.notFound("Penugasan");
     if (cur._count.schedules > 0) throw Errors.conflict(`${cur.instructor.name} masih dipakai pada ${cur._count.schedules} jadwal. Ganti atau batalkan jadwalnya dulu.`);
@@ -451,6 +458,7 @@ export async function uploadDocument(actor: Actor, projectId: string, file: { na
   const meta = parseInput(documentMetaSchema, fields);
   if (SENSITIVE_DOC_CATEGORIES.includes(meta.category)) requireAbility(access, "manage_participants", "Dokumen peserta hanya dapat diunggah oleh pengelola peserta proyek.");
   return transaction(async (tx) => {
+    await assertEditableLocked(tx, projectId);   // kunci bersama proyek (langkah PERTAMA): status dibaca ulang segar — tidak lolos bila penutupan/pembatalan commit lebih dulu
     // Tipe berkas diverifikasi dari magic bytes & ukuran dibatasi oleh storeFile (PDF/PNG/JPEG, MAX_DOCUMENT_UPLOAD_MB).
     const stored = await storeFile(actor, "TRAINING_DOCUMENT", file, tx);
     const d = await tx.trainingProjectDocument.create({ data: { projectId, category: meta.category, title: meta.title, note: meta.note, fileId: stored.id, uploadedById: actor.userId } });
@@ -470,6 +478,7 @@ export async function deleteDocument(actor: Actor, documentId: string): Promise<
   if (SENSITIVE_DOC_CATEGORIES.includes(doc.category)) requireAbility(access, "manage_participants");
   if (!access.abilities.has("delete_document") && doc.uploadedById !== actor.userId) throw Errors.forbidden("Hanya pengunggah atau pengelola proyek yang dapat menghapus dokumen.");
   await transaction(async (tx) => {
+    await assertEditableLocked(tx, doc.projectId);   // kunci bersama proyek (langkah PERTAMA): status dibaca ulang segar — tidak lolos bila penutupan/pembatalan commit lebih dulu
     const r = await tx.trainingProjectDocument.updateMany({ where: { id: documentId, deletedAt: null }, data: { deletedAt: new Date(), deletedById: actor.userId } });
     if (r.count === 0) throw Errors.conflict("Dokumen sudah dihapus.");
     await auditProject(tx, actor, doc.projectId, { action: "training.document.delete", summary: `Dokumen "${doc.title}" dihapus dari ${access.project.code}`, before: { documentId, category: doc.category } });
