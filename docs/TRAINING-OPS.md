@@ -118,6 +118,20 @@ Seluruhnya satu transaksi: satu keputusan tidak sah menggagalkan semuanya. Audit
 
 **Melonggarkan checklist wajib** (dijadikan tidak wajib, atau dihapus): **alasan wajib**; setelah proyek **Berjalan** hanya pemegang hak menutup (Koordinator Program/Direktur) — itulah persetujuannya, PIC dan Admin Program meminta mereka; sebelum itu (Draf/Persiapan) PIC/Admin Program boleh dengan alasan. Setiap pelonggaran tercatat di `training_checklist_relaxations` (satu baris per item; dicabut bila item dijadikan wajib lagi), tampil di ringkasan penutupan dan Riwayat ("…dijadikan TIDAK WAJIB (pelonggaran)", alasan di kolom alasan), dan **harus diakui** Koordinator Program (kotak pengakuan) saat menutup. Yang sudah diakui tidak diminta lagi saat penutupan ulang; yang baru perlu diakui. Menurunkan item yang *sudah selesai* pun beralasan — menutup celah "turunkan lalu buka kembali". Migrasi: `20261111200000_closure_followup_relaxation` (aditif).
 
+#### Penutupan vs perubahan bersamaan (`lockProjectShared` / `lockProjectExclusive` di `training/access.ts`)
+
+Pemeriksaan `assertEditable(access.project)` di awal service membaca status proyek **sebelum** transaksi tulis, sedangkan penutupan membaca daftar tugas/checklist lalu mengubah status. Tanpa serialisasi, perubahan yang masuk di antaranya lolos diam-diam (terbukti lewat tes serentak pada kode sebelumnya: proyek Selesai dengan tugas terbuka yang tak diputuskan; ditutup "bersih" padahal checklist wajib kembali belum selesai; pelonggaran belum diakui; isi tugas berubah setelah dikunci). Perbaikannya: **satu kunci advisory per proyek**.
+
+| Pihak | Kunci | Perilaku |
+|---|---|---|
+| **Penulis**: tambah/ubah/komentar tugas, terapkan/tambah/ubah/hapus checklist, tambah/ubah/akhiri anggota, ubah data proyek | **Bersama** (banyak penulis paralel) | Langkah **pertama** di transaksi; lalu status proyek dibaca ulang **segar** (dan penanda tindak lanjut tugas) — ditolak bila final, dengan pesan yang sama seperti sebelumnya (`CONFLICT`) |
+| **Pengubah status**: tutup, batal, buka kembali, ganti status | **Eksklusif** | Menunggu penulis yang sedang berjalan selesai (data yang dibaca penutupan adalah yang **terbaru**) dan menahan penulis berikutnya sampai commit (mereka lalu melihat status baru) |
+
+Hasilnya, untuk **setiap** urutan waktu: penulis berhasil lebih dulu → penutupan membaca data terbaru dan meminta keputusan tugas / pengakuan pelonggaran / menolak checklist wajib yang belum selesai; penutupan berhasil lebih dulu → perubahan ditolak dengan pesan jelas ("Proyek sudah ditutup (Selesai) sehingga datanya dikunci…"); tugas **tindak lanjut tetap dapat dikerjakan** setelah proyek Selesai (dibaca segar di dalam kunci); tutup × batal: tepat satu yang menang, yang kalah menerima `CONFLICT` yang jelas (bukan galat basis data mentah).
+Aturan pakai: kunci diambil sebagai **hal pertama** di transaksi (sebelum menulis/mengunci baris lain) supaya urutan kunci seragam dan tidak ada deadlock; lepas otomatis saat commit/rollback. Tidak menambah tabel/migrasi.
+**Belum tercakup** (sengaja, tidak memengaruhi keputusan penutupan): penulisan dokumen, peserta, jadwal, instruktur, rujukan, milestone, item kesiapan, tugas jam kerja, dan catatan pemulihan masih memakai pemeriksaan awal service sehingga sangat jarang dapat lolos dalam jendela milidetik saat penutupan; dapat dipasangi `assertEditableLocked` dengan pola yang sama.
+Pengujian: `tests/integration/training-closure-concurrency.test.ts` memakai koneksi basis data yang benar-benar serentak; jendela balapan dilebarkan dengan trigger uji dan tiap skenario dijalankan pada lima selisih waktu mulai.
+
 ### Definisi indikator dashboard (`src/lib/training/indicators.ts`)
 
 | Indikator | Definisi |
@@ -319,6 +333,7 @@ Mengaktifkan flag tidak memberi siapa pun akses otomatis: Super Admin harus memb
 | Integrasi — alur bisnis (proyek→penutupan, dashboard, jadwal, peserta, dokumen, referensi) | `tests/integration/training-flow.test.ts` | 35 |
 | Unit + integrasi — penanda tugas operasional pada peta beban (definisi, ambang, cakupan, tidak memengaruhi status program) | `tests/unit/training-operational-load.test.ts`, `tests/integration/training-operational-load.test.ts` | 13 + 11 |
 | Unit + integrasi — jam kerja tanpa hitung ganda (idempoten, disesuaikan/selesai/manual, ganti pemegang jabatan, serentak, data lama, kembalikan ke template, rapikan kembar, ID konfigurasi) | `tests/unit/training-workload-sync.test.ts`, `tests/integration/training-workload-sync.test.ts` | 22 + 21 |
+| Integrasi — penutupan vs perubahan bersamaan (tutup × tambah tugas / ubah status / ubah isi / checklist wajib / batalkan; koneksi serentak, 5 selisih waktu) | `tests/integration/training-closure-concurrency.test.ts` | 11 |
 | Unit + integrasi — penutupan: keputusan tugas terbuka, tindak lanjut hidup, tugas yatim tidak dihitung, pelonggaran checklist wajib & pengakuan | `tests/unit/training-closure.test.ts`, `tests/integration/training-closure.test.ts` | 13 + 20 |
 | Integrasi — modul dimatikan | `tests/integration/training-flag.test.ts` | 3 |
 | Unit — mesin indikator, konfigurasi, skema PATCH, eskalasi & deret hari kerja, waktu relatif | `tests/unit/training-indicators.test.ts`, `training-validation.test.ts`, `training-escalation.test.ts`, `nav-pref.test.ts`, `format-timeago.test.ts` | 60 |

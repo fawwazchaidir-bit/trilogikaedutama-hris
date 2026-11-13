@@ -24,7 +24,7 @@ import {
 } from "@/lib/validation/training";
 import type { Paged } from "@/lib/types";
 import {
-  accessibleProjectWhere, assertEditable, assertModuleEnabled, loadProjectAccess, requireAbility, requireGlobalCap, requireModule,
+  accessibleProjectWhere, assertEditable, assertEditableLocked, assertModuleEnabled, loadProjectAccess, lockProjectExclusive, requireAbility, requireGlobalCap, requireModule,
 } from "./access";
 import { assertUuid, auditProject, iso, liveTaskWhere, today } from "./shared";
 import { loadConfig } from "./indicator-config";
@@ -305,6 +305,7 @@ export async function updateProject(actor: Actor, id: string, raw: unknown): Pro
   assertEditable(access.project);
   const input = parseInput(projectUpdateSchema, raw);
   await transaction(async (tx) => {
+    await assertEditableLocked(tx, id);                              // proyek yang sedang/sudah ditutup tidak dapat diubah datanya
     const b = await tx.trainingProject.findUniqueOrThrow({ where: { id } });
     const data: Prisma.TrainingProjectUncheckedUpdateInput = {};
     const next = { ...input };
@@ -367,6 +368,7 @@ export async function changeProjectStatus(actor: Actor, id: string, raw: unknown
   assertEditable(access.project);
   const { to } = parseInput(projectStatusSchema, raw);
   return transaction(async (tx) => {
+    await lockProjectExclusive(tx, id);
     const p = await tx.trainingProject.findUniqueOrThrow({ where: { id } });
     if (PROJECT_FORWARD[p.status] !== to) {
       throw Errors.conflict(`Status proyek saat ini "${PROJECT_STATUS_LABEL[p.status]}"; status berikutnya yang sah adalah ${PROJECT_FORWARD[p.status] ? `"${PROJECT_STATUS_LABEL[PROJECT_FORWARD[p.status]!]}"` : "—"}.`);
@@ -399,7 +401,12 @@ export async function closeProject(actor: Actor, id: string, raw: unknown): Prom
   assertEditable(access.project);
   const input = parseInput(projectCloseSchema, raw);
   return transaction(async (tx) => {
+    // Kunci EKSKLUSIF proyek: menunggu penulis (tugas/checklist/anggota) yang sedang berjalan selesai — sehingga semua yang dibaca di bawah adalah data TERBARU — dan menahan penulis
+    // berikutnya sampai penutupan commit (mereka lalu melihat status baru dan ditolak). Harus langkah pertama di transaksi.
+    await lockProjectExclusive(tx, id);
     const p = await tx.trainingProject.findUniqueOrThrow({ where: { id } });
+    if (p.status === "COMPLETED") throw Errors.conflict("Proyek ini sudah ditutup (Selesai) oleh pengguna lain. Muat ulang halaman.");
+    if (p.status === "CANCELLED") throw Errors.conflict("Proyek ini sudah dibatalkan sehingga tidak dapat ditutup.");
     if (p.status !== "PREPARATION" && p.status !== "RUNNING") throw Errors.conflict("Hanya proyek berstatus Persiapan atau Berjalan yang dapat ditutup.");
     const [items, tasks, relaxations] = await Promise.all([
       tx.trainingProjectChecklistItem.findMany({ where: { projectId: id }, select: { title: true, isRequired: true, isDone: true } }),
@@ -457,7 +464,10 @@ export async function cancelProject(actor: Actor, id: string, raw: unknown): Pro
   assertEditable(access.project);
   const { reason } = parseInput(projectReasonSchema, raw);
   await transaction(async (tx) => {
+    await lockProjectExclusive(tx, id);                              // serial dengan penutupan & penulis; status dibaca SEGAR di bawah
     const p = await tx.trainingProject.findUniqueOrThrow({ where: { id } });
+    if (p.status === "COMPLETED") throw Errors.conflict("Proyek ini sudah ditutup (Selesai) sehingga tidak dapat dibatalkan. Koordinator Program dapat membukanya kembali dengan alasan.");
+    if (p.status === "CANCELLED") throw Errors.conflict("Proyek ini sudah dibatalkan.");
     const r = await tx.trainingProject.updateMany({ where: { id, status: p.status }, data: { status: "CANCELLED", cancelledAt: new Date(), cancelledById: actor.userId, cancelReason: reason } });
     if (r.count === 0) throw Errors.conflict("Status proyek baru saja diubah pengguna lain. Muat ulang halaman.");
     await auditProject(tx, actor, id, { action: "training.project.cancel", summary: `Proyek ${p.code} dibatalkan`, before: { status: p.status }, after: { status: "CANCELLED" }, reason });
@@ -470,6 +480,7 @@ export async function reopenProject(actor: Actor, id: string, raw: unknown): Pro
   requireAbility(access, "reopen", "Hanya Koordinator Program yang dapat membuka kembali proyek.");
   const { reason } = parseInput(projectReasonSchema, raw);
   await transaction(async (tx) => {
+    await lockProjectExclusive(tx, id);
     const p = await tx.trainingProject.findUniqueOrThrow({ where: { id } });
     if (p.status !== "COMPLETED") throw Errors.conflict("Hanya proyek berstatus Selesai yang dapat dibuka kembali.");
     await tx.trainingProject.update({ where: { id }, data: { status: "RUNNING", closedAt: null, closedById: null, closureSummary: null, closureFollowUp: null, closureOverrideReason: null } });
@@ -523,7 +534,7 @@ export async function addMember(actor: Actor, projectId: string, raw: unknown): 
   assertEditable(access.project);
   const input = parseInput(memberAddSchema, raw);
   requireTeamRights(access, [input.role]);
-  await transaction(async (tx) => addMemberRow(tx, actor, access.project, input.employeeId, input.role, input.note));
+  await transaction(async (tx) => { await assertEditableLocked(tx, projectId); await addMemberRow(tx, actor, access.project, input.employeeId, input.role, input.note); });
 }
 
 export async function updateMember(actor: Actor, projectId: string, memberId: string, raw: unknown): Promise<void> {
@@ -532,6 +543,7 @@ export async function updateMember(actor: Actor, projectId: string, memberId: st
   assertUuid(memberId, "Anggota");
   const input = parseInput(memberUpdateSchema, raw);
   await transaction(async (tx) => {
+    await assertEditableLocked(tx, projectId);
     // `projectId` ikut pada where: anggota proyek lain dengan ID yang ditebak → 404.
     const m = await tx.trainingProjectMember.findFirst({ where: { id: memberId, projectId, endedAt: null }, include: { employee: { select: { fullName: true } } } });
     if (!m) throw Errors.notFound("Anggota");
@@ -562,6 +574,7 @@ export async function endMember(actor: Actor, projectId: string, memberId: strin
   assertEditable(access.project);
   assertUuid(memberId, "Anggota");
   return transaction(async (tx) => {
+    await assertEditableLocked(tx, projectId);
     const m = await tx.trainingProjectMember.findFirst({ where: { id: memberId, projectId, endedAt: null }, include: { employee: { select: { fullName: true } } } });
     if (!m) throw Errors.notFound("Anggota");
     requireTeamRights(access, [m.role]);

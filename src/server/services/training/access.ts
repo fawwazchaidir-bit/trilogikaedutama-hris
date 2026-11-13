@@ -137,6 +137,34 @@ export function assertEditable(project: Pick<ProjectCore, "status">): void {
   }
 }
 
+// ═════════ Serialisasi penutupan vs perubahan bersamaan ═════════
+//
+// Pemeriksaan `assertEditable(access.project)` di awal service membaca status proyek SEBELUM transaksi tulis, sedangkan penutupan membaca daftar tugas/checklist lalu mengubah
+// status. Tanpa serialisasi, perubahan yang masuk di antaranya lolos diam-diam (tugas terbuka menggantung di proyek Selesai, checklist wajib tidak lagi lengkap pada proyek
+// yang ditutup "bersih", pelonggaran belum diakui). Solusinya satu kunci advisory per proyek:
+//   • PENULIS (tambah/ubah tugas, checklist, anggota, data proyek): kunci BERSAMA — banyak penulis berjalan paralel — lalu membaca ULANG status proyek (segar) dan menolak bila final.
+//   • PENGUBAH STATUS (tutup, batal, buka kembali, ganti status): kunci EKSKLUSIF — menunggu penulis yang sedang berjalan selesai (sehingga data terbaru terbaca) dan menahan
+//     penulis berikutnya sampai ia commit (sehingga mereka melihat status baru dan ditolak dengan pesan jelas).
+// ATURAN: ambil kunci ini sebagai hal PERTAMA di transaksi (sebelum menulis/mengunci baris lain) agar urutan kunci seragam dan tidak ada deadlock. Kunci lepas otomatis saat commit/rollback.
+const projectEditKey = (projectId: string) => `training:project-edit:${projectId}`;
+
+/** Kunci BERSAMA (penulis). Panggil sebagai langkah pertama di transaksi tulis. */
+export const lockProjectShared = (tx: Tx, projectId: string) => tx.$executeRaw`SELECT pg_advisory_xact_lock_shared(hashtextextended(${projectEditKey(projectId)}, 0))`;
+/** Kunci EKSKLUSIF (tutup/batal/buka kembali/ganti status). Panggil sebagai langkah pertama di transaksi. */
+export const lockProjectExclusive = (tx: Tx, projectId: string) => tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${projectEditKey(projectId)}, 0))`;
+
+/**
+ * Untuk PENULIS: ambil kunci bersama lalu baca ulang status proyek yang SEGAR dan tolak bila sudah final (pesan sama dengan `assertEditable`). Hanya pemeriksaan di dalam transaksi
+ * inilah yang otoritatif; `assertEditable` di awal service hanya penolakan dini (bisa basi).
+ */
+export async function assertEditableLocked(tx: Tx, projectId: string): Promise<ProjectStatus> {
+  await lockProjectShared(tx, projectId);
+  const p = await tx.trainingProject.findUnique({ where: { id: projectId }, select: { status: true } });
+  if (!p) throw Errors.notFound("Proyek");
+  assertEditable(p);
+  return p.status;
+}
+
 /**
  * Apakah akun ini MASIH boleh membuka proyek? Untuk pekerja latar belakang yang tidak punya `Actor` (mis. penerima pengingat).
  * Aturannya identik dengan `loadProjectAccess`: kemampuan `view` dari level modul / Super Admin atau dari peran proyek yang masih AKTIF

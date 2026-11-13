@@ -21,7 +21,7 @@ import {
   taskStatusSchema, taskUpdateSchema, templateSaveSchema, checklistItemDeleteSchema,
 } from "@/lib/validation/training";
 import {
-  assertEditable, getModuleContext, loadProjectAccess, requireAbility, requireGlobalCap, requireModule, accessibleProjectWhere, type ProjectAccess,
+  assertEditable, assertEditableLocked, getModuleContext, loadProjectAccess, lockProjectShared, requireAbility, requireGlobalCap, requireModule, accessibleProjectWhere, type ProjectAccess,
 } from "./access";
 import { assertUuid, auditProject, iso, liveTaskWhere, today } from "./shared";
 
@@ -126,6 +126,19 @@ function assertTaskEditable(project: Pick<ProjectAccess["project"], "status">, t
   assertEditable(project);
 }
 
+/**
+ * Versi OTORITATIF (di dalam transaksi, setelah kunci bersama): status proyek dan penanda tindak lanjut tugas dibaca ULANG. Penutupan yang berhasil lebih dulu menandai tindak lanjut
+ * dan mengunci tugas lain; di sini keduanya terbaca segar, sehingga tugas yang bukan tindak lanjut ditolak dengan pesan "proyek sudah ditutup" sedangkan tindak lanjut tetap boleh dikerjakan.
+ */
+async function assertTaskEditableLocked(tx: Tx, projectId: string, taskId: string): Promise<void> {
+  await lockProjectShared(tx, projectId);
+  const p = await tx.trainingProject.findUnique({ where: { id: projectId }, select: { status: true } });
+  if (!p) throw Errors.notFound("Proyek");
+  if (!isFinalProject(p.status)) return;
+  const t = await tx.trainingTask.findUnique({ where: { id: taskId }, select: { isFollowUp: true } });
+  assertTaskEditable(p, { isFollowUp: t?.isFollowUp ?? false });
+}
+
 async function loadTask(actor: Actor, taskId: string): Promise<{ task: TaskRow; access: ProjectAccess }> {
   assertUuid(taskId, "Tugas");
   const task = await prisma.trainingTask.findUnique({ where: { id: taskId }, include: taskInclude });
@@ -217,6 +230,7 @@ export async function createTask(actor: Actor, projectId: string, raw: unknown):
   assertEditable(access.project);
   const input = parseInput(taskCreateSchema, raw);
   return transaction(async (tx) => {
+    await assertEditableLocked(tx, projectId);                       // kunci bersama + status proyek SEGAR (tidak bisa menyelinap ke proyek yang sedang/ sudah ditutup)
     await assertAssigneeInTeam(tx, projectId, input.assigneeId);
     const t = await tx.trainingTask.create({
       data: { projectId, title: input.title, description: input.description, assigneeId: input.assigneeId, dueDate: input.dueDate ? isoToDate(input.dueDate) : null, priority: input.priority, requiresReview: input.requiresReview, createdById: actor.userId },
@@ -234,6 +248,7 @@ export async function updateTask(actor: Actor, taskId: string, raw: unknown): Pr
   const input = parseInput(taskUpdateSchema, raw);
   const reason = input.reason?.trim() || null;
   await transaction(async (tx) => {
+    await assertTaskEditableLocked(tx, task.projectId, taskId);
     // Penanggung jawab divalidasi hanya bila DIGANTI: menyunting hal lain pada tugas yang masih atas nama karyawan yang sudah berhenti tidak boleh terkunci.
     if ("assigneeId" in input && (input.assigneeId ?? null) !== task.assigneeId) await assertAssigneeInTeam(tx, task.projectId, input.assigneeId);
     const data: Prisma.TrainingTaskUncheckedUpdateInput = {};
@@ -309,6 +324,7 @@ export async function changeTaskStatus(actor: Actor, taskId: string, raw: unknow
     throw Errors.conflict(`Status tugas tidak dapat diubah dari "${TASK_STATUS_LABEL[task.status]}" ke "${TASK_STATUS_LABEL[input.status]}".`);
   }
   await transaction(async (tx) => {
+    await assertTaskEditableLocked(tx, task.projectId, taskId);
     if (isAssignee && !canManage) await assertStillActiveMember(tx, task.projectId, actor.employeeId!);   // hak lahir dari keanggotaan: baca ulang bersama kunci
     const done = input.status === "DONE";
     const now = new Date();
@@ -355,6 +371,7 @@ export async function addComment(actor: Actor, taskId: string, raw: unknown): Pr
   if (!access.memberRole && !access.abilities.has("manage_tasks")) throw Errors.forbidden("Hanya anggota proyek yang dapat berkomentar pada tugas.");
   const { body } = parseInput(taskCommentSchema, raw);
   await transaction(async (tx) => {
+    await assertTaskEditableLocked(tx, task.projectId, taskId);
     await tx.trainingTaskComment.create({ data: { taskId, authorId: actor.userId, body } });
     await notifyEmployee(tx, actor, task.assigneeId && task.assigneeId !== actor.employeeId ? task.assigneeId : null, { type: "training.task.comment", title: "Komentar baru pada tugas Anda", body: `${task.title}: ${body.slice(0, 120)}`, href: "/training/tugas-saya" });
   });
@@ -409,6 +426,7 @@ export async function applyChecklistTemplate(actor: Actor, projectId: string, ra
   assertEditable(access.project);
   const { templateId } = parseInput(applyTemplateSchema, raw);
   return transaction(async (tx) => {
+    await assertEditableLocked(tx, projectId);
     const tpl = await tx.trainingChecklistTemplate.findUnique({ where: { id: templateId }, include: { items: { orderBy: [{ phase: "asc" }, { sortOrder: "asc" }] } } });
     if (!tpl || !tpl.isActive) throw Errors.validation("Template tidak ditemukan atau nonaktif.", { templateId: "Template tidak valid" });
     if ((await tx.trainingProjectChecklistItem.count({ where: { projectId, sourceTemplateName: tpl.name } })) > 0) throw Errors.conflict(`Template "${tpl.name}" sudah diterapkan pada proyek ini.`);
@@ -427,6 +445,7 @@ export async function addChecklistItem(actor: Actor, projectId: string, raw: unk
   assertEditable(access.project);
   const input = parseInput(checklistItemCreateSchema, raw);
   return transaction(async (tx) => {
+    await assertEditableLocked(tx, projectId);                       // item (terutama yang WAJIB) tidak boleh menyelinap ke proyek yang sedang/sudah ditutup
     await assertAssigneeInTeam(tx, projectId, input.assigneeId);
     const max = await tx.trainingProjectChecklistItem.aggregate({ where: { projectId, phase: input.phase }, _max: { sortOrder: true } });
     const it = await tx.trainingProjectChecklistItem.create({ data: { projectId, phase: input.phase, title: input.title, isRequired: input.isRequired, assigneeId: input.assigneeId, note: input.note, sortOrder: (max._max.sortOrder ?? -1) + 1, createdById: actor.userId } });
@@ -450,6 +469,7 @@ export async function updateChecklistItem(actor: Actor, itemId: string, raw: unk
   const promoting = input.isRequired === true && !item.isRequired;
   const relaxReason = demoting ? assertMayRelax(access, input.reason) : null;
   await transaction(async (tx) => {
+    await assertEditableLocked(tx, item.projectId);
     if ("isDone" in input && !canManage && isOwner) await assertStillActiveMember(tx, item.projectId, actor.employeeId!);
     if ("assigneeId" in input && (input.assigneeId ?? null) !== item.assigneeId) await assertAssigneeInTeam(tx, item.projectId, input.assigneeId);
     const data: Prisma.TrainingProjectChecklistItemUncheckedUpdateInput = {};
@@ -487,6 +507,7 @@ export async function deleteChecklistItem(actor: Actor, itemId: string, raw: unk
   if (item.isDone) throw Errors.conflict("Item yang sudah selesai tidak dapat dihapus. Buka kembali tanda selesainya dulu bila memang keliru.");
   const relaxReason = item.isRequired ? assertMayRelax(access, reason) : null;
   await transaction(async (tx) => {
+    await assertEditableLocked(tx, item.projectId);
     await tx.trainingProjectChecklistItem.delete({ where: { id: itemId } });
     if (item.isRequired) {
       await tx.trainingChecklistRelaxation.upsert({
