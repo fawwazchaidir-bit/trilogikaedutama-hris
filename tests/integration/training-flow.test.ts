@@ -311,18 +311,18 @@ describe("jadwal", () => {
     await addTeam(fx.mgr, a, [[fx.empIds[AYU], "PROJECT_MANAGER"]]);
     const b = await mkProject(fx.mgr, { name: "Proyek B", ...period });
     await addTeam(fx.mgr, b, [[fx.empIds[CITRA], "ADMIN_PROGRAM"]]);
-    await createSchedule(fx.emp1, a, { title: "Sesi A", date: "2027-04-05", startTime: "09:00", endTime: "12:00", room: "Ruang Utama" });
-    const touching = await createSchedule(fx.emp3, b, { title: "Sesi B1", date: "2027-04-05", startTime: "12:00", endTime: "14:00", room: "ruang   utama" });
+    await createSchedule(fx.emp1, a, { title: "Sesi A", date: "2027-04-05", startTime: "09:00", endTime: "12:00", room: "Ruang Utama", location: "Kantor Pusat" });
+    const touching = await createSchedule(fx.emp3, b, { title: "Sesi B1", date: "2027-04-05", startTime: "12:00", endTime: "14:00", room: "ruang   utama", location: "kantor pusat" });
     expect(touching.warnings).toEqual([]);
     // B2 beririsan dengan Sesi A (proyek lain) saja; tidak menyentuh B1 (mulai 12.00).
-    const overlap = await createSchedule(fx.emp3, b, { title: "Sesi B2", date: "2027-04-05", startTime: "10:00", endTime: "11:30", room: "RUANG UTAMA" });
+    const overlap = await createSchedule(fx.emp3, b, { title: "Sesi B2", date: "2027-04-05", startTime: "10:00", endTime: "11:30", room: "RUANG UTAMA", location: "Kantor  Pusat." });
     expect(overlap.warnings).toHaveLength(1);
     expect(overlap.warnings[0]).toContain("Ruangan yang sama");
     expect(overlap.warnings[0]).toContain("proyek lain (di luar akses Anda)"); // Citra bukan anggota A → detail disembunyikan
     const asMgr = (await listCalendar(fx.mgr, { from: "2027-04-01", to: "2027-04-30" })).find((s) => s.title === "Sesi B2")!;
     expect(asMgr.conflicts[0]).toMatchObject({ kind: "ROOM", visible: true, withTitle: "Sesi A" });
     // Bentrok dengan jadwal proyek sendiri juga terdeteksi, dan rinciannya terlihat oleh anggotanya.
-    const same = await createSchedule(fx.emp3, b, { title: "Sesi B3", date: "2027-04-05", startTime: "13:30", endTime: "15:00", room: "Ruang Utama" });
+    const same = await createSchedule(fx.emp3, b, { title: "Sesi B3", date: "2027-04-05", startTime: "13:30", endTime: "15:00", room: "Ruang Utama", location: "Kantor Pusat" });
     expect(same.warnings).toHaveLength(1);
     expect(same.warnings[0]).toContain('"Sesi B1"');
     await updateSchedule(fx.emp3, overlap.id, { status: "CANCELLED" });
@@ -345,6 +345,116 @@ describe("jadwal", () => {
     expect(await fail(createSchedule(fx.emp1, a, { title: "PJ luar", date: "2027-05-06", startTime: "09:00", endTime: "10:00", inchargeId: fx.lonerEmp }))).toMatchObject({ code: "VALIDATION" });
     expect((await listCalendar(fx.emp2, { from: "2027-05-01", to: "2027-05-31" })).map((s) => s.title)).toEqual(["Uji A"]); // Budi hanya di A
     expect(await fail(removeProjectInstructor(fx.mgr, a, pa.id))).toMatchObject({ code: "CONFLICT" }); // masih dipakai jadwal
+  });
+
+  describe("bentrok ruangan menurut LOKASI + RUANGAN + waktu (bukan nama ruang saja)", () => {
+    const period = { startDate: "2027-06-07", endDate: "2027-06-09" };
+    const day = "2027-06-08";
+    const sess = (title: string, startTime: string, endTime: string, over: Record<string, unknown> = {}) => ({ title, date: day, startTime, endTime, ...over });
+    const twoProjects = async () => {
+      const a = await mkProject(fx.mgr, { name: "Proyek A", ...period });
+      await addTeam(fx.mgr, a, [[fx.empIds[AYU], "PROJECT_MANAGER"]]);
+      const b = await mkProject(fx.mgr, { name: "Proyek B", ...period });
+      await addTeam(fx.mgr, b, [[fx.empIds[AYU], "PROJECT_MANAGER"]]);
+      return { a, b };
+    };
+    const calendar = async () => listCalendar(fx.mgr, { from: "2027-06-01", to: "2027-06-30" });
+
+    it("'Ruang Jasmine' di DUA HOTEL berbeda bukan bentrok; di hotel yang sama = bentrok pasti (kedua arah)", async () => {
+      const { a, b } = await twoProjects();
+      await createSchedule(fx.emp1, a, sess("Kelas Aston", "09:00", "12:00", { room: "Ruang Jasmine", location: "Hotel Aston Magelang" }));
+      const other = await createSchedule(fx.emp1, b, sess("Kelas Santika", "10:00", "11:00", { room: "ruang jasmine", location: "Hotel Santika Yogyakarta" }));
+      expect(other.warnings).toEqual([]);
+      let cal = await calendar();
+      expect(cal.find((x) => x.title === "Kelas Aston")!.conflicts).toEqual([]);
+      expect(cal.find((x) => x.title === "Kelas Santika")!.conflicts).toEqual([]);
+
+      const same = await createSchedule(fx.emp1, b, sess("Kelas Aston lagi", "11:00", "13:00", { room: "RUANG JASMINE", location: "aston hotel, magelang" }));
+      expect(same.warnings).toHaveLength(1);
+      expect(same.warnings[0]).toContain("Ruangan yang sama (lokasi sama)");
+      cal = await calendar();
+      expect(cal.find((x) => x.title === "Kelas Aston lagi")!.conflicts).toMatchObject([{ kind: "ROOM", visible: true, withTitle: "Kelas Aston", why: null }]);
+      expect(cal.find((x) => x.title === "Kelas Aston")!.conflicts).toMatchObject([{ kind: "ROOM", withTitle: "Kelas Aston lagi" }]);
+    });
+
+    it("lokasi belum jelas → 'perlu diperiksa' (bukan dianggap aman), dua arah; tidak memblokir penyimpanan", async () => {
+      const { a, b } = await twoProjects();
+      await createSchedule(fx.emp1, a, sess("Sesi berlokasi", "09:00", "12:00", { room: "Ruang Jasmine", location: "Hotel Aston" }));
+      const r = await createSchedule(fx.emp1, b, sess("Sesi tanpa lokasi", "10:00", "11:00", { room: "Ruang Jasmine" }));
+      expect(r.id).toBeTruthy();                                                       // tetap tersimpan
+      expect(r.warnings).toHaveLength(1);
+      expect(r.warnings[0]).toMatch(/Bentrok ruangan perlu diperiksa:.*Sesi berlokasi.*lokasinya belum jelas/);
+      expect(r.warnings[0]).not.toContain("Ruangan yang sama (lokasi sama)");            // bukan klaim pasti
+      const cal = await calendar();
+      expect(cal.find((x) => x.title === "Sesi tanpa lokasi")!.conflicts).toMatchObject([{ kind: "ROOM_CHECK", why: "NO_LOCATION", withTitle: "Sesi berlokasi" }]);
+      expect(cal.find((x) => x.title === "Sesi berlokasi")!.conflicts).toMatchObject([{ kind: "ROOM_CHECK", why: "NO_LOCATION", withTitle: "Sesi tanpa lokasi" }]);
+      // Setelah lokasi dilengkapi dan ternyata berbeda → peringatan hilang; bila ternyata sama → menjadi bentrok pasti.
+      const fix = await updateSchedule(fx.emp1, r.id, { location: "Hotel Santika" });
+      expect(fix.warnings).toEqual([]);
+      const fix2 = await updateSchedule(fx.emp1, r.id, { location: "Hotel Aston" });
+      expect(fix2.warnings).toHaveLength(1);
+      expect(fix2.warnings[0]).toContain("Ruangan yang sama (lokasi sama)");
+    });
+
+    it("lokasi berbeda tetapi mirip ('Hotel Aston' vs 'Hotel Aston Magelang') → perlu diperiksa dengan sebab SIMILAR_LOCATION", async () => {
+      const { a, b } = await twoProjects();
+      await createSchedule(fx.emp1, a, sess("Sesi umum", "09:00", "12:00", { room: "Ruang Jasmine", location: "Hotel Aston" }));
+      const r = await createSchedule(fx.emp1, b, sess("Sesi rinci", "10:00", "11:00", { room: "Ruang Jasmine", location: "Hotel Aston Magelang" }));
+      expect(r.warnings).toHaveLength(1);
+      expect(r.warnings[0]).toMatch(/perlu diperiksa:.*lokasinya mirip/);
+      expect((await calendar()).find((x) => x.title === "Sesi rinci")!.conflicts).toMatchObject([{ kind: "ROOM_CHECK", why: "SIMILAR_LOCATION" }]);
+    });
+
+    it("jadwal tanpa ruangan tidak pernah bentrok ruangan; ruangan berbeda di lokasi sama bukan bentrok; waktu bersentuhan bukan bentrok", async () => {
+      const { a, b } = await twoProjects();
+      await createSchedule(fx.emp1, a, sess("Ruang Jasmine", "09:00", "12:00", { room: "Ruang Jasmine", location: "Hotel Aston" }));
+      expect((await createSchedule(fx.emp1, b, sess("Tanpa ruangan", "10:00", "11:00", { location: "Hotel Aston" }))).warnings).toEqual([]);
+      expect((await createSchedule(fx.emp1, b, sess("Ruang Melati", "10:00", "11:00", { room: "Ruang Melati", location: "Hotel Aston" }))).warnings).toEqual([]);
+      expect((await createSchedule(fx.emp1, b, sess("Mulai pas selesai", "12:00", "13:00", { room: "Ruang Jasmine", location: "Hotel Aston" }))).warnings).toEqual([]);
+    });
+
+    it("lawan di luar akses: peringatan umum saja — lokasi/rincian proyek lawan tidak dibuka, termasuk pada 'perlu diperiksa'", async () => {
+      const a = await mkProject(fx.mgr, { name: "Proyek rahasia klien", ...period });
+      await addTeam(fx.mgr, a, [[fx.empIds[AYU], "PROJECT_MANAGER"]]);
+      const b = await mkProject(fx.mgr, { name: "Proyek B", ...period });
+      await addTeam(fx.mgr, b, [[fx.empIds[CITRA], "ADMIN_PROGRAM"]]);                  // Citra tidak ada di proyek A
+      await createSchedule(fx.emp1, a, sess("Sesi rahasia", "09:00", "12:00", { room: "Ruang Jasmine", location: "Hotel Aston" }));
+      const r = await createSchedule(fx.emp3, b, sess("Sesi Citra", "10:00", "11:00", { room: "Ruang Jasmine" }));
+      expect(r.warnings).toHaveLength(1);
+      expect(r.warnings[0]).toContain("proyek lain (di luar akses Anda)");
+      expect(r.warnings[0]).not.toMatch(/Aston|rahasia/i);
+      const mine = (await listCalendar(fx.emp3, { from: "2027-06-01", to: "2027-06-30" })).find((x) => x.title === "Sesi Citra")!;
+      expect(mine.conflicts).toEqual([{ kind: "ROOM_CHECK", visible: false, withProjectCode: null, withTitle: null, why: "NO_LOCATION" }]);
+    });
+
+    it("jadwal milik proyek yang DIBATALKAN tidak menimbulkan bentrok (ruangannya tidak jadi dipakai), dan sebaliknya", async () => {
+      const { a, b } = await twoProjects();
+      await createSchedule(fx.emp1, a, sess("Sesi proyek batal", "09:00", "12:00", { room: "Ruang Jasmine", location: "Hotel Aston" }));
+      const r = await createSchedule(fx.emp1, b, sess("Sesi proyek aktif", "10:00", "11:00", { room: "Ruang Jasmine", location: "Hotel Aston" }));
+      expect(r.warnings).toHaveLength(1);
+      await cancelProject(fx.mgr, a, { reason: "Klien membatalkan seluruh program" });
+      const cal = await calendar();
+      expect(cal.find((x) => x.title === "Sesi proyek aktif")!.conflicts).toEqual([]);
+      expect(cal.find((x) => x.title === "Sesi proyek batal")!.conflicts).toEqual([]);
+      // 11.30–12.30 hanya beririsan dengan jadwal proyek yang sudah dibatalkan (09.00–12.00), bukan dengan sesi aktif (10.00–11.00).
+      expect((await createSchedule(fx.emp1, b, sess("Sesi susulan", "11:30", "12:30", { room: "Ruang Jasmine", location: "Hotel Aston" }))).warnings).toEqual([]);
+    });
+
+    it("instruktur: orang yang sama bentrok walau ruangan & lokasi berbeda; instruktur berbeda tidak", async () => {
+      const { a, b } = await twoProjects();
+      const { id: i1 } = await createInstructor(fx.mgr, { name: "Dr. Satu", kind: "INSTRUCTOR" });
+      const { id: i2 } = await createInstructor(fx.mgr, { name: "Dr. Dua", kind: "INSTRUCTOR" });
+      const a1 = await assignInstructor(fx.mgr, a, { instructorId: i1, kind: "INSTRUCTOR" });
+      const b1 = await assignInstructor(fx.mgr, b, { instructorId: i1, kind: "INSTRUCTOR", confirmation: "CONFIRMED" });
+      const b2 = await assignInstructor(fx.mgr, b, { instructorId: i2, kind: "INSTRUCTOR", confirmation: "CONFIRMED" });
+      await createSchedule(fx.emp1, a, sess("Mengajar A", "09:00", "12:00", { room: "Ruang Jasmine", location: "Hotel Aston", projectInstructorId: a1.id }));
+      const same = await createSchedule(fx.emp1, b, sess("Mengajar B1", "10:00", "11:00", { room: "Ruang Melati", location: "Hotel Santika", projectInstructorId: b1.id }));
+      expect(same.warnings).toHaveLength(1);
+      expect(same.warnings[0]).toContain("Instruktur / asesor yang sama");
+      expect((await calendar()).find((x) => x.title === "Mengajar B1")!.conflicts).toMatchObject([{ kind: "INSTRUCTOR", why: null }]);
+      const diff = await createSchedule(fx.emp1, b, sess("Mengajar B2", "10:00", "11:00", { room: "Ruang Melati", location: "Hotel Santika", projectInstructorId: b2.id }));
+      expect(diff.warnings.filter((w) => w.includes("Instruktur"))).toEqual([]);
+    });
   });
 
   it("peringatan bila tanggal di luar periode proyek", async () => {

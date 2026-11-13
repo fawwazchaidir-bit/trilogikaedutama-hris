@@ -10,7 +10,7 @@ import { dateToIso, isoToDate } from "../../json";
 import { storeFile } from "../files";
 import { addDays, localDate, localTime, startOfLocalDay, zonedInstant } from "@/lib/time";
 import { SENSITIVE_DOC_CATEGORIES, type Confirmation, type DocCategory, type ExternalSystem, type InstructorKind, type ParticipantStatus, type ScheduleStatus } from "@/lib/training/types";
-import { intervalsOverlap, normalizeRoom } from "@/lib/training/misc";
+import { conflictMessage, intervalsOverlap, matchRoom } from "@/lib/training/misc";
 import {
   assignmentLinkSchema, calendarQuerySchema, documentMetaSchema, externalRefSchema, instructorAssignSchema, instructorAssignUpdateSchema, instructorSchema,
   instructorUpdateSchema, participantListSchema, participantSchema, participantUpdateSchema, scheduleSchema, scheduleUpdateSchema,
@@ -22,11 +22,17 @@ import { assertUuid, auditProject, today } from "./shared";
 // ═════════════════════════════ Jadwal ═════════════════════════════
 
 export interface ConflictDto {
-  kind: "ROOM" | "INSTRUCTOR";
-  /** Rincian hanya diberikan bila pelaku boleh melihat proyek lawan; bila tidak, hanya peringatan umum. */
+  /**
+   * ROOM = ruangan DAN lokasi sama (bentrok pasti); ROOM_CHECK = nama ruangan sama tetapi lokasi belum cukup jelas (perlu diperiksa — bukan dianggap aman);
+   * INSTRUCTOR = instruktur/asesor (orang) yang sama.
+   */
+  kind: "ROOM" | "ROOM_CHECK" | "INSTRUCTOR";
+  /** Rincian hanya diberikan bila pelaku boleh melihat proyek lawan; bila tidak, hanya peringatan umum (lokasi lawan tidak dibuka). */
   visible: boolean;
   withProjectCode: string | null;
   withTitle: string | null;
+  /** Hanya untuk ROOM_CHECK: lokasi kosong, atau berbeda tetapi mirip. */
+  why: "NO_LOCATION" | "SIMILAR_LOCATION" | null;
 }
 
 export interface ScheduleDto {
@@ -38,34 +44,41 @@ export interface ScheduleDto {
 }
 
 const scheduleInclude = {
-  project: { select: { code: true, name: true } },
+  project: { select: { code: true, name: true, status: true } },
   incharge: { select: { fullName: true } },
   projectInstructor: { select: { instructorId: true, instructor: { select: { name: true } } } },
 } satisfies Prisma.TrainingScheduleInclude;
 type ScheduleRow = Prisma.TrainingScheduleGetPayload<{ include: typeof scheduleInclude }>;
 
-/** Peringatan bentrok (bukan pemblokiran): ruangan yang sama atau instruktur yang sama pada waktu beririsan, lintas proyek. */
+/**
+ * Peringatan bentrok (bukan pemblokiran), lintas proyek, pada waktu yang beririsan:
+ *   · RUANGAN menurut LOKASI + RUANGAN + waktu (`matchRoom`): "Ruang Jasmine" di dua hotel berbeda BUKAN bentrok; bila lokasi belum cukup jelas (kosong/mirip)
+ *     hasilnya ROOM_CHECK ("perlu diperiksa"), tidak dianggap aman;
+ *   · INSTRUKTUR menurut orang (satu entri direktori) + waktu.
+ * Jadwal yang dibatalkan, dan jadwal milik proyek yang DIBATALKAN (ruangan/instrukturnya tidak jadi dipakai), tidak dihitung — baik sebagai pembanding maupun sebagai baris yang diperiksa.
+ */
 async function conflictsFor(actor: Actor, mod: ModuleContext, rows: ScheduleRow[]): Promise<Map<string, ConflictDto[]>> {
   const out = new Map<string, ConflictDto[]>();
-  const live = rows.filter((r) => r.status !== "CANCELLED");
+  const live = rows.filter((r) => r.status !== "CANCELLED" && r.project.status !== "CANCELLED");
   for (const r of rows) out.set(r.id, []);
   if (live.length === 0) return out;
   const minStart = new Date(Math.min(...live.map((r) => r.startAt.getTime())));
   const maxEnd = new Date(Math.max(...live.map((r) => r.endAt.getTime())));
   const [others, mine] = await Promise.all([
-    prisma.trainingSchedule.findMany({ where: { status: { not: "CANCELLED" }, startAt: { lt: maxEnd }, endAt: { gt: minStart } }, include: scheduleInclude }),
+    prisma.trainingSchedule.findMany({ where: { status: { not: "CANCELLED" }, project: { status: { not: "CANCELLED" } }, startAt: { lt: maxEnd }, endAt: { gt: minStart } }, include: scheduleInclude }),
     actor.employeeId ? prisma.trainingProjectMember.findMany({ where: { employeeId: actor.employeeId, endedAt: null }, select: { projectId: true } }) : Promise.resolve([]),
   ]);
   const visibleProjects = new Set(mine.map((m) => m.projectId));
   for (const a of live) {
-    const room = normalizeRoom(a.room);
     for (const b of others) {
       if (b.id === a.id || !intervalsOverlap(a.startAt, a.endAt, b.startAt, b.endAt)) continue;
-      const sameRoom = room !== null && room === normalizeRoom(b.room);
+      const room = matchRoom(a, b);
       const sameInstructor = !!a.projectInstructor && !!b.projectInstructor && a.projectInstructor.instructorId === b.projectInstructor.instructorId;
       const visible = mod.caps.viewAll || visibleProjects.has(b.projectId);
-      if (sameRoom) out.get(a.id)!.push({ kind: "ROOM", visible, withProjectCode: visible ? b.project.code : null, withTitle: visible ? b.title : null });
-      if (sameInstructor) out.get(a.id)!.push({ kind: "INSTRUCTOR", visible, withProjectCode: visible ? b.project.code : null, withTitle: visible ? b.title : null });
+      const who = { visible, withProjectCode: visible ? b.project.code : null, withTitle: visible ? b.title : null };
+      if (room.match === "SAME") out.get(a.id)!.push({ kind: "ROOM", ...who, why: null });
+      else if (room.match === "CHECK") out.get(a.id)!.push({ kind: "ROOM_CHECK", ...who, why: room.why });
+      if (sameInstructor) out.get(a.id)!.push({ kind: "INSTRUCTOR", ...who, why: null });
     }
   }
   return out;
@@ -118,10 +131,7 @@ async function scheduleWarnings(actor: Actor, mod: ModuleContext, id: string, pr
   const row = await prisma.trainingSchedule.findUniqueOrThrow({ where: { id }, include: scheduleInclude });
   const [dto] = await toScheduleDtos(actor, mod, [row]);
   const w: string[] = [];
-  for (const c of dto!.conflicts) {
-    const who = c.visible ? `${c.withProjectCode} · "${c.withTitle}"` : "proyek lain (di luar akses Anda)";
-    w.push(c.kind === "ROOM" ? `Ruangan yang sama dipakai ${who} pada waktu yang beririsan.` : `Instruktur / asesor yang sama dijadwalkan di ${who} pada waktu yang beririsan.`);
-  }
+  for (const c of dto!.conflicts) w.push(conflictMessage(c));
   if (project.startDate && project.endDate && (date < dateToIso(project.startDate) || date > dateToIso(project.endDate))) w.push("Tanggal ini berada di luar periode proyek.");
   return w;
 }

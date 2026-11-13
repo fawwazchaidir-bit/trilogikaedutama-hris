@@ -228,6 +228,37 @@ Definisi (satu tempat; dasbor "Ringkasan penugasan tim" memakai definisi yang sa
 **Penanda "Perlu dicek"** — beban jam standar **minggu ini** masih "Ada ruang" (≤ `thresholds.load.roomyMax`) **dan** (tugas terbuka ≥ `thresholds.operational.openMin` **atau** tugas terlambat ≥ `overdueMin`). Awal: 5 dan 1 — **usulan awal, bukan ukuran baku**; dapat diubah Direktur di Rumus Indikator (berversi; konfigurasi lama tanpa bagian ini memakai nilai bawaan). Tinjau setelah 1–2 bulan: apakah terlalu sering muncul atau melewatkan kondisi yang perlu diperhatikan, dan apakah informasi terpisah sudah cukup atau perlu estimasi jam langsung pada tugas.
 Penanda **hanya meminta PIC atau atasan memeriksa keadaan** — tidak mengubah status program, tidak memicu eskalasi/notifikasi, dan bukan penilaian kinerja staf. Anggota biasa hanya melihat barisnya sendiri (scope `self`).
 
+### Bentrok jadwal
+
+Peringatan saja (tidak memblokir penyimpanan), lintas proyek, dihitung saat jadwal disimpan dan saat daftar/kalender dibuka (`conflictsFor`; aturan murni `matchRoom` di `src/lib/training/misc.ts`).
+
+**Ruangan: lokasi + ruangan + waktu.** Dua jadwal yang waktunya beririsan (bersentuhan di batas, mis. selesai 10.00 / mulai 10.00, **bukan** bentrok) dibandingkan sebagai berikut:
+
+| Ruangan | Lokasi | Hasil |
+|---|---|---|
+| sama (abaikan huruf besar/kecil & spasi) | sama (abaikan huruf besar/kecil, tanda baca, urutan kata: "Aston Hotel, Magelang" = "Hotel Aston Magelang") | **Bentrok** (`ROOM`) |
+| sama | **jelas berbeda** ("Hotel Aston" vs "Hotel Santika"; "Hotel Aston Magelang" vs "Hotel Aston Yogyakarta") | bukan bentrok — "Ruang Jasmine" di dua hotel tidak dianggap satu ruangan |
+| sama | **salah satu atau keduanya kosong** | **Bentrok ruangan perlu diperiksa** (`ROOM_CHECK`, sebab `NO_LOCATION`) — tidak dianggap aman |
+| sama | berbeda tetapi yang satu memuat semua kata yang lain ("Hotel Aston" vs "Hotel Aston Magelang") | **Perlu diperiksa** (`ROOM_CHECK`, sebab `SIMILAR_LOCATION`) |
+| berbeda, atau salah satu jadwal **tanpa ruangan** | apa pun | bukan bentrok ruangan (jadwal tanpa ruangan tidak mengklaim ruangan; lokasi sama tanpa ruangan sengaja tidak ditandai agar tidak menjadi gangguan) |
+
+Tampilan: bentrok pasti berwarna amber ("Ruangan yang sama (lokasi sama) dipakai …"), perlu diperiksa berwarna biru muda ("Bentrok ruangan perlu diperiksa: … lokasinya belum jelas. Isi kolom Lokasi agar pengecekannya pasti."); beranda Training menandai "Bentrok" atau "Perlu dicek". Melengkapi lokasi lewat dialog **Ubah** langsung menghitung ulang (menjadi bentrok pasti atau hilang). Rincian proyek lawan (kode, judul, lokasi) **tidak dibuka** bila di luar akses pelaku — hanya "proyek lain (di luar akses Anda)".
+
+**Instruktur: orang + waktu.** Entri direktori instruktur/asesor yang sama pada waktu beririsan, apa pun ruangan/lokasinya.
+
+**Yang tidak dihitung:** jadwal berstatus Dibatalkan, dan jadwal milik **proyek yang dibatalkan** (pembatalan proyek tidak membatalkan jadwalnya satu per satu, tetapi ruangan/instrukturnya tidak jadi dipakai — sebelumnya menimbulkan "bentrok hantu").
+
+Tahap berikutnya (belum dibuat): bentrok instruktur/PIC dengan **cuti** dan **surat tugas** karyawan.
+
+### Keputusan operasional: dialog edit jam kerja
+
+Perbaikan hitung ganda dan penanda tugas operasional siap masuk UAT. Dialog **edit jam/tanggal baris jam kerja** belum ada (perubahan hanya lewat API `PATCH /training/workload/:id`), dan mengganti **status** saja bukan "penyesuaian" — sehingga alur "disesuaikan → dipertahankan saat hitung ulang → Kembalikan ke template" belum dapat dicoba penuh lewat layar biasa. Dicatat sebagai **keputusan operasional**, bukan penghalang pekerjaan lain:
+
+- Bila PIC perlu menyesuaikan jam/tanggal lewat aplikasi **sejak awal pemakaian**, dialog edit harus dibuat **sebelum** fitur ini dipakai operasional.
+- Bila untuk sementara jam mengikuti template dan perubahan program, dialog dapat menyusul **setelah** perbaikan nomor 14 dan persuratan (urutan prioritas dari pimpinan).
+
+Keputusan mana yang berlaku ditetapkan pimpinan setelah UAT.
+
 ### 3b. Otomasi: snapshot harian, eskalasi, pengingat tenggat
 
 **Pekerja harian** (`src/server/services/training/automation.ts`) berjalan di dalam aplikasi tiap jam (`TRAINING_WORKER`, bawaan menyala bila modul menyala; 5 menit setelah start untuk pertama kali) atau dipicu penjadwal eksternal:
@@ -362,7 +393,7 @@ PW_CHROMIUM_PATH=/opt/pw-browsers/chromium npm run test:e2e   # di sandbox; di m
    - HR/karyawan tanpa penugasan tidak melihat menu & mendapat 404 pada URL `/training` · Super Admin melihat dashboard Direktur dan dapat membuat/mengubah proyek.
    - Manajer membuat proyek dengan PIC + template; Admin Program membuat proyek tanpa PIC (PIC hanya Manajer).
    - Tim disusun; staf hanya mengerjakan tugas miliknya; tugas "perlu diperiksa" tidak dapat diselesaikan penanggung jawabnya sendiri.
-   - Jadwal dengan ruangan/instruktur bentrok memunculkan peringatan; kalender per bulan benar dalam WIB.
+   - Jadwal dengan ruangan **dan lokasi** yang sama / instruktur yang sama pada waktu beririsan memunculkan peringatan; "Ruang Jasmine" di dua hotel berbeda tidak; lokasi kosong/mirip muncul sebagai "perlu diperiksa"; kalender per bulan benar dalam WIB.
    - PJ Peserta mengelola peserta; staf tidak melihat kontak; dokumen peserta tak terlihat staf/pemantau.
    - Unggah PDF/PNG/JPEG; berkas palsu (ekstensi .pdf isi lain) ditolak; unduh hanya oleh yang berhak.
    - Penutupan: checklist wajib menghalangi; pengecualian beralasan tercatat; proyek jadi baca-saja; Manajer dapat membuka kembali; tugas terbuka diputuskan (tindak lanjut/batal) dan tindak lanjut tetap dapat dikerjakan; pelonggaran checklist wajib beralasan & diakui (`05u-closure.spec.ts`).
@@ -402,7 +433,7 @@ Urutkan dari yang paling aman.
 
 Dashboard per peran (Staf, Admin Program, Koordinator Program, Direktur) · master program · proyek (daftar dengan cari/filter/urut/halaman/penanda perhatian, detail 9 tab, buat/ubah, alur status,
 penutupan, pembatalan, buka kembali) · tim & peran proyek · tugas (prioritas, tenggat, status, perlu-diperiksa, komentar, "Tugas Saya", lencana terlambat) · checklist & template (disalin ke proyek,
-wajib untuk penutupan, template standar atas tindakan eksplisit) · jadwal & kalender bulanan (WIB, peringatan bentrok ruangan/instruktur) · peserta (kontak dibatasi) · direktori instruktur/asesor
+wajib untuk penutupan, template standar atas tindakan eksplisit) · jadwal & kalender bulanan (WIB, peringatan bentrok ruangan menurut lokasi + ruangan, dan instruktur) · peserta (kontak dibatasi) · direktori instruktur/asesor
 (internal ditautkan ke karyawan, eksternal tanpa akun) · dokumen proyek privat · tautan surat tugas (referensi) & referensi manual sistem lain · riwayat aktivitas · laporan + unduhan CSV/Excel/PDF ·
 pengaturan level akses (Super Admin) dengan usulan dari bagan organisasi · notifikasi dalam aplikasi (tugas baru, ditambahkan ke proyek, menunggu pemeriksaan, perubahan akses) lewat mekanisme existing ·
 **indikator pemantauan** (Ketepatan Waktu, Kesiapan, Beban Tim, proyeksi peserta, kepadatan kelas; tab Pemantauan per proyek, halaman Pemantauan Program, peta beban tim) dengan **rumus & parameter yang dapat diedit Direktur di aplikasi** (berversi) ·
@@ -412,7 +443,8 @@ pengaturan level akses (Super Admin) dengan usulan dari bagan organisasi · noti
 
 - **Integrasi eksternal belum ada** (lihat §14). Peserta dan referensi dicatat manual.
 - **Dokumen**: hanya PDF/PNG/JPEG; "hapus" = sembunyikan (belum ada penghapusan permanen/retensi); disimpan di PostgreSQL (pertimbangkan penyimpanan objek bila volume besar). Tidak ada pemindai malware.
-- **Peringatan bentrok** terbatas pada ruangan (label teks) dan instruktur; belum ada master ruangan/sumber daya.
+- **Peringatan bentrok** (lihat [Bentrok jadwal](#bentrok-jadwal)): ruangan menurut lokasi + ruangan (teks bebas, bukan master) dan instruktur. Belum ada master lokasi/ruangan/sumber daya, sehingga penulisan lokasi yang sangat berbeda untuk tempat yang sama ("Aston" vs "Hotel Aston Magelang") hanya terdeteksi sebagai *perlu diperiksa*, dan kesalahan ketik tidak terdeteksi. **Belum ada** pemeriksaan bentrok dengan **cuti** dan **surat tugas** karyawan (tahap berikutnya, setelah aturan dasar lokasi/ruangan ini dipakai di lapangan).
+- **Dialog edit jam/tanggal baris jam kerja** belum ada (lihat [keputusan operasional](#keputusan-operasional-dialog-edit-jam-kerja)).
 - Kalender berbentuk **daftar per tanggal**, bukan grid bulanan; belum ada ekspor iCal/Google Calendar (sengaja, butuh izin & konfigurasi).
 - **Template checklist**: menyimpan mengganti seluruh item; belum ada riwayat versi template.
 - **Penghapusan** tugas/peserta/jadwal tidak ada (dibatalkan/diubah statusnya); duplikat salah-ketik tetap terlihat sebagai "Dibatalkan".

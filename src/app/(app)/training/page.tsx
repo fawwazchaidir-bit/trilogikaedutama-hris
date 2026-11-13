@@ -82,7 +82,7 @@ export default async function TrainingDashboardPage() {
           <Card>
             <CardHeader title="Jadwal terdekat" description="14 hari ke depan" actions={<CalendarClock className="size-4 text-muted" aria-hidden />} />
             {d.upcoming.length === 0 ? <EmptyState title="Tidak ada jadwal" description="Belum ada sesi dalam 14 hari ke depan." /> : (
-              <ul className="divide-y divide-line">{d.upcoming.map((s) => <li key={s.id} className="px-5 py-2.5 text-sm"><p className="font-medium text-ink">{s.title}</p><p className="text-xs text-muted">{formatDateWithDay(s.date)} · {s.startTime}–{s.endTime}</p><p className="text-xs text-muted">{s.projectCode}{s.room ? ` · ${s.room}` : ""}</p>{s.conflicts.length > 0 && <Badge tone="amber">Bentrok</Badge>}</li>)}</ul>
+              <ul className="divide-y divide-line">{d.upcoming.map((s) => <li key={s.id} className="px-5 py-2.5 text-sm"><p className="font-medium text-ink">{s.title}</p><p className="text-xs text-muted">{formatDateWithDay(s.date)} · {s.startTime}–{s.endTime}</p><p className="text-xs text-muted">{s.projectCode}{s.room ? ` · ${s.room}` : ""}</p>{s.conflicts.some((c) => c.kind !== "ROOM_CHECK") ? <Badge tone="amber">Bentrok</Badge> : s.conflicts.length > 0 && <Badge tone="blue">Perlu dicek</Badge>}</li>)}</ul>
             )}
           </Card>
         </div>

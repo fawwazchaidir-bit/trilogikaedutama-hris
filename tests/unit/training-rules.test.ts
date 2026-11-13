@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { PROJECT_FORWARD, PROJECT_TRANSITIONS, allowedTaskTransitions, canProjectTransition, checkReadyForPreparation, reviewBlockReason } from "@/lib/training/status";
 import { ATTENTION_WINDOW_DAYS, attentionReasons, checklistProgress, closureReadiness, isTaskDueSoon, isTaskDueToday, isTaskOverdue, requiredOutstanding } from "@/lib/training/indicators";
-import { DEFAULT_TEMPLATE_ITEMS, formatProjectCode, intervalsOverlap, normalizeRoom } from "@/lib/training/misc";
+import { DEFAULT_TEMPLATE_ITEMS, conflictMessage, formatProjectCode, intervalsOverlap, matchRoom, normalizeRoom, placeTokens } from "@/lib/training/misc";
 import { PROJECT_STATUSES, TASK_STATUSES, isActiveProject, isFinalProject, isOpenTask, type ProjectStatus, type TaskStatus } from "@/lib/training/types";
 import { addDays } from "@/lib/time";
 import { assigneeUnavailableReason } from "@/lib/training/availability";
@@ -127,6 +127,48 @@ describe("utilitas murni", () => {
     expect(normalizeRoom("  Ruang   UTAMA ")).toBe("ruang utama");
     expect(normalizeRoom("")).toBeNull();
     expect(normalizeRoom(undefined)).toBeNull();
+  });
+
+  it("lokasi: tanda baca, huruf besar/kecil, urutan kata, dan kata ganda tidak berpengaruh; kosong = tanpa lokasi", () => {
+    expect(placeTokens("  Hotel   ASTON, Magelang ")).toEqual(["aston", "hotel", "magelang"]);
+    expect(placeTokens("Magelang - Hotel Aston")).toEqual(placeTokens("hotel aston magelang"));
+    expect(placeTokens("Hotel Hotel Aston")).toEqual(["aston", "hotel"]);
+    expect(placeTokens("")).toBeNull();
+    expect(placeTokens(" ., - ")).toBeNull();
+    expect(placeTokens(undefined)).toBeNull();
+  });
+
+  describe("pencocokan ruangan: lokasi + ruangan (bukan nama ruang saja)", () => {
+    const at = (room: string | null, location: string | null) => ({ room, location });
+    it("ruangan DAN lokasi sama → bentrok pasti (abaikan huruf besar/kecil, tanda baca, urutan kata)", () => {
+      expect(matchRoom(at("Ruang Jasmine", "Hotel Aston Magelang"), at("ruang  JASMINE", "Aston Hotel, Magelang"))).toEqual({ match: "SAME" });
+    });
+    it("nama ruang sama tetapi lokasi JELAS berbeda ('Ruang Jasmine' di dua hotel) → bukan bentrok", () => {
+      expect(matchRoom(at("Ruang Jasmine", "Hotel Aston"), at("Ruang Jasmine", "Hotel Santika"))).toEqual({ match: "NONE" });
+      expect(matchRoom(at("Ruang Jasmine", "Hotel Aston Magelang"), at("Ruang Jasmine", "Hotel Aston Yogyakarta"))).toEqual({ match: "NONE" });
+    });
+    it("lokasi belum jelas (kosong di salah satu/kedua) → PERLU DIPERIKSA, bukan dianggap aman", () => {
+      expect(matchRoom(at("Ruang Jasmine", null), at("Ruang Jasmine", "Hotel Aston"))).toEqual({ match: "CHECK", why: "NO_LOCATION" });
+      expect(matchRoom(at("Ruang Jasmine", "Hotel Aston"), at("Ruang Jasmine", "  "))).toEqual({ match: "CHECK", why: "NO_LOCATION" });
+      expect(matchRoom(at("Ruang Jasmine", null), at("Ruang Jasmine", null))).toEqual({ match: "CHECK", why: "NO_LOCATION" });
+    });
+    it("lokasi berbeda tetapi yang satu memuat semua kata yang lain ('Hotel Aston' vs 'Hotel Aston Magelang') → perlu diperiksa", () => {
+      expect(matchRoom(at("Ruang Jasmine", "Hotel Aston"), at("Ruang Jasmine", "Hotel Aston Magelang"))).toEqual({ match: "CHECK", why: "SIMILAR_LOCATION" });
+      expect(matchRoom(at("Ruang Jasmine", "Aston Magelang"), at("Ruang Jasmine", "Aston"))).toEqual({ match: "CHECK", why: "SIMILAR_LOCATION" });
+    });
+    it("ruangan berbeda, atau salah satu jadwal tidak memakai ruangan → bukan bentrok ruangan (apa pun lokasinya)", () => {
+      expect(matchRoom(at("Ruang Jasmine", "Hotel Aston"), at("Ruang Melati", "Hotel Aston"))).toEqual({ match: "NONE" });
+      expect(matchRoom(at(null, "Hotel Aston"), at("Ruang Jasmine", "Hotel Aston"))).toEqual({ match: "NONE" });
+      expect(matchRoom(at("", null), at("", null))).toEqual({ match: "NONE" });
+    });
+    it("kalimat peringatan: pasti / perlu diperiksa (dua sebab) / instruktur; rincian proyek lawan disamarkan bila di luar akses", () => {
+      const vis = { visible: true, withProjectCode: "TRN-2027-0001", withTitle: "Sesi A" };
+      const hid = { visible: false, withProjectCode: null, withTitle: null };
+      expect(conflictMessage({ kind: "ROOM", ...vis, why: null })).toBe('Ruangan yang sama (lokasi sama) dipakai TRN-2027-0001 · "Sesi A" pada waktu yang beririsan.');
+      expect(conflictMessage({ kind: "ROOM_CHECK", ...vis, why: "NO_LOCATION" })).toMatch(/^Bentrok ruangan perlu diperiksa:.*TRN-2027-0001.*lokasinya belum jelas.*Isi kolom Lokasi/);
+      expect(conflictMessage({ kind: "ROOM_CHECK", ...hid, why: "SIMILAR_LOCATION" })).toMatch(/perlu diperiksa:.*proyek lain \(di luar akses Anda\).*lokasinya mirip/);
+      expect(conflictMessage({ kind: "INSTRUCTOR", ...hid, why: null })).toBe("Instruktur / asesor yang sama dijadwalkan di proyek lain (di luar akses Anda) pada waktu yang beririsan.");
+    });
   });
 
   it("template standar: memuat tiga tahap, memiliki item wajib, dan tidak ada judul ganda", () => {

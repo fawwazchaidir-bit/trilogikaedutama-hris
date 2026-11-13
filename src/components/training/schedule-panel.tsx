@@ -8,6 +8,7 @@ import { SelectField, TextAreaField, TextField } from "@/components/ui/field";
 import { api } from "@/lib/api-client";
 import { formatDateWithDay } from "@/lib/format";
 import { SCHEDULE_STATUSES, SCHEDULE_STATUS_LABEL, type ScheduleStatus } from "@/lib/training/types";
+import { conflictMessage } from "@/lib/training/misc";
 import type { ScheduleDto, ScheduleSaveResult } from "@/server/services/training/operations";
 import type { ProjectInstructorDto } from "@/server/services/training/operations";
 import { ScheduleStatusBadge } from "./ui";
@@ -16,7 +17,7 @@ import { useRunner } from "./use-runner";
 interface Form { id?: string; title: string; date: string; startTime: string; endTime: string; location: string; room: string; inchargeId: string; projectInstructorId: string; status: ScheduleStatus; note: string }
 const BLANK: Form = { title: "", date: "", startTime: "09:00", endTime: "16:00", location: "", room: "", inchargeId: "", projectInstructorId: "", status: "PLANNED", note: "" };
 
-/** Daftar jadwal berdasarkan tanggal (WIB). Bentrok ruangan/instruktur ditampilkan sebagai PERINGATAN (tidak memblokir). */
+/** Daftar jadwal berdasarkan tanggal (WIB). Bentrok ruangan (lokasi + ruangan + waktu) / instruktur ditampilkan sebagai PERINGATAN (tidak memblokir); lokasi yang belum jelas ditandai "perlu diperiksa". */
 export function SchedulePanel({ projectId, schedules, members, instructors, canManage, editable }: {
   projectId: string; schedules: ScheduleDto[]; members: { employeeId: string; name: string }[]; instructors: ProjectInstructorDto[]; canManage: boolean; editable: boolean;
 }) {
@@ -43,7 +44,7 @@ export function SchedulePanel({ projectId, schedules, members, instructors, canM
                   <p className="font-medium text-ink"><span className="tabular text-ink-soft">{s.startTime}–{s.endTime}</span> · {s.title} <ScheduleStatusBadge status={s.status} /></p>
                   <p className="text-xs text-muted">{[s.room, s.location, s.instructorName && `Pengajar: ${s.instructorName}`, s.inchargeName && `PJ: ${s.inchargeName}`].filter(Boolean).join(" · ") || "—"}</p>
                   {s.note && <p className="mt-0.5 text-xs text-muted">{s.note}</p>}
-                  {s.conflicts.map((c, i) => <p key={i} role="status" className="mt-1 flex items-start gap-1.5 text-xs font-medium text-amber-800"><AlertTriangle className="mt-0.5 size-3.5 shrink-0" />{c.kind === "ROOM" ? "Ruangan sama" : "Instruktur sama"} dipakai {c.visible ? `${c.withProjectCode} · "${c.withTitle}"` : "proyek lain (di luar akses Anda)"} pada waktu beririsan.</p>)}
+                  {s.conflicts.map((c, i) => <p key={i} role="status" data-testid={`conflict-${c.kind}`} className={`mt-1 flex items-start gap-1.5 text-xs font-medium ${c.kind === "ROOM_CHECK" ? "text-sky-800" : "text-amber-800"}`}><AlertTriangle className="mt-0.5 size-3.5 shrink-0" />{conflictMessage(c)}</p>)}
                 </div>
                 {canManage && editable && <Button size="sm" onClick={() => open(s)}>Ubah</Button>}
               </li>
@@ -60,7 +61,7 @@ export function SchedulePanel({ projectId, schedules, members, instructors, canM
           <SelectField label="Status" value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value as ScheduleStatus })}>{SCHEDULE_STATUSES.map((s) => <option key={s} value={s}>{SCHEDULE_STATUS_LABEL[s]}</option>)}</SelectField>
           <TextField label="Jam mulai" type="time" required value={form.startTime} onChange={(e) => setForm({ ...form, startTime: e.target.value })} error={fieldErrors.startTime} />
           <TextField label="Jam selesai" type="time" required value={form.endTime} onChange={(e) => setForm({ ...form, endTime: e.target.value })} error={fieldErrors.endTime} />
-          <TextField label="Ruangan" maxLength={80} value={form.room} onChange={(e) => setForm({ ...form, room: e.target.value })} hint="Dipakai untuk peringatan bentrok." />
+          <TextField label="Ruangan" maxLength={80} value={form.room} onChange={(e) => setForm({ ...form, room: e.target.value })} hint="Bentrok ruangan dicek menurut Lokasi + Ruangan + waktu. Isi Lokasi agar hasilnya pasti." />
           <TextField label="Lokasi / media" maxLength={200} value={form.location} onChange={(e) => setForm({ ...form, location: e.target.value })} />
           <SelectField label="Instruktur / asesor" value={form.projectInstructorId} onChange={(e) => setForm({ ...form, projectInstructorId: e.target.value })} error={fieldErrors.projectInstructorId}><option value="">— Belum ditentukan —</option>{instructors.map((i) => <option key={i.id} value={i.id}>{i.name}</option>)}</SelectField>
           <SelectField label="Penanggung jawab" value={form.inchargeId} onChange={(e) => setForm({ ...form, inchargeId: e.target.value })} error={fieldErrors.inchargeId}><option value="">— Belum ditentukan —</option>{members.map((m) => <option key={m.employeeId} value={m.employeeId}>{m.name}</option>)}</SelectField>

@@ -21,6 +21,46 @@ export function normalizeRoom(room: string | null | undefined): string | null {
   return r === "" ? null : r;
 }
 
+/** Kata-kata pembentuk lokasi (huruf kecil, tanpa tanda baca, tanpa kata ganda, terurut): urutan kata, huruf besar/kecil, dan tanda baca tidak berpengaruh. Kosong → null. */
+export function placeTokens(place: string | null | undefined): string[] | null {
+  const t = (place ?? "").toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+  return t.length === 0 ? null : [...new Set(t)].sort();
+}
+
+/**
+ * Hasil membandingkan ruangan dua jadwal yang waktunya beririsan.
+ *   SAME  — ruangan DAN lokasi sama: bentrok pasti.
+ *   CHECK — nama ruangan sama tetapi lokasi belum cukup jelas untuk memastikan: bentrok perlu DIPERIKSA (bukan dianggap aman).
+ *           NO_LOCATION = salah satu/dua-duanya tanpa lokasi; SIMILAR_LOCATION = lokasi berbeda tetapi yang satu memuat semua kata yang lain ("Hotel Aston" ⊂ "Hotel Aston Magelang").
+ *   NONE  — bukan ruangan yang sama: ruangan berbeda, salah satu tanpa ruangan (jadwal itu tidak memakai ruangan), atau lokasi jelas berbeda ("Ruang Jasmine" di dua hotel).
+ */
+export type RoomMatch = { match: "SAME" } | { match: "CHECK"; why: "NO_LOCATION" | "SIMILAR_LOCATION" } | { match: "NONE" };
+export function matchRoom(a: { room: string | null | undefined; location: string | null | undefined }, b: { room: string | null | undefined; location: string | null | undefined }): RoomMatch {
+  const ra = normalizeRoom(a.room), rb = normalizeRoom(b.room);
+  if (ra === null || rb === null || ra !== rb) return { match: "NONE" };
+  const la = placeTokens(a.location), lb = placeTokens(b.location);
+  if (la === null || lb === null) return { match: "CHECK", why: "NO_LOCATION" };
+  if (la.length === lb.length && la.every((t, i) => t === lb[i])) return { match: "SAME" };
+  const [small, big] = la.length <= lb.length ? [la, lb] : [lb, la];
+  return small.every((t) => big.includes(t)) ? { match: "CHECK", why: "SIMILAR_LOCATION" } : { match: "NONE" };
+}
+
+export interface ScheduleConflictLike {
+  kind: "ROOM" | "ROOM_CHECK" | "INSTRUCTOR";
+  visible: boolean; withProjectCode: string | null; withTitle: string | null;
+  /** Hanya untuk ROOM_CHECK. */
+  why: "NO_LOCATION" | "SIMILAR_LOCATION" | null;
+}
+/** Kalimat peringatan bentrok — satu sumber untuk peringatan saat menyimpan dan untuk tampilan jadwal/kalender. Rincian proyek lawan disamarkan bila di luar akses pelaku. */
+export function conflictMessage(c: ScheduleConflictLike): string {
+  const who = c.visible ? `${c.withProjectCode} · "${c.withTitle}"` : "proyek lain (di luar akses Anda)";
+  if (c.kind === "INSTRUCTOR") return `Instruktur / asesor yang sama dijadwalkan di ${who} pada waktu yang beririsan.`;
+  if (c.kind === "ROOM") return `Ruangan yang sama (lokasi sama) dipakai ${who} pada waktu yang beririsan.`;
+  return c.why === "SIMILAR_LOCATION"
+    ? `Bentrok ruangan perlu diperiksa: nama ruangan sama dengan ${who} pada waktu yang beririsan dan lokasinya mirip — pastikan apakah tempatnya sama.`
+    : `Bentrok ruangan perlu diperiksa: nama ruangan sama dengan ${who} pada waktu yang beririsan, tetapi lokasinya belum jelas. Isi kolom Lokasi agar pengecekannya pasti.`;
+}
+
 // ─────────────────────────── Template checklist standar ───────────────────────────
 
 export interface TemplateItemSeed { phase: ChecklistPhase; title: string; isRequired: boolean }
