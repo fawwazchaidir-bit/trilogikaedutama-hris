@@ -55,7 +55,7 @@ Seluruh 24 jenis katalog master disemai idempoten (penandatangan awal: Direktur 
 
 - **HR sebagai penandatangan**: khusus INT-007 (izin/persetujuan), INT-010 (keterangan kerja), INT-011 (administrasi internal) — flag `hrCanSign` pada jenis.
 - **Surat Rahasia** (INT-006, 009, 010; flag `confidential`): hanya pembuat, penandatangan, penandatangan tambahan, dan Direktur; HR hanya INT-010 (`hrCanView`).
-  Perihal dan judul lampiran tidak tampil di halaman verifikasi dan notifikasi; pembukaan oleh Direktur/HR dicatat di Audit Log (`letter.view_confidential`).
+  Perihal tidak tampil di halaman verifikasi dan notifikasi (judul lampiran tidak pernah tampil di halaman publik; nama jenis surat rahasia ditampilkan generik); pembukaan oleh Direktur/HR dicatat di Audit Log (`letter.view_confidential`).
 - **Multi-penandatangan** (EKS-013, INT-008; `multiSigner`): penandatangan utama + hingga 6 penandatangan tambahan — *internal* (akun portal; wajib menandatangani lewat
   tombol "Tandatangani bagian saya" sebelum surat dapat diterbitkan) atau *mitra luar* (slot kosong di PDF untuk tanda tangan basah). Tabel `letter_signatories` dikunci trigger sejak Menunggu.
 - **Tanda tangan pribadi**: Direktur untuk siapa saja; pemilik akun sendiri bila ia Direktur/Supervisor/Manajer/HR (tombol "Tanda tangan saya"). Berkas `LETTER_SIGNATURE`
@@ -136,9 +136,10 @@ dan lampiran (judul, jumlah halaman, hash). **Isi surat tidak ditampilkan.** Pen
 
 | Informasi | Halaman publik | Pengguna berwenang (halaman surat di Persuratan) |
 |---|---|---|
-| Nomor, jenis, tanggal, penandatangan, status, hash | ya | ya |
+| Nomor, tanggal, penandatangan, status, hash | ya | ya |
+| Jenis surat | ya, **kecuali** surat rahasia (INT-006/009/010): ditampilkan generik **"Surat rahasia (internal)"** — nama jenisnya ("Surat peringatan", "Surat evaluasi dan pembinaan") sendiri mengungkap sifat surat | ya |
 | Perihal | ya, **kecuali** surat rahasia atau SK | ya |
-| Judul lampiran | ya, **kecuali** surat rahasia atau SK (diganti "Lampiran n") | ya |
+| Judul lampiran | **tidak pernah** (selalu "Lampiran n" + jumlah halaman + hash; judul bisa memuat nama klien/isi sensitif, dan hash cukup untuk mencocokkan berkas) | ya |
 | Nama berkas lampiran | **tidak pernah** (sering memuat nama klien/orang) | ya |
 | **Alasan pembatalan** | **tidak pernah** (catatan internal; bisa memuat sengketa/nama klien) | ya (kotak "Dibatalkan: …") |
 

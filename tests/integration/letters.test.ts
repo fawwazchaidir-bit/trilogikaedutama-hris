@@ -345,7 +345,7 @@ describe("tahap 2b: lampiran", () => {
     expect(sha(file.data)).toBe(row.pdfSha256);
     expect(out.attachments.map((a) => a.title)).toEqual(["Rincian Investasi", "Proposal Lengkap", "Profil Lembaga"]);
     const v = await verifyByToken(row.verifyToken);
-    expect(v?.attachments.map((a) => [a.title, a.mode])).toEqual([["Proposal Lengkap", "MERGED"], ["Profil Lembaga", "SEPARATE"]]);
+    expect(v?.attachments.map((a) => [a.title, a.mode])).toEqual([["Lampiran 1", "MERGED"], ["Lampiran 2", "SEPARATE"]]);   // judul TIDAK tampil di halaman publik (hash + jumlah halaman cukup untuk mencocokkan)
     expect(v?.attachments[1]?.sha256).toBe(sep.sha256);
     // terkunci sejak diajukan
     expect(await fail(deleteAttachment(staf, d.id, merged.id))).toMatchObject(CONFLICT);
@@ -483,8 +483,8 @@ describe("keamanan dokumen terbit: verifikasi publik tanpa kebocoran & PDF dibat
     await cancelLetter(direktur, row.id, { note: SECRET_NOTE });
     const v = await verifyByToken(row.verifyToken);
     const json = JSON.stringify(v);
-    expect(v).toMatchObject({ state: "CANCELLED", subject: null });
-    for (const leak of [SECRET_NOTE, "Budi", "penilaian-rahasia", "sp1-budi", "Daftar Penilaian", "Surat Peringatan", "fileName", "cancelledNote"]) expect(json, leak).not.toContain(leak);
+    expect(v).toMatchObject({ state: "CANCELLED", subject: null, typeName: "Surat rahasia (internal)" });   // nama jenis ("Surat evaluasi dan pembinaan") sendiri mengungkap sifat surat
+    for (const leak of [SECRET_NOTE, "Budi", "penilaian-rahasia", "sp1-budi", "Daftar Penilaian", "Surat Peringatan", "evaluasi", "pembinaan", "fileName", "cancelledNote"]) expect(json, leak).not.toContain(leak);
     expect(v!.attachments.map((a) => a.title)).toEqual(["Lampiran 1", "Lampiran 2"]);          // judul disamarkan; hash tetap untuk pencocokan
     expect(v!.attachments.every((a) => /^[0-9a-f]{64}$/.test(a.sha256))).toBe(true);
     // pengguna berwenang (pembuat) tetap melihat semuanya
@@ -493,14 +493,15 @@ describe("keamanan dokumen terbit: verifikasi publik tanpa kebocoran & PDF dibat
     expect(d.attachments.map((a) => [a.title, a.fileName])).toEqual([["Daftar Penilaian Rahasia Budi", "penilaian-rahasia-budi.pdf"], ["Surat Peringatan Pertama", "sp1-budi-santoso.pdf"]]);
   });
 
-  it("surat BIASA dibatalkan: alasan pembatalan & nama file juga tidak tampil di halaman publik (judul lampiran boleh, bukan nama file)", async () => {
+  it("surat BIASA dibatalkan: alasan pembatalan, nama file, DAN judul lampiran juga tidak tampil di halaman publik (judul bisa memuat nama klien/isi sensitif)", async () => {
     const row = await issuedWithAttachments({ series: "EKS", code: 3 }, ["Proposal Lengkap", "Profil Lembaga"], ["proposal-pt-klien-rahasia.pdf", "profil-final.pdf"]);
     await cancelLetter(direktur, row.id, { note: SECRET_NOTE });
     const v = await verifyByToken(row.verifyToken);
     const json = JSON.stringify(v);
     expect(v!.state).toBe("CANCELLED");
-    for (const leak of [SECRET_NOTE, "proposal-pt-klien", "profil-final", "fileName", "cancelledNote"]) expect(json, leak).not.toContain(leak);
-    expect(v!.attachments.map((a) => a.title)).toEqual(["Proposal Lengkap", "Profil Lembaga"]);
+    for (const leak of [SECRET_NOTE, "proposal-pt-klien", "profil-final", "Proposal Lengkap", "Profil Lembaga", "fileName", "cancelledNote"]) expect(json, leak).not.toContain(leak);
+    expect(v!.attachments.map((a) => a.title)).toEqual(["Lampiran 1", "Lampiran 2"]);
+    expect(v!.typeName).not.toMatch(/rahasia/i);                                                // jenis surat biasa tetap memakai nama aslinya
   });
 
   it("surat terbit (belum batal) tetap memuat hash lampiran; tidak ada nama file di data publik", async () => {
