@@ -130,9 +130,12 @@ Seluruh 24 jenis katalog master disemai idempoten (penandatangan awal: Direktur 
 
 ## Kop surat & layout jenis
 
-**Kop** (semua surat; format baru): logo di kiri; tiga baris dari **Pengaturan lembaga** (satu sumber) — *tagline* (Cambria bold 12), **nama lembaga** huruf besar (Cambria bold 14),
-alamat (Cambria italic 10); garis pemisah di bawahnya. Baris email/hotline dan "Vocational Identity Number" **tidak lagi dicetak** (bidang "Baris identitas" di Pengaturan Persuratan
-tetap tersimpan sebagai arsip). Pastikan Pengaturan lembaga memuat teks yang diinginkan: Nama = `Trilogika Edutama`, Tagline = `Lembaga Pelatihan Kerja Berbasis Kompetensi`,
+**Kop** (semua surat; format baru): logo di kiri; dari **Pengaturan lembaga** (satu sumber) — *tagline* (Cambria bold 12), **nama lembaga** huruf besar (Cambria bold 14),
+alamat (Cambria italic 10), lalu **baris kontak** di bawah alamat (Cambria italic 10): `Email: … | Telp: … | Website: …` — urutan tetap, bagian yang kosong dilewati, dan bila ketiganya
+kosong barisnya tidak dicetak sama sekali (kartu Kop di Pengaturan Persuratan menampilkan petunjuk untuk melengkapinya). Spasi di dalam satu bagian ("0274 555 0100") tidak dapat
+terpisah antar baris: kontak yang panjang hanya patah **di antara** bagian. **Garis di bawah kop dapat diadakan atau ditiadakan** (kartu *Kop surat* di Pengaturan Persuratan, hanya
+Direktur; bawaan: ada). Bila ditiadakan, jarak ke isi surat **tetap sama** (letak isi tidak bergeser; diuji lewat posisi teks). Baris "Vocational Identity Number" **tidak lagi dicetak**
+(bidang "Baris identitas" di Pengaturan Persuratan tetap tersimpan sebagai arsip). Pastikan Pengaturan lembaga memuat teks yang diinginkan: Nama = `Trilogika Edutama`, Tagline = `Lembaga Pelatihan Kerja Berbasis Kompetensi`,
 Alamat = `Grha Trilogika, Jln. Ontoseno 47, Jambon 01/21, Kel. Trihanggo, Kec. Gamping, Kab. Sleman, Daerah Istimewa Yogyakarta 55291`. Kop slip gaji dan laporan **tidak** berubah.
 
 **Font.** Cambria adalah font berlisensi Microsoft sehingga tidak dapat dibundel. Dipakai **Caladea** (SIL OFL; dirancang metrik-kompatibel dengan Cambria sehingga lebar glif dan
@@ -143,7 +146,7 @@ berkas itu dengan salinan Cambria yang berlisensi (nama berkas dipertahankan). I
 
 | kind | jenis | blok atas | catatan |
 |---|---|---|---|
-| `SURAT` | hampir semua jenis | Nomor / Lampiran / Perihal + tempat-tanggal, "Kepada Yth.", salam | — |
+| `SURAT` | hampir semua jenis | Nomor / Lampiran / Perihal + tempat-tanggal, alamat tujuan ringkas (`Yth. …` / `di tempat`), salam | — |
 | `SK` | INT-001 | judul + diktum disusun di kertas | "Ditetapkan di / Pada tanggal" di akhir |
 | `TUGAS` | INT-002 | seperti SURAT; isi dibangkitkan dari data penugasan | — |
 | `EDARAN` | INT-005 Surat edaran | judul **MEMO INTERNAL** (tebal bergaris bawah), `Nomor : {{nomor}}`, **TENTANG** + `{{perihal}}` tebal huruf besar — semua di kertas | tanpa penerima, salam, penutup, tempat-tanggal; isi **Cambria-kompatibel 12 pt, spasi 1,5**, daftar bernomor dengan jarak bawah |
@@ -155,6 +158,50 @@ tanda tangan + cap tetap dicetak. Saat jenis lama berubah layout (mis. INT-005 s
 **Catatan teknis renderer.** (1) `lineHeight` TIDAK boleh dipasang di level `Page`: teks `render` pada elemen `fixed` (nomor halaman) lalu tercetak di luar kertas (y ≈ −8000), sehingga
 kaki halaman tidak pernah tampil. Tinggi baris dipasang per teks dalam satuan pt lewat konteks `LayoutCtx` (uji `documents-pdf.test.ts` memeriksa posisi kaki di tiap halaman).
 (2) Kaki halaman = `View fixed` ber-`render` (halaman pertama dapat dikosongkan beserta garisnya) berisi teks ber-font eksplisit (elemen `fixed` tidak mewarisi font halaman). (3) Teks yang dibuat saat pemenggalan halaman (prop `render`: kaki halaman) tidak ikut fase pemuatan font react-pdf → font kaki halaman dipramuat dengan `Font.load` (bobot numerik 400/700) di `renderDocumentPdf`; tanpa itu teks jatuh ke Helvetica bawaan. (4) `createContext` tidak boleh dipakai di modul PDF (ditolak build Next di sisi server): pengaturan tata letak diteruskan sebagai prop `lay`.
+
+## Tata letak PDF: tanda tangan banyak pihak, isi panjang, lekukan, tabel, total halaman
+
+Temuan audit visual (Bukti Visual Audit Persuratan) yang diperbaiki di renderer (`src/server/pdf/DocumentPdf.tsx`), semuanya diuji lewat **posisi kata di kertas**
+(`pdftotext -bbox`, `tests/helpers/pdf-words.ts`) — bukan sekadar teks hasil ekstraksi:
+
+1. **Tanda tangan tidak lagi terpotong.** Satu pihak: QR di kiri, penandatangan di kanan (tata letak lama). Dua pihak atau lebih: **grid dua kolom**; tiap baris tanda tangan tidak
+   pernah terbelah, tetapi baris berikutnya **pindah ke halaman berikutnya** bila tidak muat — tidak ada nama/tanda tangan yang keluar kertas (batas sistem: penandatangan utama + 6
+   tambahan = 7 pihak). QR mengisi sel kosong di baris terakhir (jumlah ganjil) atau baris sendiri di bawah (jumlah genap, dijaga bersama baris tanda tangan terakhir). Akar masalah lama:
+   kotak 200 pt tidak muat berdampingan di sisi kanan QR sehingga semua tertumpuk vertikal di dalam satu blok `wrap={false}` yang lebih tinggi dari halaman.
+2. **Isi panjang mengalir antar halaman.** react-pdf meletakkan elemen `wrap={false}` yang lebih tinggi dari halaman secara utuh dan membiarkannya meluber (menimpa QR/tanda tangan,
+   sebagian isi hilang). Kini butir daftar, baris tabel, dan "ekor surat" (satuan isi terakhir + penutup + baris tanda tangan pertama) dijaga satu halaman **hanya bila diperkirakan
+   pendek** (`src/lib/documents/layout-estimate.ts`: ≤ 60% tinggi halaman); yang panjang dibiarkan terpecah. Paragraf terbelah dengan aturan yatim/janda 2 baris. Diuji dengan satu
+   paragraf ±5.000 dan ±12.000 karakter, butir daftar, baris tabel, dan butir diktum yang lebih tinggi dari satu halaman (tidak ada kata hilang/di luar kertas/saling menimpa).
+3. **"Baris pertama menjorok" kini tercetak.** `textIndent` react-pdf dibaca dari atribut *run pertama* paragraf dan tidak diwariskan ke anak `<Text>`; lekukan 1,25 cm kini dipasang
+   pada run pertama. Tes membandingkan posisi x kata pertama (paragraf menjorok vs tidak) dan baris lanjutan.
+4. **Total halaman mengikuti berkas gabungan.** Lampiran PDF *digabung* dibaca lebih dulu dan halamannya ditambahkan ke token `{total}` (`Hal. 1 dari 3` untuk surat 1 halaman +
+   lampiran 2 halaman). Lampiran *terpisah* tidak dihitung; **halaman lampiran unggahan tidak diubah** (tidak diberi kaki).
+5. **Tabel sel gabungan sampai tepi.** Lebar sel dihitung dari indeks **kolom** (colspan dan rowspan, `src/lib/documents/table-grid.ts`), bukan indeks sel dalam baris; sel
+   rowspan menempati kolomnya di baris-baris berikutnya (penampung kosong, garis bawah hanya di baris terakhir); baris bergerigi diisi sel kosong; `colWidths` yang tidak cocok
+   dengan jumlah kolom (mis. kolom ditambah di editor) → lebar rata. **Tabel yang ditempel dari Word** diuji di editor sungguhan (e2e `05z`): colspan/rowspan terbaca, tersimpan,
+   dan PDF-nya rata kanan. Belum ada tombol "gabung sel" di toolbar editor (penggabungan hanya lewat tempel).
+
+**Format.** Alamat tujuan ringkas: `Yth. {penerima pertama}` (awalan tidak tebal) pada satu baris, baris berikutnya, lalu `di tempat` (tempat bawaan "Tempat" ditulis huruf kecil; kota
+yang diketik dipertahankan, mis. `di Yogyakarta`). Salam baku `Dengan hormat,` (huruf kapital hanya di awal): jenis bawaan yang masih memakai `Dengan Hormat,` dirapikan otomatis
+**hanya bila nilainya persis bawaan lama**; salam yang sudah diubah Direktur dan surat yang sudah ada tidak disentuh. Keterangan di bawah QR: *"Dokumen ini terdaftar dalam sistem
+Trilogika. Pindai kode QR untuk memeriksa statusnya."* (QR memeriksa status/keterdaftaran dokumen — gambar tanda tangan dicetak langsung di PDF).
+
+**Editor ≈ PDF.** Kertas di editor kini berlebar tetap 21 cm (isi 17 cm = area isi PDF), diskalakan (`zoom`) bila kolom lebih sempit sehingga pemenggalan baris tidak berubah karena
+lebar layar (`src/components/letters/paper.tsx`); font memakai **berkas yang sama** dengan PDF (`@font-face` dari `public/fonts`); surat biasa 11 pt spasi 1,3; **Surat Edaran** Cambria-
+kompatibel (Caladea) 12 pt spasi 1,5; jarak antarparagraf 6 pt; daftar, judul, tabel, dan blok rincian menyamai PDF. **Batas yang diketahui:** pustaka PDF memampatkan spasi hingga
+50% (`shrinkWhitespaceFactor`, tertanam di react-pdf) sehingga PDF dapat memuat ±1 kata lebih banyak per baris daripada peramban — jumlah baris di editor bisa beberapa persen lebih
+banyak (tidak pernah lebih sedikit; diuji ≤ 12% untuk paragraf 500+ kata). **Pratinjau PDF tetap acuan akhir.** Margin halaman (kiri/kanan 2 cm, atas 1,5 cm, bawah 2,1 cm) **tidak
+diubah**: usulan margin 3 cm/2,5 cm untuk arsip/penjilidan menunggu format resmi Trilogika dan akan menambah jumlah halaman.
+
+## Templat isi 24 jenis
+
+Setiap jenis surat kini punya templat isi **sendiri** (`src/lib/documents/templates-isi.ts`; sebelumnya 17 jenis memakai kerangka umum `[isi surat]`, dan tiga penawaran berisi sama):
+Penawaran B2C/B2B/ajakan kerja sama, Permohonan & perizinan, Undangan, Pemberitahuan, Permohonan sertifikasi/uji kompetensi (LSP), Keterangan & rekomendasi, Keuangan & penagihan,
+Surat umum (ucapan terima kasih), Perjanjian (kerangka pasal), Berita acara (eksternal dan internal), serta Pemberitahuan, Undangan rapat, Peringatan, Izin/persetujuan, Evaluasi &
+pembinaan, Keterangan kerja (tanpa data gaji), dan Administrasi (internal). Bagian **[bertanda kurung siku]** wajib diganti sebelum surat dapat diajukan. *Perjanjian*, *Peringatan*,
+dan *Evaluasi* adalah **kerangka**: wajib ditinjau pihak hukum/HR sebelum dipakai. **Peningkatan database lama:** `ensureDefaultTypes` mengganti templat HANYA pada jenis yang
+templatnya **persis** kerangka umum lama (dibandingkan dengan JSON kanonik); templat yang sudah diubah Direktur dan surat yang sudah dibuat tidak disentuh. Surat Tugas (INT-02)
+isinya dibangkitkan dari data penugasan.
 
 ## Kaki halaman (footer)
 
@@ -222,8 +269,8 @@ PDF **asli** (yang dulu diterbitkan) tidak pernah diubah atau dihapus — trigge
 
 ## Pengaturan (Direktur)
 
-Kota penerbitan, baris identitas (arsip; tidak dicetak), **kaki halaman** (lihat bagian di atas), batas eskalasi; cap lembaga; gambar tanda tangan per penandatangan (PNG dinormalisasi); nomor urut.
-Nama/tagline/alamat/logo kop mengikuti **Pengaturan lembaga** (satu sumber).
+Kota penerbitan, baris identitas (arsip; tidak dicetak), **kop surat** (garis di bawah kop; isi kop dari Pengaturan lembaga), **kaki halaman** (lihat bagian di atas), batas eskalasi; cap lembaga; gambar tanda tangan per penandatangan (PNG dinormalisasi); nomor urut.
+Nama/tagline/alamat/email/telepon/website/logo kop mengikuti **Pengaturan lembaga** (satu sumber; kesiapan sistem memperingatkan bila alamat, email, telepon, atau website kosong).
 
 ## API (`/api/letters`, flag `LETTERS_MODULE_ENABLED`)
 

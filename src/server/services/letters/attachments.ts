@@ -107,6 +107,13 @@ export async function deleteAttachment(actor: Actor, id: string, attId: string):
 }
 
 /** Gabungkan PDF utama dengan lampiran unggahan bermode "digabung" (urut posisi). */
+/** Jumlah halaman semua bagian PDF yang akan digabung (sama dengan yang ditambahkan `mergePdfs`). */
+export async function countPdfPages(parts: Uint8Array[]): Promise<number> {
+  let n = 0;
+  for (const part of parts) n += (await PDFDocument.load(part)).getPageCount();
+  return n;
+}
+
 export async function mergePdfs(main: Buffer, parts: Uint8Array[]): Promise<Buffer> {
   if (parts.length === 0) return main;
   const out = await PDFDocument.load(main);

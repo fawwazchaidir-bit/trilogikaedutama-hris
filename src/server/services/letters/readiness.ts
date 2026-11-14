@@ -53,9 +53,9 @@ export async function checkLettersReadiness(opts: { renderTest?: boolean } = {})
 
   // 5) Identitas lembaga (kop surat) & cap
   const [company, ls] = await Promise.all([getSettings(), prisma.letterSettings.findUnique({ where: { id: 1 } })]);
-  const missingKop = [!company.address?.trim() && "alamat", !company.phone?.trim() && "telepon", !company.email?.trim() && "email"].filter(Boolean) as string[];
+  const missingKop = [!company.address?.trim() && "alamat", !company.email?.trim() && "email", !company.phone?.trim() && "telepon", !company.website?.trim() && "website"].filter(Boolean) as string[];
   if (missingKop.length) add({ key: "letterhead", severity: "WARN", title: "Kop surat", detail: `Data lembaga belum lengkap: ${missingKop.join(", ")} (kop surat memakainya).`, fix: "Lengkapi di Pengaturan → Lembaga." });
-  else ok("letterhead", "Kop surat", "Alamat, telepon, dan email lembaga terisi.");
+  else ok("letterhead", "Kop surat", "Alamat, email, telepon, dan website lembaga terisi.");
   if (!ls?.stampFileId) add({ key: "stamp", severity: "WARN", title: "Cap lembaga", detail: "Belum diunggah; surat terbit tanpa cap (cap dipakai pada semua surat).", fix: "Unggah cap di Persuratan → Pengaturan (Direktur)." });
   else ok("stamp", "Cap lembaga", "Terpasang.");
   const directorIds = director.length ? (await prisma.user.findMany({ where: { role: "SUPER_ADMIN", isActive: true }, select: { id: true } })).map((u) => u.id) : [];

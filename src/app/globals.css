@@ -62,13 +62,28 @@ dialog { margin: auto; }
 }
 .nav-scroll::-webkit-scrollbar { display: none; }
 
-/* ───────── Persuratan: kertas & isi dokumen di editor (meniru PDF: Liberation Serif ~ Times, 11pt, rata kiri-kanan) ───────── */
+/* ───────── Persuratan: kertas & isi dokumen di editor — SAMA dengan PDF supaya susunan baris yang dilihat staf saat mengetik tidak berbeda dari hasil PDF ─────────
+   Font: berkas yang sama dengan renderer PDF (public/fonts, SIL OFL) → lebar huruf identik. Lebar isi = 17 cm (A4 21 cm − margin 2 × 2 cm, sama dengan PDF).
+   Surat biasa: Liberation Serif (≈ Times New Roman) 11 pt, spasi 1,3, jarak antarparagraf 6 pt. Surat Edaran (data-layout="edaran"): Caladea (≈ Cambria) 12 pt, spasi 1,5. ───────── */
+@font-face { font-family: "Liberation Serif"; font-weight: 400; font-style: normal; font-display: swap; src: url("/fonts/LiberationSerif-Regular.ttf") format("truetype"); }
+@font-face { font-family: "Liberation Serif"; font-weight: 700; font-style: normal; font-display: swap; src: url("/fonts/LiberationSerif-Bold.ttf") format("truetype"); }
+@font-face { font-family: "Liberation Serif"; font-weight: 400; font-style: italic; font-display: swap; src: url("/fonts/LiberationSerif-Italic.ttf") format("truetype"); }
+@font-face { font-family: "Liberation Serif"; font-weight: 700; font-style: italic; font-display: swap; src: url("/fonts/LiberationSerif-BoldItalic.ttf") format("truetype"); }
+@font-face { font-family: "Caladea"; font-weight: 400; font-style: normal; font-display: swap; src: url("/fonts/Caladea-Regular.ttf") format("truetype"); }
+@font-face { font-family: "Caladea"; font-weight: 700; font-style: normal; font-display: swap; src: url("/fonts/Caladea-Bold.ttf") format("truetype"); }
+@font-face { font-family: "Caladea"; font-weight: 400; font-style: italic; font-display: swap; src: url("/fonts/Caladea-Italic.ttf") format("truetype"); }
+@font-face { font-family: "Caladea"; font-weight: 700; font-style: italic; font-display: swap; src: url("/fonts/Caladea-BoldItalic.ttf") format("truetype"); }
 @counter-style diktum-id { system: fixed; symbols: "KESATU" "KEDUA" "KETIGA" "KEEMPAT" "KELIMA" "KEENAM" "KETUJUH" "KEDELAPAN" "KESEMBILAN" "KESEPULUH"; fallback: decimal; }
 .letter-paper { font-family: "Liberation Serif", "Times New Roman", Times, serif; font-size: 11pt; line-height: 1.3; color: #000; }
+.letter-paper[data-layout="edaran"] { font-family: "Caladea", Cambria, Georgia, serif; font-size: 12pt; line-height: 1.5; }
+.letter-paper[data-layout="edaran"] .ProseMirror ul, .letter-paper[data-layout="edaran"] .ProseMirror ol { margin-bottom: 12pt; }
+.letter-paper .ProseMirror h1, .letter-paper .ProseMirror h2, .letter-paper .ProseMirror h3 { font-weight: 700; margin: 0 0 6pt; }
+.letter-paper .ProseMirror h1 { font-size: 14pt; } .letter-paper .ProseMirror h2 { font-size: 13pt; } .letter-paper .ProseMirror h3 { font-size: 12pt; }
 .letter-paper .ProseMirror { outline: none; min-height: 14cm; }
 .letter-paper .ProseMirror p { margin: 0 0 6pt; }
 .letter-paper .ProseMirror p[data-first-line] { text-indent: 1.25cm; }
-.letter-paper .ProseMirror ul, .letter-paper .ProseMirror ol { margin: 0 0 6pt; padding-left: 1.1cm; }
+.letter-paper .ProseMirror ul, .letter-paper .ProseMirror ol { margin: 0 0 0; padding-left: .9cm; }
+.letter-paper .ProseMirror li { margin-bottom: 2pt; }
 .letter-paper .ProseMirror ul { list-style: disc; }
 .letter-paper .ProseMirror ol { list-style: decimal; }
 .letter-paper .ProseMirror ol[data-list-style="lower-alpha"] { list-style: lower-alpha; }
@@ -79,12 +94,12 @@ dialog { margin: auto; }
 .letter-paper .ProseMirror [data-label-row] { display: grid; grid-template-columns: 3.2cm 1fr; gap: 0 .2cm; }
 .letter-paper .ProseMirror [data-label-row]::before { content: attr(data-label) " :"; }
 .letter-paper .ProseMirror [data-diktum-list] { counter-reset: diktum; margin: 0 0 6pt; }
-.letter-paper .ProseMirror [data-diktum-item] { display: grid; grid-template-columns: 2.6cm 1fr; margin-bottom: 4pt; }
+.letter-paper .ProseMirror [data-diktum-item] { display: grid; grid-template-columns: 2.6cm 1fr; margin-bottom: 6pt; }
 .letter-paper .ProseMirror [data-diktum-item]::before { content: attr(data-label) " :"; }
 .letter-paper .ProseMirror [data-diktum-item]:not([data-label]) { counter-increment: diktum; }
 .letter-paper .ProseMirror [data-diktum-item]:not([data-label])::before { content: counter(diktum, diktum-id) " :"; }
 .letter-paper .ProseMirror table { border-collapse: collapse; width: 100%; margin: 0 0 6pt; table-layout: fixed; }
-.letter-paper .ProseMirror td, .letter-paper .ProseMirror th { border: .75pt solid #000; padding: 2pt 4pt; vertical-align: top; position: relative; }
+.letter-paper .ProseMirror td, .letter-paper .ProseMirror th { border: .6pt solid #000; padding: 3pt; vertical-align: top; position: relative; }
 .letter-paper .ProseMirror th { background: #f0f0f0; font-weight: bold; }
 .letter-paper .ProseMirror td > p, .letter-paper .ProseMirror th > p { margin: 0; }
 .letter-paper .ProseMirror .selectedCell::after { content: ""; position: absolute; inset: 0; background: rgba(140, 29, 45, .15); pointer-events: none; }

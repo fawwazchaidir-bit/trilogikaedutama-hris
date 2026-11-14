@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { EditorContent, useEditor } from "@tiptap/react";
+import { Paper } from "./paper";
 import { CheckCircle2, Clock, Download, Eye, FileText, Loader2, Send, Undo2, XCircle, Ban, PencilLine, PenLine, Plus, Trash2, Lock, FileUp, Paperclip } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -257,9 +258,9 @@ export function LetterEditor({ initial, signers, people, employees = [], me }: {
             {editable && d.kind === "TUGAS" && <p className="border-b border-line bg-brand-50 px-4 py-1.5 text-xs text-brand-800">Isi Surat Tugas dibangkitkan otomatis dari <b>Data penugasan</b> (panel kiri). Ubah datanya, bukan isinya.</p>}
             {editable && d.kind !== "TUGAS" && <p className="border-b border-line bg-brand-50 px-4 py-1.5 text-xs text-brand-800">Kop surat, nomor, penerima, salam, blok tanda tangan + cap, dan QR verifikasi disusun otomatis — lihat tab <b>Pratinjau PDF</b>. Di sini Anda menyunting isi surat saja.</p>}
             <div className="max-h-[calc(100vh-18rem)] overflow-auto p-4 sm:p-6">
-              <article className="letter-paper mx-auto w-full max-w-[21cm] bg-white px-[1.6cm] py-[1.4cm] shadow-md ring-1 ring-black/5">
+              <Paper layout={d.kind === "EDARAN" ? "edaran" : "default"}>
                 <EditorContent editor={editor} />
-              </article>
+              </Paper>
             </div>
           </div>
           {atts.filter((a) => a.kind === "EDITOR").map((a) => tab === `att:${a.id}` && <AttachmentEditor key={a.id} letterId={d.id} att={a} editable={editable} onSaved={(n) => { setAtts((l) => l.map((x) => (x.id === n.id ? n : x))); setPdfKey((k) => k + 1); }} />)}

@@ -103,8 +103,8 @@ describe("jenis Surat Edaran", () => {
     // pada surat terbit nomor sungguhan masuk ke judul
     const issued = await buildFrame(row, { number: "001/TE-INT/005/II/2026", date: "2026-02-10", signerUserId: manajer.userId, draft: false });
     expect(docText(issued.frame.body)).toMatch(/Nomor :\s+001\/TE-INT\/005\/II\/2026/);
-    // kop: tiga baris (tagline, nama, alamat) — tanpa baris kontak/identitas
-    expect(Object.keys(frame.letterhead).sort()).toEqual(["addressLines", "logo", "name", "tagline"]);
+    // kop: tagline, nama, alamat, baris kontak (email/telp/website), dan penanda garis kop
+    expect(Object.keys(frame.letterhead).sort()).toEqual(["addressLines", "contactLine", "logo", "name", "rule", "tagline"]);
   });
 
   it("pratinjau PDF surat edaran berhasil dirender (satu halaman); surat biasa tetap berbingkai SURAT dengan penerima", async () => {
@@ -123,6 +123,6 @@ describe("jenis Surat Edaran", () => {
     expect(sf.kind).toBe("SURAT");
     expect(sf.recipient?.lines.map((l) => l.text)).toEqual(["Bapak Uji", "PT Contoh"]);
     expect(sf.subject).toBe("Permohonan narasumber");
-    expect(sf.salutation).toBe("Dengan Hormat,");
+    expect(sf.salutation).toBe("Dengan hormat,");
   });
 });

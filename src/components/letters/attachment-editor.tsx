@@ -1,6 +1,7 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { EditorContent, useEditor } from "@tiptap/react";
+import { Paper } from "./paper";
 import { Loader2, CheckCircle2, Clock } from "lucide-react";
 import { api, errorMessage } from "@/lib/api-client";
 import { documentExtensions } from "@/lib/documents/editor-extensions";
@@ -33,10 +34,10 @@ export function AttachmentEditor({ letterId, att, editable, onSaved }: { letterI
       {editor && editable && <EditorToolbar editor={editor} />}
       <div className="max-h-[calc(100vh-18rem)] overflow-auto p-4 sm:p-6">
         {editable && <p className="mb-2 flex items-center gap-1.5 text-xs text-muted" role="status">{state === "saving" ? <><Loader2 className="size-3.5 animate-spin" />Menyimpan lampiran…</> : state === "dirty" ? <><Clock className="size-3.5" />Belum tersimpan</> : state === "error" ? "Gagal menyimpan" : <><CheckCircle2 className="size-3.5 text-emerald-600" />Lampiran tersimpan</>}</p>}
-        <article className="letter-paper mx-auto w-full max-w-[21cm] bg-white px-[1.6cm] py-[1.4cm] shadow-md ring-1 ring-black/5">
+        <Paper layout="default">
           <p className="mb-3 text-center font-bold" style={{ fontSize: "13pt" }}>{att.title}</p>
           <EditorContent editor={editor} />
-        </article>
+        </Paper>
       </div>
     </div>
   );

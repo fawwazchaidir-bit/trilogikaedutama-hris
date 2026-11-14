@@ -5,7 +5,7 @@ import { Errors } from "../../errors";
 import { actorCan, assertCan, type Actor } from "../../actor";
 import { parseInput } from "../../validate";
 import { writeAudit } from "../../audit";
-import { DEFAULT_LETTER_TYPES } from "@/lib/documents/templates";
+import { DEFAULT_LETTER_TYPES, DEFAULT_SALUTATION, LEGACY_SALUTATION, isLegacyGenericTemplate, sameDoc } from "@/lib/documents/templates";
 import { isEligibleSigner, letterKind, type JobLevel, type LetterKind } from "@/lib/documents/policy";
 import { personFacts, requireLetters, isDirector } from "./access";
 
@@ -30,7 +30,7 @@ const dto = (t: { id: string; series: "EKS" | "INT"; code: number; name: string;
 
 /** Semai jenis bawaan yang belum ada (tidak menimpa kebijakan yang sudah diubah Direktur). Idempoten. */
 export async function ensureDefaultTypes(): Promise<void> {
-  const have = await prisma.letterType.findMany({ select: { id: true, series: true, code: true, name: true, _count: { select: { documents: true } }, confidential: true, hrCanSign: true, hrCanView: true, multiSigner: true, funnel: true, adminCreateOnly: true, kind: true } });
+  const have = await prisma.letterType.findMany({ select: { id: true, series: true, code: true, name: true, _count: { select: { documents: true } }, confidential: true, hrCanSign: true, hrCanView: true, multiSigner: true, funnel: true, adminCreateOnly: true, kind: true, defaultSalutation: true, templateBody: true } });
   const key = (s: string, c: number) => `${s}:${c}`;
   const byKey = new Map(have.map((h) => [key(h.series, h.code), h]));
   for (const t of DEFAULT_LETTER_TYPES) {
@@ -42,6 +42,11 @@ export async function ensureDefaultTypes(): Promise<void> {
         // Dokumen yang sudah dibuat memegang salinan isinya sendiri sehingga tidak terpengaruh; surat terbit memakai PDF terkunci.
         await prisma.letterType.update({ where: { id: cur.id }, data: { confidential: t.confidential, hrCanView: t.hrCanView, multiSigner: t.multiSigner, funnel: t.funnel, adminCreateOnly: t.adminCreateOnly, kind: t.kind, ...(cur.kind !== t.kind ? { templateBody: t.template as object, defaultSalutation: t.salutation, defaultClosing: t.closing } : {}) } });
       }
+      // Salam bawaan lama "Dengan Hormat," dirapikan menjadi "Dengan hormat,"; hanya bila nilainya PERSIS bawaan lama (salam yang sudah diubah Direktur tidak disentuh). Surat yang sudah dibuat tidak berubah.
+      if (cur.defaultSalutation === LEGACY_SALUTATION && t.salutation === DEFAULT_SALUTATION) await prisma.letterType.update({ where: { id: cur.id }, data: { defaultSalutation: DEFAULT_SALUTATION } });
+      // Templat awal: jenis yang templatnya PERSIS kerangka umum bawaan lama ("[isi surat]") ditingkatkan ke templat khusus jenisnya. Templat yang sudah diubah Direktur (tidak sama persis)
+      // tidak disentuh, dan surat yang sudah dibuat memegang salinan isinya sendiri.
+      if (cur.kind === t.kind && isLegacyGenericTemplate(cur.templateBody) && !sameDoc(cur.templateBody, t.template)) await prisma.letterType.update({ where: { id: cur.id }, data: { templateBody: t.template as object } });
       // Katalog master berubah (mis. kode lama diganti): selaraskan nama/templat HANYA bila jenis itu belum dipakai satu surat pun. Kebijakan tidak disentuh.
       if (cur.name !== t.name && cur._count.documents === 0) {
         await prisma.letterType.update({ where: { id: cur.id }, data: { name: t.name, description: t.description, kind: t.kind, templateBody: t.template as object, defaultSalutation: t.salutation, defaultClosing: t.closing } });

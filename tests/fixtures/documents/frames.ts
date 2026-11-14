@@ -1,8 +1,9 @@
 import { attachmentText, dayDate, timeRange } from "@/lib/documents/text";
 import { b, body, cell, center, dk, diktum, doc, i, labels, li, ol, p, row, t, table, th } from "@/lib/documents/builders";
-import type { DocFrame, DocLetterhead, DocSignatory } from "@/lib/documents/frame";
+import { VERIFY_CAPTION, type DocFrame, type DocLetterhead, type DocSignatory } from "@/lib/documents/frame";
 import type { PmNode } from "@/lib/documents/content";
 import { DEFAULT_FOOTER, type DocFooter } from "@/lib/documents/footer";
+import { kopContactLine } from "@/lib/documents/kop";
 import { demoLogo, demoSignature, demoStamp } from "./assets";
 
 /** Kaki halaman bawaan dengan teks kiri tertentu (null = tanpa teks lembaga; nomor halaman di kanan tetap). */
@@ -13,17 +14,19 @@ export async function letterhead(): Promise<DocLetterhead> {
   return {
     logo: await demoLogo(), tagline: "Lembaga Pelatihan Kerja Berbasis Kompetensi", name: "TRILOGIKA EDUTAMA",
     addressLines: ["Grha Trilogika, Jln. Ontoseno 47, Jambon 01/21, Kel. Trihanggo, Kec. Gamping, Kab. Sleman, Daerah Istimewa Yogyakarta 55291"],
+    // Kontak FIKTIF (domain .example / nomor contoh) — bukan data lembaga sungguhan.
+    contactLine: kopContactLine({ email: "info@trilogika.example", phone: "(0274) 555-0100", website: "www.trilogika.example" }), rule: true,
   };
 }
 async function director(title = "Direktur Utama", org = "TRILOGIKA EDUTAMA"): Promise<DocSignatory> {
   return { orgName: org, title, name: "Nama Direktur, S.Psi.", signature: await demoSignature(), stamp: await demoStamp() };
 }
-const verify = { url: "https://verifikasi.contoh.test/verifikasi/0123456789abcdef0123456789abcdef", caption: "Dokumen ini sah secara elektronik. Pindai kode QR untuk verifikasi." };
+const verify = { url: "https://verifikasi.contoh.test/verifikasi/0123456789abcdef0123456789abcdef", caption: VERIFY_CAPTION };
 
 export async function frameSuratPenawaran(): Promise<DocFrame> {
   return {
     kind: "SURAT", number: "001/TE-EKS/002/XI/2026", date: "2026-11-10", place: "Sleman", attachmentText: attachmentText(1, "berkas"), subject: "Surat Penawaran",
-    recipient: { prefix: "Kepada Yth.", lines: [{ text: "Bapak/Ibu Kepala", bold: true }, { text: "SPPG Contoh Fiktif Gamping 2", bold: true }], cityPrefix: "Di", place: "Tempat" },
+    recipient: { prefix: "Yth.", lines: [{ text: "Bapak/Ibu Kepala", bold: true }, { text: "SPPG Contoh Fiktif Gamping 2", bold: true }], cityPrefix: "di", place: "tempat" },
     salutation: "Salam Sejahtera,",
     body: doc(
       body(["Trilogika Edutama merupakan Lembaga Pusat Pendidikan dan Pelatihan (Diklat) yang dapat melaksanakan Pelatihan Berbasis Kompetensi, kami bermaksud mengajukan penawaran terkait kegiatan ", b("Diklat dan Sertifikasi BNSP Bidang Food Production Offline Skema Demi Chef dan Chef de Partie"), " di wilayah Yogyakarta. Adapun kegiatan ini dirancang selama ", b("2 (dua) hari"), ", dengan rincian ", b("1 (satu) hari"), " pelaksanaan ", b("Diklat"), " dan ", b("1 (satu) hari"), " pelaksanaan ", b("Asesmen/Uji Kompetensi"), ". Jumlah peserta dan jadwal pelaksanaan akan disesuaikan berdasarkan kesepakatan bersama. Kegiatan Diklat dan Asesmen Sertifikasi ini dilaksanakan oleh instruktur dan asesor kompetensi yang tersertifikasi, serta mengacu pada skema dan ketentuan resmi BNSP."]),
@@ -39,8 +42,8 @@ export async function frameSuratPenawaran(): Promise<DocFrame> {
 export async function frameSuratNarasumber(): Promise<DocFrame> {
   return {
     kind: "SURAT", number: "001/TE-EKS/003/XI/2026", date: "2026-11-09", place: "Sleman", attachmentText: attachmentText(1, "halaman"), subject: "Surat Permohonan Narasumber",
-    recipient: { prefix: "Kepada Yth.", lines: [{ text: "Bapak Contoh Narasumber", bold: true }], cityPrefix: "Di", place: "Tempat" },
-    salutation: "Dengan Hormat,",
+    recipient: { prefix: "Yth.", lines: [{ text: "Bapak Contoh Narasumber", bold: true }], cityPrefix: "di", place: "tempat" },
+    salutation: "Dengan hormat,",
     body: doc(
       body("Seiring pesatnya perkembangan dunia kerja dan penerapan sistem pelatihan berbasis kompetensi, tuntutan terhadap ketersediaan instruktur yang memiliki kualifikasi metodologi pengajaran terstandar serta profesional menjadi semakin krusial. Dalam rangka mendukung peningkatan mutu, kompetensi, serta profesionalisme tenaga pengajar di bidang metodologi pelatihan sesuai standar nasional (SKKNI), kami dari Trilogika Edutama Yogyakarta berencana mengadakan Pelatihan dan Sertifikasi BNSP Bidang Metodologi Pelatihan Lv. 4 Skema Instruktur. Adapun kegiatan tersebut akan dilaksanakan pada:"),
       labels([row("Hari, tanggal", dayDate("2026-11-11")), row("Waktu", timeRange("09:00", "16:00")), row("Tempat", [t("Zoom Meeting ("), i("Online"), t(")")])], { indent: 1.25, labelWidth: 3.2 }),

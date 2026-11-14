@@ -6,10 +6,12 @@ import { assertCan, type Actor } from "../../actor";
 import { parseInput } from "../../validate";
 import { writeAudit } from "../../audit";
 import { buildFooterSampleFrame, getLetterSettings } from "./frame";
+import { getSettings } from "../settings";
 import { isDirector, personFacts, requireLetters } from "./access";
 import { canHoldSignature } from "@/lib/documents/policy";
 import { optionalText, uuid } from "@/lib/validation/common";
 import { FOOTER_COLOR_RE, FOOTER_FONT_KEYS, FOOTER_SIZE, FOOTER_TEXT_MAX, footerFromRow, footerTextProblems, type DocFooter } from "@/lib/documents/footer";
+import { kopContactLine } from "@/lib/documents/kop";
 import { renderDocumentPdf } from "../../pdf/document-render";
 
 function assertDirector(actor: Actor): void {
@@ -20,12 +22,20 @@ function assertDirector(actor: Actor): void {
 
 export interface LetterSettingsDto {
   place: string; idLine: string | null; /** = kaki halaman zona kiri (nama lama dipertahankan). */ footerText: string | null; footer: DocFooter; escalationDays: number; stampUrl: string | null; annualTarget: number; products: string[];
+  /** Garis di bawah kop surat (ada/tiada). */ kopRule: boolean;
+  /** Isi kop menurut Pengaturan lembaga (hanya baca di sini; diubah di Pengaturan → Lembaga). */
+  kop: { tagline: string | null; name: string; address: string | null; email: string | null; phone: string | null; website: string | null; contactLine: string | null };
   counters: { series: "EKS" | "INT"; year: number; lastSeq: number }[];
 }
 export async function getLetterSettingsDto(actor: Actor): Promise<LetterSettingsDto> {
   assertDirector(actor);
-  const [s, counters] = await Promise.all([getLetterSettings(), prisma.letterCounter.findMany({ orderBy: [{ year: "desc" }, { series: "asc" }] })]);
-  return { place: s.place, idLine: s.idLine, footerText: s.footerText, footer: footerFromRow(s), escalationDays: s.escalationDays, annualTarget: Number(s.annualTarget), products: s.products, stampUrl: s.stampFileId ? `/api/files/${s.stampFileId}` : null, counters };
+  const [s, company, counters] = await Promise.all([getLetterSettings(), getSettings(), prisma.letterCounter.findMany({ orderBy: [{ year: "desc" }, { series: "asc" }] })]);
+  return {
+    place: s.place, idLine: s.idLine, footerText: s.footerText, footer: footerFromRow(s), escalationDays: s.escalationDays, annualTarget: Number(s.annualTarget), products: s.products, stampUrl: s.stampFileId ? `/api/files/${s.stampFileId}` : null,
+    kopRule: s.kopRule,
+    kop: { tagline: company.tagline, name: company.name, address: company.address, email: company.email, phone: company.phone, website: company.website, contactLine: kopContactLine(company) },
+    counters,
+  };
 }
 
 /** Teks zona kaki halaman: opsional, maks 200 karakter, hanya token yang dikenal (salah ketik seperti {halamn} ditolak, bukan dicetak apa adanya). */
@@ -44,6 +54,8 @@ const settingsSchema = z.object({
   /** Nama lama zona kiri kaki halaman; `footer.left` didahulukan bila keduanya dikirim. Dihilangkan = tidak diubah. */
   footerText: footerText.optional(),
   footer: footerSchema.optional(),
+  /** Garis di bawah kop surat. */
+  kopRule: z.boolean().optional(),
   escalationDays: z.number().int().min(0).max(30).optional(),
   annualTarget: z.number().int().min(0).max(1_000_000_000_000).optional(),
   products: z.array(z.string().trim().min(1).max(120)).min(1).max(40).optional(),
@@ -69,17 +81,17 @@ export async function updateLetterSettings(actor: Actor, raw: unknown): Promise<
     const { annualTarget, footer, footerText: legacyLeft, ...rest } = input;
     const data = { ...rest, ...(annualTarget !== undefined ? { annualTarget: BigInt(annualTarget) } : {}), ...footerColumns(footer ?? {}, legacyLeft) };
     await tx.letterSettings.upsert({ where: { id: 1 }, create: { id: 1, ...data }, update: data });
-    await writeAudit(tx, actor, { action: "letter.settings", entityType: "LetterSettings", entityId: "1", summary: footer || legacyLeft !== undefined ? "Pengaturan persuratan diubah (termasuk kaki halaman)" : "Pengaturan persuratan diubah", after: { ...input } });
+    await writeAudit(tx, actor, { action: "letter.settings", entityType: "LetterSettings", entityId: "1", summary: footer || legacyLeft !== undefined ? "Pengaturan persuratan diubah (termasuk kaki halaman)" : rest.kopRule !== undefined ? `Pengaturan persuratan diubah (garis kop ${rest.kopRule ? "diadakan" : "ditiadakan"})` : "Pengaturan persuratan diubah", after: { ...input } });
   });
 }
 
-/** Pratinjau PDF kaki halaman dengan konfigurasi yang SEDANG disunting (belum tersimpan): bagian yang tidak dikirim memakai nilai tersimpan. Hanya Direktur. */
+/** Pratinjau PDF kop + kaki halaman dengan konfigurasi yang SEDANG disunting (belum tersimpan): bagian yang tidak dikirim memakai nilai tersimpan. Hanya Direktur. */
 export async function previewFooterPdf(actor: Actor, raw: unknown): Promise<Buffer> {
   assertDirector(actor);
-  const { footer = {} } = parseInput(z.object({ footer: footerSchema.optional() }).strict(), raw ?? {});
+  const { footer = {}, kopRule } = parseInput(z.object({ footer: footerSchema.optional(), kopRule: z.boolean().optional() }).strict(), raw ?? {});
   const saved = footerFromRow(await getLetterSettings());
   const merged: DocFooter = { ...saved, ...Object.fromEntries(Object.entries(footer).filter(([, v]) => v !== undefined)) } as DocFooter;
-  return renderDocumentPdf(await buildFooterSampleFrame(merged));
+  return renderDocumentPdf(await buildFooterSampleFrame(merged, { kopRule }));
 }
 
 /** Atur nomor urut terakhir yang sudah terpakai (mis. melanjutkan register arsip). Hanya boleh naik. */

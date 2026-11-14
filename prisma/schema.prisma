@@ -402,6 +402,8 @@ model LetterSettings {
   footerRule        Boolean @default(false)
   footerFirstPage   Boolean @default(true)
   footerAttachments Boolean @default(true)
+  /// Garis di bawah kop surat (halaman pertama): bawaan ada.
+  kopRule        Boolean  @default(true)
   stampFileId    String?  @db.Uuid
   /// Hari kerja sejak diajukan sebelum Direktur boleh mengambil alih.
   escalationDays Int      @default(2)
@@ -1322,7 +1324,8 @@ model CompanySettings {
   attendancePhotoRequireLocation Boolean             @default(true)
   /// Foto absensi yang lebih tua dari ini dihapus otomatis (jejak teks cap tetap). 0 = simpan selamanya (tidak disarankan).
   attendancePhotoRetentionMonths Int                 @default(6)
-  /// Admin & Super Admin wajib mengaktifkan 2FA.
+  /// Super Admin (Direktur) dan HR wajib mengaktifkan 2FA (peran yang diwajibkan: src/lib/two-factor-policy.ts; Karyawan — manajer, staf, magang — tidak pernah diwajibkan).
+  /// Bawaan kolom false agar lingkungan uji/dev tidak terkunci; instalasi baru lewat prisma/seed.ts menyalakannya (true), dan migrasi 20261114140000 menyalakannya pada instalasi yang sudah ada.
   twoFactorRequiredForAdmins     Boolean             @default(false)
 
   // Kebijakan cuti BAWAAN (dipakai karyawan yang tidak punya kebijakan khusus; lihat kolom leave* pada Employee)

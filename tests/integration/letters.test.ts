@@ -15,6 +15,7 @@ import { assertCanSetSignature, setCounterOffset, updateLetterSettings } from "@
 import { verifyByToken } from "@/server/services/letters/public";
 import { doc, p } from "@/lib/documents/builders";
 import { PDFDocument } from "pdf-lib";
+import { outsidePage, overlappingWords, pdfWords } from "../helpers/pdf-words";
 import { addEditorAttachment, deleteAttachment, updateAttachment, uploadAttachment } from "@/server/services/letters/attachments";
 
 let direktur: Actor, manajer: Actor, staf: Actor, staf2: Actor, magang: Actor, hr: Actor;
@@ -354,6 +355,40 @@ describe("tahap 2b: lampiran", () => {
     const { canReadLetterPdf } = await import("@/server/services/letters/access");
     expect(await canReadLetterPdf(staf, merged.fileId!)).toBe(true);
     expect(await canReadLetterPdf(staf2, merged.fileId!)).toBe(false);
+  });
+
+  it("berita acara dengan enam penandatangan tambahan (batas sistem): semua nama (7 pihak) tercetak di dalam kertas dan tidak saling menimpa", async () => {
+    const ba = await draftReady(staf, manajer, { series: "EKS", code: 13 });
+    const ext = Array.from({ length: 6 }, (_, i) => ({ kind: "EXTERNAL" as const, name: `Mitra Nomor${i + 1}`, title: `Jabatan Mitra${i + 1}`, org: `Lembaga Mitra${i + 1}` }));
+    await updateLetter(staf, ba.id, { body: doc(p("Pada hari ini para pihak telah melakukan serah terima pelaksanaan kegiatan.")), signatories: ext });
+    const { words, pages } = pdfWords(Buffer.from((await letterPdf(staf, ba.id)).bytes));
+    const text = words.map((w) => w.text).join(" ");
+    for (let i = 1; i <= 6; i++) expect(text.split(/\s+/).filter((w) => w === `Nomor${i}`), `nama mitra ${i}`).toHaveLength(1);
+    expect(text).toContain("Manajer Uji");                                          // penandatangan utama tetap tercetak
+    expect(outsidePage(words, pages)).toEqual([]);
+    expect(overlappingWords(words.filter((w) => !["D", "R", "A", "F"].includes(w.text)))).toEqual([]);   // pratinjau draf: huruf watermark "DRAF" memang menimpa isi
+  });
+
+  it("kaki surat 'Hal. n dari m' menghitung SELURUH halaman berkas gabungan; lampiran terpisah tidak ikut; halaman lampiran unggahan tidak diubah", async () => {
+    const d = await draftReady(staf, manajer);
+    await updateLetter(staf, d.id, { body: doc(p("Isi final.")) });
+    const footerOf = (bytes: Uint8Array | Buffer, page: number) => pdfWords(Buffer.from(bytes)).words.filter((w) => w.page === page).map((w) => w.text).join(" ");
+    expect(footerOf((await letterPdf(staf, d.id)).bytes, 1)).toContain("Hal. 1 dari 1");
+    await uploadAttachment(staf, d.id, { title: "Proposal Lengkap", mode: "MERGED", name: "proposal.pdf", bytes: await pdfOf(2) });
+    await uploadAttachment(staf, d.id, { title: "Profil Lembaga", mode: "SEPARATE", name: "profil.pdf", bytes: await pdfOf(5) });   // terpisah: bukan bagian berkas ini
+    const out = (await letterPdf(staf, d.id)).bytes;
+    expect(await pageCount(out)).toBe(3);                                       // 1 surat + 2 halaman lampiran digabung
+    expect(footerOf(out, 1)).toContain("Hal. 1 dari 3");                         // sebelumnya "Hal. 1 dari 1" pada berkas 3 halaman
+    // halaman lampiran unggahan tidak diubah diam-diam: tidak ada kaki "Hal." yang ditambahkan
+    expect(footerOf(out, 2)).not.toContain("Hal.");
+    expect(footerOf(out, 3)).not.toContain("Hal.");
+    // lampiran editor menambah halaman yang dibuat sistem DAN total ikut menghitung lampiran digabung
+    const ed = await addEditorAttachment(staf, d.id, { title: "Rincian" });
+    await updateAttachment(staf, d.id, ed.id, { body: doc(p("Isi lampiran editor.")) });
+    const out2 = (await letterPdf(staf, d.id)).bytes;
+    expect(await pageCount(out2)).toBe(4);
+    expect(footerOf(out2, 1)).toContain("Hal. 1 dari 4");
+    expect(footerOf(out2, 2)).toContain("Hal. 2 dari 4");                        // halaman lampiran editor (dibuat sistem) bernomor dalam total yang sama
   });
 
   it("menolak: bukan PDF, PDF rusak, bukan pembuat, status terkunci, lebih dari batas; mengganti mode & judul", async () => {

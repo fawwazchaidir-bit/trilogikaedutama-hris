@@ -42,7 +42,7 @@ describe("renderer PDF persuratan", () => {
     expect(b.toString("latin1")).toContain("LiberationSerif");
   });
 
-  it("kop format baru: font Cambria-kompatibel (Caladea) — nama 14 pt, alamat 10 pt, tagline 12 pt; tanpa baris kontak/identitas", async () => {
+  it("kop format baru: font Cambria-kompatibel (Caladea) — nama 14 pt, alamat 10 pt, tagline 12 pt; baris kontak di bawah alamat", async () => {
     const f = await frameSuratNarasumber();
     const b = await renderDocumentPdf(f);
     const txt = b.toString("latin1");
@@ -53,7 +53,7 @@ describe("renderer PDF persuratan", () => {
     expect(p1).toMatch(/\/F\d+ 14 Tf/); // nama lembaga
     expect(p1).toMatch(/\/F\d+ 12 Tf/); // tagline
     expect(p1).toMatch(/\/F\d+ 10 Tf/); // alamat
-    expect(Object.keys(f.letterhead).sort()).toEqual(["addressLines", "logo", "name", "tagline"]);
+    expect(Object.keys(f.letterhead).sort()).toEqual(["addressLines", "contactLine", "logo", "name", "rule", "tagline"]);
   });
   it("kaki halaman tercetak di setiap halaman (teks lembaga + nomor halaman) — pada surat satu halaman, SK berlampiran, dan edaran", async () => {
     for (const [name, frame, minPages] of [["penawaran", await frameSuratPenawaran(), 1], ["sk", await frameSk(), 2], ["edaran", await frameEdaran(), 1]] as const) {

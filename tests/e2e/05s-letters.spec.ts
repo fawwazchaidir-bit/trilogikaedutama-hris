@@ -179,7 +179,7 @@ test("Pengaturan kaki halaman: Direktur mengatur teks/font/ukuran/gaya, pratinja
   await expect(page.getByRole("button", { name: "Simpan kaki halaman" })).toBeDisabled();
   await page.getByLabel("Teks kiri").fill("Trilogika Edutama");
   await shot(page, "40-pengaturan-kaki-halaman");
-  await page.getByRole("button", { name: "Pratinjau PDF" }).click();
+  await page.getByRole("button", { name: "Pratinjau PDF" }).last().click();                 // kartu Kaki halaman ada SESUDAH kartu Kop surat (yang juga punya tombol ini)
   await expect(page.locator("iframe[title='Pratinjau PDF kaki halaman']")).toBeVisible();
   await page.getByRole("button", { name: "Simpan kaki halaman" }).click();
   await expect(page.getByText("Kaki halaman disimpan.")).toBeVisible();
