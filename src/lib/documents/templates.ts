@@ -80,6 +80,12 @@ const CATALOG: Row[] = [
 
 /** Sifat struktural per jenis (Register: kolom "Sifat" & penanda tangan "…atau HR", berita acara "pihak yang terlibat"). */
 const CONFIDENTIAL = new Set(["INT:6", "INT:9", "INT:10"]);
+/**
+ * Jenis surat rahasia yang NAMA ASLINYA tetap tampil di halaman verifikasi publik (jenis rahasia lain ditampilkan generik "Surat rahasia (internal)", karena namanya sendiri mengungkap
+ * sifat surat — mis. "Surat peringatan"). INT-010 Surat keterangan kerja sengaja dikecualikan: tujuannya memang diverifikasi PIHAK LUAR (pemberi kerja baru, bank, dst.). Perihal, judul lampiran,
+ * nama file, dan alasan pembatalan tetap disembunyikan untuk semua surat rahasia.
+ */
+export const PUBLIC_TYPE_NAME_ALLOWED = new Set(["INT:10"]);
 const HR_SIGN = new Set(["INT:7", "INT:10", "INT:11"]);
 const HR_VIEW = new Set(["INT:10"]);
 const MULTI = new Set(["EKS:13", "INT:8"]);

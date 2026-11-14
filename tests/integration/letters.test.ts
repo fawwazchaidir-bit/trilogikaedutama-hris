@@ -469,12 +469,12 @@ describe("keamanan dokumen terbit: verifikasi publik tanpa kebocoran & PDF dibat
   const SECRET_NOTE = "Dibatalkan karena evaluasi kinerja Budi Santoso salah kirim";
   const pdfMeta = async (bytes: Uint8Array | Buffer) => { const d = await PDFDocument.load(bytes); return { subject: d.getSubject() ?? "", keywords: d.getKeywords() ?? "", pages: d.getPageCount() }; };
 
-  async function issuedWithAttachments(t: { series: "EKS" | "INT"; code: number }, titles: [string, string], names: [string, string]) {
-    const d = await draftReady(staf, manajer, t);
+  async function issuedWithAttachments(t: { series: "EKS" | "INT"; code: number }, titles: [string, string], names: [string, string], signer: Actor = manajer) {
+    const d = await draftReady(staf, signer, t);
     await updateLetter(staf, d.id, { body: doc(p("Isi surat dengan lampiran.")) });
     await uploadAttachment(staf, d.id, { title: titles[0], mode: "MERGED", name: names[0], bytes: await pdfOf(2) });
     await uploadAttachment(staf, d.id, { title: titles[1], mode: "SEPARATE", name: names[1], bytes: await pdfOf(1) });
-    await submitLetter(staf, d.id); await approveLetter(manajer, d.id);
+    await submitLetter(staf, d.id); await approveLetter(signer, d.id);
     return prisma.letterDocument.findUniqueOrThrow({ where: { id: d.id } });
   }
 
@@ -491,6 +491,26 @@ describe("keamanan dokumen terbit: verifikasi publik tanpa kebocoran & PDF dibat
     const d = await getLetter(staf, row.id);
     expect(d.cancelNote).toBe(SECRET_NOTE);
     expect(d.attachments.map((a) => [a.title, a.fileName])).toEqual([["Daftar Penilaian Rahasia Budi", "penilaian-rahasia-budi.pdf"], ["Surat Peringatan Pertama", "sp1-budi-santoso.pdf"]]);
+  });
+
+  it("INT-010 Surat keterangan kerja (rahasia, untuk verifikasi PIHAK LUAR): NAMA JENIS ASLINYA tampil; perihal, judul & nama file lampiran, dan alasan pembatalan tetap tersembunyi; jenis rahasia lain tetap generik", async () => {
+    const ket = await issuedWithAttachments({ series: "INT", code: 10 }, ["Slip gaji Budi Santoso", "Surat pengalaman kerja"], ["slip-gaji-budi.pdf", "pengalaman-budi.pdf"], hr);   // INT-010: penandatangan Direktur atau HR
+    const v = await verifyByToken(ket.verifyToken);
+    expect(v).toMatchObject({ state: "VALID", subject: null });
+    expect(v!.typeName).toBe((await prisma.letterType.findFirstOrThrow({ where: { series: "INT", code: 10 } })).name);   // "Surat keterangan kerja (internal)"
+    expect(v!.typeName).toMatch(/keterangan kerja/i);
+    expect(v!.attachments.map((a) => a.title)).toEqual(["Lampiran 1", "Lampiran 2"]);
+    const json = JSON.stringify(v);
+    for (const leak of ["Budi", "slip-gaji", "pengalaman-budi", "Slip gaji", "fileName", "cancelledNote"]) expect(json, leak).not.toContain(leak);
+    // dibatalkan: nama jenis tetap, alasan pembatalan tidak pernah
+    await cancelLetter(direktur, ket.id, { note: SECRET_NOTE });
+    const c = await verifyByToken(ket.verifyToken);
+    expect(c).toMatchObject({ state: "CANCELLED", subject: null });
+    expect(c!.typeName).toMatch(/keterangan kerja/i);
+    expect(JSON.stringify(c)).not.toContain(SECRET_NOTE);
+    // jenis rahasia lain (INT-009 evaluasi/pembinaan) TETAP generik
+    const evaluasi = await issuedWithAttachments({ series: "INT", code: 9 }, ["Penilaian A", "Penilaian B"], ["a.pdf", "b.pdf"]);
+    expect((await verifyByToken(evaluasi.verifyToken))!.typeName).toBe("Surat rahasia (internal)");
   });
 
   it("surat BIASA dibatalkan: alasan pembatalan, nama file, DAN judul lampiran juga tidak tampil di halaman publik (judul bisa memuat nama klien/isi sensitif)", async () => {
