@@ -16,6 +16,7 @@ import {
 import { assignAsset, createAsset } from "@/server/services/assets";
 import { cancelAssignment, issueReceipt, listAssignments, pendingAllowanceCount } from "@/server/services/assignments";
 import { readFileSync } from "node:fs";
+import { ALLOWANCE_MIGRATIONS, ALLOWANCE_TRIGGERS, runAllowanceAudit } from "@/server/services/allowance-audit";
 import { listEmployeeChecklists, startChecklist } from "@/server/services/employee-checklists";
 
 let fx: TrainingFixtures;
@@ -685,5 +686,122 @@ describe("sinyal pada checklist karyawan berhenti", () => {
     expect(done.signal).toMatchObject({ state: "OK" });
     expect(done.signal?.text).toMatch(/sudah dibayar/);
     expect(done.status).toBe("TODO");
+  });
+});
+
+describe("audit uang harian untuk data nyata (skrip operasional, baca-saja)", () => {
+  const TRG = "daily_allowance_receipts_settlement_guard";
+  const mkAssignee = async (seq = 1) => {
+    const l = await makeLetter(fx.hr.userId, seq);
+    return prisma.assignmentAssignee.create({ data: { letterId: l.id, employeeId: emp(), days: 5, dailyRate: 150_000n, total: 750_000n } });
+  };
+  /** Bukti disisipkan langsung dengan penjaga dimatikan — meniru data lama yang lolos dari pemeriksaan service. */
+  async function rawReceipt(a: { id: string; letterId: string; employeeId: string }, seqNo = 90) {
+    await prisma.$executeRawUnsafe(`ALTER TABLE daily_allowance_receipts DISABLE TRIGGER ${TRG}`);
+    try {
+      return await prisma.dailyAllowanceReceipt.create({ data: { seqYear: 2026, seqNo, number: `${seqNo}/BPUH/XI/2026`, letterId: a.letterId, assigneeId: a.id, employeeId: a.employeeId, days: 5, dailyRate: 150_000n, total: 750_000n, paidDate: isoToDate("2026-11-03"), method: "CASH", snapshot: {}, issuedById: fx.hr.userId } });
+    } finally { await prisma.$executeRawUnsafe(`ALTER TABLE daily_allowance_receipts ENABLE TRIGGER ${TRG}`); }
+  }
+  const audit = () => runAllowanceAudit(prisma);
+  /** Tiru baris lama yang tidak dapat ditautkan otomatis: tautan dan kunci sumber hilang. */
+  const unlink = (settlementId: string) => prisma.finalSettlementLine.updateMany({ where: { settlementId }, data: { sourceKey: null, assigneeId: null } });
+
+  it("basis data bersih: kode keluar 0, semua migrasi dan penjaga terpasang, tanpa temuan", async () => {
+    await salary(); await mkAssignee(); await mk();
+    const r = await audit();
+    expect(r.migrations).toEqual(ALLOWANCE_MIGRATIONS.map((name) => ({ name, applied: true })));
+    expect(r.triggers).toEqual(ALLOWANCE_TRIGGERS.map((name) => ({ name, present: true })));
+    expect(r.counts).toMatchObject({ settlementLines: 1, linkedLines: 1, unlinkedLines: 0, activeReceipts: 0 });
+    expect(r.findings).toEqual([]);
+    expect(r.exitCode).toBe(0);
+  });
+
+  it("uang harian tercatat dua kali (penyelesaian akhir + bukti aktif) → ACTIVE_RECEIPT, kode keluar 2, memuat nomor bukti dan surat", async () => {
+    await salary(); const a = await mkAssignee(); const s = await mk();
+    await rawReceipt(a);
+    const r = await audit();
+    expect(r.exitCode).toBe(2);
+    expect(r.findings).toEqual([expect.objectContaining({ kind: "ACTIVE_RECEIPT", settlementId: s.id, employeeName: "Ayu Lestari", amount: 750_000, receiptNumber: "90/BPUH/XI/2026", receiptTotal: 750_000, letterNumber: "001/ST/XI/2026" })]);
+    expect(r.findings[0]!.action).toMatch(/dua kali/);
+  });
+
+  it("surat tugas dibatalkan tetapi barisnya masih berlaku → LETTER_CANCELLED, kode keluar 2; hilang setelah penyelesaian dibatalkan", async () => {
+    await salary(); const a = await mkAssignee(); const s = await mk();
+    await cancelAssignment(fx.hr, a.letterId, { reason: "Perjalanan dibatalkan klien" });
+    expect((await audit()).findings).toEqual([expect.objectContaining({ kind: "LETTER_CANCELLED", settlementId: s.id, letterNumber: "001/ST/XI/2026" })]);
+    expect((await audit()).exitCode).toBe(2);
+    await cancelSettlement(fx.hr, s.id, { reason: "Dibuat ulang" });
+    expect((await audit()).exitCode).toBe(0);
+  });
+
+  it("BARIS LAMA yang tidak dapat dikenali otomatis (tak tertaut) muncul sebagai UNLINKED → kode keluar 4 (periksa manual), dengan jumlah calon tautan", async () => {
+    await salary(); await mkAssignee(); const s = await mk();
+    await unlink(s.id);
+    const r = await audit();
+    expect(r.counts).toMatchObject({ settlementLines: 1, linkedLines: 0, unlinkedLines: 1 });
+    expect(r.findings).toEqual([expect.objectContaining({ kind: "UNLINKED", settlementId: s.id, amount: 750_000, candidateAssignees: 1, receiptNumber: null })]);
+    expect(r.findings[0]!.action).toMatch(/periksa manual/i);
+    expect(r.exitCode).toBe(4);
+    // baris manual murni (HR menulis uang harian sendiri) juga terdaftar untuk diperiksa
+    await prisma.finalSettlementLine.updateMany({ where: { settlementId: s.id }, data: { source: "MANUAL" } });
+    expect((await audit()).findings[0]).toMatchObject({ kind: "UNLINKED", source: "MANUAL" });
+  });
+
+  it("baris lama tak tertaut + karyawan punya bukti aktif senilai itu → UNLINKED_MATCH (patut diduga ganda), kode keluar 2, di urutan teratas", async () => {
+    await salary(); const a = await mkAssignee(); const s = await mk();
+    await unlink(s.id);
+    await rawReceipt(a);
+    const r = await audit();
+    expect(r.findings[0]).toMatchObject({ kind: "UNLINKED_MATCH", settlementId: s.id, receiptNumber: "90/BPUH/XI/2026", receiptTotal: 750_000 });
+    expect(r.exitCode).toBe(2);
+  });
+
+  it("penyelesaian yang DIBATALKAN diabaikan", async () => {
+    await salary(); const a = await mkAssignee(); const s = await mk();
+    await rawReceipt(a);
+    expect((await audit()).exitCode).toBe(2);
+    await cancelSettlement(fx.hr, s.id, { reason: "Dibuat ulang" });
+    expect((await audit()).findings).toEqual([]);
+  });
+
+  it("BACA-SAJA: transaksi dibuka READ ONLY sebagai pernyataan pertama, tidak ada pernyataan tulis, dan data tidak berubah", async () => {
+    await salary(); const a = await mkAssignee(); const s = await mk();
+    await rawReceipt(a); await unlink(s.id);
+    const log: string[] = [];
+    const spy = { $transaction: <T>(fn: (tx: never) => Promise<T>) => prisma.$transaction((tx) => fn({
+      $executeRawUnsafe: (q: string) => { log.push(q); return tx.$executeRawUnsafe(q); },
+      $queryRawUnsafe: (q: string, ...v: unknown[]) => { log.push(q); return tx.$queryRawUnsafe(q, ...v); },
+    } as never)) };
+    const snap = async () => JSON.stringify([await prisma.finalSettlementLine.findMany({ orderBy: { id: "asc" } }), await prisma.dailyAllowanceReceipt.findMany({ orderBy: { id: "asc" } }), await prisma.auditLog.count()], (_k, v) => (typeof v === "bigint" ? v.toString() : v));
+    const before = await snap();
+    await runAllowanceAudit(spy as never);
+    expect(log[0]).toBe("SET TRANSACTION READ ONLY");
+    expect(log.length).toBeGreaterThan(3);
+    for (const q of log.slice(1)) expect(q, q).toMatch(/^\s*SELECT/i);
+    expect(await snap()).toBe(before);
+    // basis data benar-benar menolak tulis di dalam transaksi READ ONLY itu
+    await expect(prisma.$transaction(async (tx) => { await tx.$executeRawUnsafe("SET TRANSACTION READ ONLY"); await tx.$executeRawUnsafe(`UPDATE final_settlement_lines SET name = 'x' WHERE id = '${(await prisma.finalSettlementLine.findFirstOrThrow()).id}'`); })).rejects.toThrow(/read-only/i);
+  });
+
+  it("migrasi/penjaga belum lengkap atau kolom belum ada → kode keluar 3 (jangan menilai data sebelum migrasi diterapkan)", async () => {
+    const stub = (opts: { migrations: string[]; triggers: string[]; column: boolean }) => ({
+      $transaction: async <T>(fn: (tx: never) => Promise<T>) => fn({
+        $executeRawUnsafe: async () => 0,
+        $queryRawUnsafe: async (q: string) => {
+          if (q.includes("_prisma_migrations")) return opts.migrations.map((migration_name) => ({ migration_name }));
+          if (q.includes("pg_trigger")) return opts.triggers.map((tgname) => ({ tgname }));
+          if (q.includes("information_schema.columns")) return [{ n: opts.column ? 1n : 0n }];
+          return [];
+        },
+      } as never),
+    });
+    const partial = await runAllowanceAudit(stub({ migrations: [ALLOWANCE_MIGRATIONS[0]], triggers: [...ALLOWANCE_TRIGGERS], column: true }) as never);
+    expect(partial.exitCode).toBe(3);
+    expect(partial.migrations.map((m) => m.applied)).toEqual([true, false]);
+    const noTrigger = await runAllowanceAudit(stub({ migrations: [...ALLOWANCE_MIGRATIONS], triggers: ALLOWANCE_TRIGGERS.slice(0, 3), column: true }) as never);
+    expect(noTrigger.exitCode).toBe(3);
+    expect(noTrigger.triggers.filter((t) => !t.present).map((t) => t.name)).toEqual([ALLOWANCE_TRIGGERS[3]]);
+    const noColumn = await runAllowanceAudit(stub({ migrations: [], triggers: [], column: false }) as never);
+    expect(noColumn).toMatchObject({ exitCode: 3, findings: [], counts: { settlementLines: 0 } });
   });
 });

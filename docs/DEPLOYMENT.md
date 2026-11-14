@@ -103,8 +103,16 @@ CONFIRM_RESTORE=yes TARGET_URL=… npm run db:restore -- backups/hris_….dump
 - Pemulihan ke versi aplikasi yang lebih lama tidak didukung: jalankan versi aplikasi yang sama atau lebih baru, lalu `npm run db:migrate`.
 - Latihan pemulihan diverifikasi di lingkungan pengembangan: dump 22 tabel (versi Tahap 1; Tahap 2 menambah tabel: pengajuan lembur, catatan lokasi, antrean pengiriman, pemulihan 2FA, tantangan login, token reset) → pulih ke DB kosong → `db:verify` lulus → penimpaan tanpa konfirmasi ditolak.
 
+## Menerapkan pembaruan yang berisi migrasi & memeriksa data lama
+
+Urutan untuk basis data yang **sudah berisi transaksi nyata** (cadangkan lebih dulu):
+1. `npm run db:backup` → salin arsip ke luar server.
+2. `git pull` → `npm ci` → `npm run db:migrate` (maju-saja). Migrasi terbaru yang relevan: `20261110170000` & `20261113120000` (pengaman uang harian), `20261114130000` (garis kop, aditif, bawaan *ada*), `20261114140000` (**menyalakan kewajiban 2FA untuk Direktur & HR** pada instalasi yang sudah ada — pastikan setiap Super Admin/HR siap mengaktifkan 2FA saat masuk berikutnya).
+3. **Audit uang harian (baca-saja):** `DATABASE_URL=… npm run audit:allowance` — tindak lanjuti temuan sebelum penyelesaian akhir berikutnya disetujui/dibayar (lihat [PENYELESAIAN-AKHIR.md](PENYELESAIAN-AKHIR.md)). Baris lama yang tidak dapat dikenali otomatis muncul sebagai `UNLINKED`/`UNLINKED_MATCH` dan perlu pemeriksaan manual; skrip **tidak mengubah apa pun**.
+4. `npm run db:verify`, `npm run check:config`, lalu `npm run build` dan restart.
+
 ## Pemeliharaan
 - **Pembaruan:** `git pull` → `npm ci` → `npm run db:migrate` → `npm run build` → restart. Migrasi bersifat maju-saja; cadangkan sebelum migrasi.
 - **Pemulihan akses:** `NEW_USER_PASSWORD='…' npm run user:create -- --email … --name "…" --role SUPER_ADMIN`.
 - **Sesi & rate-limit** dibersihkan otomatis (sesi kedaluwarsa > 30 hari dihapus saat login).
-- **Audit dependensi:** CI menjalankan `npm audit --omit=dev` (informasi). Peringatan `prisma`/`deepmerge-ts` saat ini hanya menyangkut CLI Prisma (alat build), bukan kode yang melayani permintaan.
+- **Audit dependensi:** CI menjalankan `npm audit --omit=dev` (informasi). Peringatan `prisma`/`deepmerge-ts` saat ini hanya menyangkut CLI Prisma (alat build), bukan kode yang melayani permintaan — penilaian dampak dan pilihan pembaruan ada di [SECURITY.md](SECURITY.md#peringatan-npm-audit-deepmerge-ts-pada-rantai-prisma-penilaian-dampak).
