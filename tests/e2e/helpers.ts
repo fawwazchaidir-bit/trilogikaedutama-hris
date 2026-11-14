@@ -10,8 +10,25 @@ export const USERS = {
   citra: "citra@demo.hris.test",
 } as const;
 
+/**
+ * Buka halaman masuk dengan tahan-banting. Setelah keluar, aplikasi memanggil router.push("/login") lalu router.refresh(); bila tes langsung memanggil page.goto("/login")
+ * selagi navigasi/refresh itu masih berjalan, Playwright dapat gagal dengan "Navigation to /login is interrupted by another navigation" (terlihat sebagai tes kode pemulihan 2FA
+ * yang gagal di CI sementara lima tes sesudahnya terlewati). Navigasi yang disela diulang; lalu tunggu formulir masuk benar-benar siap.
+ */
+export async function gotoLogin(page: Page) {
+  for (let attempt = 0; ; attempt++) {
+    // Tunggu "load" (bawaan), BUKAN "domcontentloaded": mengisi formulir sebelum hidrasi React selesai membuat tombol Masuk mengirim formulir bawaan peramban (GET /login?…), bukan login.
+    try { await page.goto("/login"); break; }
+    catch (e) {
+      if (attempt >= 3 || !/interrupted by another navigation|ERR_ABORTED|frame was detached/i.test(String(e))) throw e;
+      await page.waitForLoadState("domcontentloaded").catch(() => undefined);
+    }
+  }
+  await page.getByRole("button", { name: "Masuk" }).waitFor();
+}
+
 export async function login(page: Page, email: string, password = E2E_PASSWORD) {
-  await page.goto("/login");
+  await gotoLogin(page);
   await page.getByLabel("Email").fill(email);
   await page.getByLabel("Password").fill(password);
   await page.getByRole("button", { name: "Masuk" }).click();
@@ -23,6 +40,9 @@ export async function logout(page: Page) {
   await page.getByRole("button", { name: "Menu pengguna" }).filter({ visible: true }).first().click();
   await page.getByRole("menuitem", { name: "Keluar" }).click();
   await page.waitForURL(/\/login/);
+  // router.push + router.refresh() setelah keluar masih berjalan: tunggu formulir masuk siap dan jaringan tenang agar navigasi berikutnya tidak menyelanya.
+  await page.getByRole("button", { name: "Masuk" }).waitFor();
+  await page.waitForLoadState("networkidle").catch(() => undefined);
 }
 
 /** Elemen role="alert" yang berisi teks (pengumuman rute milik Next juga ber-role alert tetapi kosong). */

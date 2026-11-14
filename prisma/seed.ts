@@ -17,7 +17,7 @@ async function main() {
   const weak = validatePasswordStrength(password, { email, name });
   if (weak) throw new Error(`ADMIN_PASSWORD ditolak: ${weak}`);
 
-  await prisma.companySettings.upsert({ where: { id: 1 }, update: {}, create: { id: 1, name: "Trilogika Edutama" } });
+  await prisma.companySettings.upsert({ where: { id: 1 }, update: {}, create: { id: 1, name: "Trilogika Edutama", twoFactorRequiredForAdmins: true } });   // instalasi baru: 2FA wajib bagi Direktur & HR sejak awal
 
   // Contoh jam kerja 08.00–16.00 WIB (dapat diubah di menu Jadwal & Libur — perlu dikonfirmasi sesuai kebijakan perusahaan).
   if ((await prisma.workSchedule.count()) === 0) {

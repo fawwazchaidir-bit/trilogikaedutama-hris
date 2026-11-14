@@ -290,7 +290,7 @@ export async function updateStatutoryConfig(actor: Actor, raw: unknown): Promise
 
 const securitySchema = z.object({ twoFactorRequiredForAdmins: z.boolean() });
 
-/** Kebijakan keamanan akun (Super Admin): mewajibkan 2FA bagi Admin/HR & Super Admin. */
+/** Kebijakan keamanan akun (Super Admin): mewajibkan 2FA bagi Super Admin (Direktur) dan HR; Manajer/Staf/Magang tidak diwajibkan (lihat lib/two-factor-policy.ts). */
 export async function updateSecurityPolicy(actor: Actor, raw: unknown): Promise<void> {
   assertCan(actor, "settings:manage");
   const input = parseInput(securitySchema, raw);
@@ -300,7 +300,7 @@ export async function updateSecurityPolicy(actor: Actor, raw: unknown): Promise<
     if (before.twoFactorRequiredForAdmins !== input.twoFactorRequiredForAdmins) {
       await writeAudit(tx, actor, {
         action: "settings.security_policy_update", entityType: "CompanySettings", entityId: "1",
-        summary: `2FA ${input.twoFactorRequiredForAdmins ? "diwajibkan" : "tidak lagi diwajibkan"} untuk admin`, before, after: input,
+        summary: `2FA ${input.twoFactorRequiredForAdmins ? "diwajibkan" : "tidak lagi diwajibkan"} untuk Direktur dan HR`, before, after: input,
       });
     }
   });

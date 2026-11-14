@@ -10,6 +10,7 @@ import { writeAudit } from "../audit";
 import { decryptField, encryptField } from "../crypto";
 import { env } from "../env";
 import { verifyPassword } from "../auth/password";
+import { twoFactorRequired } from "@/lib/two-factor-policy";
 import { blockedSeconds, recordFailure, resetBucket } from "../auth/rate-limit";
 import { revokeAllSessions } from "../auth/session";
 import { notifyUsers } from "./notifications";
@@ -138,8 +139,8 @@ export async function enableTwoFactor(actor: Actor & { sessionId?: string }, raw
 export async function disableTwoFactor(actor: Actor & { sessionId?: string }, raw: unknown): Promise<void> {
   const { password, code } = parseInput(reauthSchema, raw);
   const settings = await prisma.companySettings.findUnique({ where: { id: 1 }, select: { twoFactorRequiredForAdmins: true } });
-  if (settings?.twoFactorRequiredForAdmins && actor.role !== "EMPLOYEE") {
-    throw Errors.forbidden("Kebijakan perusahaan mewajibkan 2FA untuk admin; tidak dapat dimatikan.");
+  if (twoFactorRequired(actor.role, !!settings?.twoFactorRequiredForAdmins)) {
+    throw Errors.forbidden("Kebijakan perusahaan mewajibkan 2FA untuk Direktur dan HR; tidak dapat dimatikan.");
   }
   await reauthenticate(actor, password, code);
   await transaction(async (tx) => {

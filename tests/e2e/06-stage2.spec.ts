@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { E2E_PASSWORD, USERS, alertWith, login, logout, workdayPlus } from "./helpers";
+import { E2E_PASSWORD, USERS, alertWith, gotoLogin, login, logout, workdayPlus } from "./helpers";
 import { totpAt, totpStep } from "../../src/lib/totp";
 
 test.describe.configure({ mode: "serial" });
@@ -16,7 +16,7 @@ async function codeAfter(secret: string, usedStep: number): Promise<{ code: stri
 }
 
 async function submitLogin(page: Page, email: string, password = E2E_PASSWORD) {
-  await page.goto("/login");
+  await gotoLogin(page);
   await page.getByLabel("Email").fill(email);
   await page.getByLabel("Password").fill(password);
   await page.getByRole("button", { name: "Masuk" }).click();
@@ -351,6 +351,17 @@ test.describe("kebijakan wajib 2FA untuk admin", () => {
     const blocked = await hp.request.get("/api/employees");
     expect(blocked.status()).toBe(403);
     expect((await blocked.json()).error.message).toMatch(/2FA/);
+
+    // Karyawan (staf/manajer) TIDAK diwajibkan: tetap masuk normal walau kebijakan menyala, dan fitur 2FA tetap tersedia baginya (opsional).
+    const empCtx = await browser.newContext();
+    const ep = await empCtx.newPage();
+    await login(ep, USERS.ayu);
+    await expect(ep).not.toHaveURL(/\/akun/);
+    expect((await ep.goto("/absensi-saya"))?.status()).toBe(200);
+    await ep.goto("/akun");
+    await expect(ep.getByRole("button", { name: "Aktifkan 2FA" })).toBeVisible();
+    await expect(ep.getByText(/mewajibkan 2FA/)).toHaveCount(0);
+    await empCtx.close();
 
     // HR mengaktifkan 2FA → akses pulih; tombol "Matikan 2FA" tidak tersedia selama kebijakan berlaku.
     await enableTwoFactorUi(hp);

@@ -58,7 +58,7 @@ export function TwoFactorCard({ account, forced }: { account: AccountDto; forced
       <CardHeader title="Autentikasi dua langkah (2FA)" description="Tambahan keamanan: selain password, masuk memerlukan kode 6 digit dari aplikasi autentikator (Google Authenticator, Microsoft Authenticator, Authy, 1Password, dll.)."
         actions={tf.enabled ? <Badge tone="green"><ShieldCheck className="mr-1 size-3" />Aktif</Badge> : <Badge tone={tf.required ? "red" : "gray"}>{tf.required ? "Wajib — belum aktif" : "Nonaktif"}</Badge>} />
       <div className="space-y-4 p-5 text-sm">
-        {forced && !tf.enabled && <Notice tone="danger">Kebijakan perusahaan <strong>mewajibkan 2FA</strong> untuk akun admin. Aktifkan sekarang untuk melanjutkan memakai aplikasi.</Notice>}
+        {forced && !tf.enabled && <Notice tone="danger">Kebijakan perusahaan <strong>mewajibkan 2FA</strong> untuk akun Direktur dan HR. Aktifkan sekarang untuk melanjutkan memakai aplikasi.</Notice>}
         {f.error && <Notice tone="danger">{f.error}</Notice>}
 
         {step === "codes" && <RecoveryCodes codes={codes} onClose={() => { reset(); window.location.reload(); }} />}
@@ -71,7 +71,7 @@ export function TwoFactorCard({ account, forced }: { account: AccountDto; forced
               <Button onClick={() => setStep("regen")}>Buat ulang kode pemulihan</Button>
               {!tf.required && <Button variant="danger" onClick={() => setStep("disable")}>Matikan 2FA</Button>}
             </div>
-            {tf.required && <p className="text-xs text-muted">2FA diwajibkan perusahaan untuk akun admin sehingga tidak dapat dimatikan. Bila ponsel hilang, hubungi Super Admin.</p>}
+            {tf.required && <p className="text-xs text-muted">2FA diwajibkan perusahaan untuk akun Direktur dan HR sehingga tidak dapat dimatikan. Bila ponsel hilang, hubungi Super Admin.</p>}
           </div>
         )}
 

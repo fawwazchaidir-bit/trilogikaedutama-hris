@@ -299,10 +299,10 @@ export function SecurityForm({ s, canEdit }: { s: SettingsDto; canEdit: boolean 
   const [required, setRequired] = useState(s.security.twoFactorRequiredForAdmins);
   return (
     <Card>
-      <CardHeader title="Keamanan akun" description="Kebijakan autentikasi untuk seluruh pengguna." actions={s.security.twoFactorRequiredForAdmins ? <Badge tone="green">2FA wajib untuk admin</Badge> : <Badge>2FA opsional</Badge>} />
+      <CardHeader title="Keamanan akun" description="Kebijakan autentikasi untuk seluruh pengguna." actions={s.security.twoFactorRequiredForAdmins ? <Badge tone="green">2FA wajib untuk Direktur &amp; HR</Badge> : <Badge>2FA opsional</Badge>} />
       <form className="space-y-4 p-5" aria-label="Form keamanan akun" onSubmit={(e) => { e.preventDefault(); void f.run(() => api("/api/settings/security", { method: "PUT", body: { twoFactorRequiredForAdmins: required } }), "Kebijakan keamanan disimpan."); }}>
         {f.error && <Notice tone="danger">{f.error}</Notice>}
-        {check("Wajibkan autentikasi dua langkah (2FA) untuk Admin/HR dan Super Admin", required, setRequired, !canEdit || f.busy, "Admin yang belum mengaktifkan 2FA diarahkan ke halaman Keamanan & Notifikasi dan tidak dapat memakai fitur lain sampai selesai. 2FA yang sudah aktif tidak dapat dimatikan sendiri. Pastikan setiap Super Admin menyimpan kode pemulihan.")}
+        {check("Wajibkan autentikasi dua langkah (2FA) untuk Direktur (Super Admin) dan HR", required, setRequired, !canEdit || f.busy, "Akun Direktur dan HR yang belum mengaktifkan 2FA diarahkan ke halaman Keamanan & Notifikasi dan tidak dapat memakai fitur lain sampai selesai; 2FA yang sudah aktif tidak dapat dimatikan sendiri. Manajer, Supervisor, Staf, dan Magang TIDAK diwajibkan, tetapi tetap dapat mengaktifkan 2FA sendiri. Pastikan setiap Super Admin menyimpan kode pemulihan.")}
         {canEdit && <Button type="submit" variant="primary" loading={f.busy}>Simpan</Button>}
       </form>
     </Card>

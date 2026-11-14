@@ -4,6 +4,7 @@ import { prisma } from "../db";
 import { env, isSecureDeployment } from "../env";
 import type { Actor } from "../actor";
 import { accountUsable } from "@/lib/account";
+import { isTwoFactorRequiredRole } from "@/lib/two-factor-policy";
 
 /**
  * Sesi berbasis cookie opaque. Token acak 256-bit; yang disimpan di DB hanya SHA-256-nya,
@@ -89,7 +90,7 @@ export async function validateSession(token: string | undefined | null): Promise
     employeeId: session.user.employee?.id ?? null,
     mustChangePassword: session.user.mustChangePassword,
     twoFactorEnabled: session.user.twoFactorEnabled,
-    mustSetupTwoFactor: session.user.role !== "EMPLOYEE" && !session.user.twoFactorEnabled && (await adminsRequireTwoFactor()),
+    mustSetupTwoFactor: isTwoFactorRequiredRole(session.user.role) && !session.user.twoFactorEnabled && (await adminsRequireTwoFactor()),
     isDemo: session.user.isDemo,
   };
 }

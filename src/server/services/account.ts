@@ -8,6 +8,7 @@ import { writeAudit } from "../audit";
 import { blockedSeconds, recordFailure } from "../auth/rate-limit";
 import { emailAvailable, sendEmail, sendWhatsapp, whatsappAvailable } from "../notify/transports";
 import { sendTestPush } from "./push";
+import { twoFactorRequired } from "@/lib/two-factor-policy";
 import { getTwoFactorStatus, type TwoFactorStatus } from "./two-factor";
 import { normalizeWhatsappNumber } from "@/lib/phone";
 
@@ -34,7 +35,7 @@ export async function getAccount(actor: Actor): Promise<AccountDto> {
   ]);
   return {
     name: u.name, email: u.email, role: u.role,
-    twoFactor: { ...tf, required: !!settings?.twoFactorRequiredForAdmins && u.role !== "EMPLOYEE" },
+    twoFactor: { ...tf, required: twoFactorRequired(u.role, !!settings?.twoFactorRequiredForAdmins) },
     notifications: { email: u.notifyEmail, whatsapp: u.notifyWhatsapp, whatsappNumber: u.whatsappNumber, emailAvailable: emailAvailable(), whatsappAvailable: whatsappAvailable() },
   };
 }
