@@ -122,11 +122,39 @@ Seluruh 24 jenis katalog master disemai idempoten (penandatangan awal: Direktur 
 
 - Isi disimpan sebagai **JSON** (ProseMirror, tervalidasi ketat `validateDoc`: hanya node/atribut/mark yang dikenal; tanpa HTML). Editor TipTap
   memakai skema yang sama (`src/lib/documents/editor-extensions.ts`; diuji round-trip dengan fixture).
-- Saat disetujui: render PDF (react-pdf, Liberation Serif) berisi kop, nomor, penerima, isi, blok tanda tangan + cap, **QR di kiri**, tembusan,
-  nomor halaman → disimpan sebagai `StoredFile` (`LETTER_PDF`, privat) + **SHA-256**. Pembuat/penandatangan/Direktur saja yang dapat membukanya (404 untuk lainnya).
+- Saat disetujui: render PDF (react-pdf; isi Liberation Serif, kop Caladea — lihat "Kop surat & layout jenis") berisi kop, nomor, penerima, isi, blok tanda tangan + cap, **QR di kiri**, tembusan,
+  kaki halaman (teks lembaga + "Hal. X dari Y") → disimpan sebagai `StoredFile` (`LETTER_PDF`, privat) + **SHA-256**. Pembuat/penandatangan/Direktur saja yang dapat membukanya (404 untuk lainnya).
 - Sejak Terbit, isi/nomor/PDF/hash **terkunci oleh trigger database** (`HRIS-GUARD`); satu-satunya perubahan sah adalah Dibatalkan. Dokumen tidak dapat
   dihapus; `letter_events` tambah-saja. Setiap tindakan masuk Audit Log.
-- Variabel bawaan di isi: `{{nomor}}` dan `{{tanggal}}`.
+- Variabel bawaan di isi: `{{nomor}}`, `{{tanggal}}`, dan `{{perihal}}` (kolom Perihal dalam HURUF BESAR; dipakai judul TENTANG pada Surat Edaran).
+
+## Kop surat & layout jenis
+
+**Kop** (semua surat; format baru): logo di kiri; tiga baris dari **Pengaturan lembaga** (satu sumber) — *tagline* (Cambria bold 12), **nama lembaga** huruf besar (Cambria bold 14),
+alamat (Cambria italic 10); garis pemisah di bawahnya. Baris email/hotline dan "Vocational Identity Number" **tidak lagi dicetak** (bidang "Baris identitas" di Pengaturan Persuratan
+tetap tersimpan sebagai arsip). Pastikan Pengaturan lembaga memuat teks yang diinginkan: Nama = `Trilogika Edutama`, Tagline = `Lembaga Pelatihan Kerja Berbasis Kompetensi`,
+Alamat = `Grha Trilogika, Jln. Ontoseno 47, Jambon 01/21, Kel. Trihanggo, Kec. Gamping, Kab. Sleman, Daerah Istimewa Yogyakarta 55291`. Kop slip gaji dan laporan **tidak** berubah.
+
+**Font.** Cambria adalah font berlisensi Microsoft sehingga tidak dapat dibundel. Dipakai **Caladea** (SIL OFL; dirancang metrik-kompatibel dengan Cambria sehingga lebar glif dan
+pemenggalan baris sama dengan dokumen Word ber-Cambria). Berkas ada di `public/fonts/Caladea-*.ttf` (+ `LICENSE-Caladea.txt`); mengganti ke Cambria asli cukup menimpa keempat
+berkas itu dengan salinan Cambria yang berlisensi (nama berkas dipertahankan). Isi surat biasa tetap Liberation Serif.
+
+**Layout per jenis** (kolom `kind` pada jenis surat; diselaraskan dari katalog master saat jenis dibuka):
+
+| kind | jenis | blok atas | catatan |
+|---|---|---|---|
+| `SURAT` | hampir semua jenis | Nomor / Lampiran / Perihal + tempat-tanggal, "Kepada Yth.", salam | — |
+| `SK` | INT-001 | judul + diktum disusun di kertas | "Ditetapkan di / Pada tanggal" di akhir |
+| `TUGAS` | INT-002 | seperti SURAT; isi dibangkitkan dari data penugasan | — |
+| `EDARAN` | INT-005 Surat edaran | judul **MEMO INTERNAL** (tebal bergaris bawah), `Nomor : {{nomor}}`, **TENTANG** + `{{perihal}}` tebal huruf besar — semua di kertas | tanpa penerima, salam, penutup, tempat-tanggal; isi **Cambria-kompatibel 12 pt, spasi 1,5**, daftar bernomor dengan jarak bawah |
+
+Surat Edaran meniru contoh "Memo Internal" Trilogika. Panel *Data surat* hanya menampilkan Penandatangan, Perihal (dicetak sebagai judul TENTANG), dan Tembusan. QR verifikasi dan blok
+tanda tangan + cap tetap dicetak. Saat jenis lama berubah layout (mis. INT-005 sebelumnya `SURAT`), `ensureDefaultTypes` menyelaraskan `kind`, templat awal, dan salam/penutup jenis itu;
+**surat yang sudah dibuat memegang salinan isinya sendiri dan surat terbit memakai PDF terkunci, sehingga tidak berubah**.
+
+**Catatan teknis renderer.** (1) `lineHeight` TIDAK boleh dipasang di level `Page`: teks `render` pada elemen `fixed` (nomor halaman) lalu tercetak di luar kertas (y ≈ −8000), sehingga
+kaki halaman tidak pernah tampil. Tinggi baris dipasang per teks dalam satuan pt lewat konteks `LayoutCtx` (uji `documents-pdf.test.ts` memeriksa posisi kaki di tiap halaman).
+(2) Kaki halaman memakai dua teks `fixed` bertumpu-mutlak dengan keluarga font eksplisit.
 
 ## Verifikasi publik (QR)
 
@@ -165,8 +193,8 @@ PDF **asli** (yang dulu diterbitkan) tidak pernah diubah atau dihapus — trigge
 
 ## Pengaturan (Direktur)
 
-Kota penerbitan, baris identitas kop, teks kaki, batas eskalasi; cap lembaga; gambar tanda tangan per penandatangan (PNG dinormalisasi); nomor urut.
-Alamat/telepon/email/logo kop mengikuti **Pengaturan lembaga** (satu sumber).
+Kota penerbitan, baris identitas (arsip; tidak dicetak), teks kaki, batas eskalasi; cap lembaga; gambar tanda tangan per penandatangan (PNG dinormalisasi); nomor urut.
+Nama/tagline/alamat/logo kop mengikuti **Pengaturan lembaga** (satu sumber).
 
 ## API (`/api/letters`, flag `LETTERS_MODULE_ENABLED`)
 

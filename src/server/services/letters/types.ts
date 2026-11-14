@@ -6,11 +6,11 @@ import { actorCan, assertCan, type Actor } from "../../actor";
 import { parseInput } from "../../validate";
 import { writeAudit } from "../../audit";
 import { DEFAULT_LETTER_TYPES } from "@/lib/documents/templates";
-import { isEligibleSigner, type JobLevel } from "@/lib/documents/policy";
+import { isEligibleSigner, letterKind, type JobLevel, type LetterKind } from "@/lib/documents/policy";
 import { personFacts, requireLetters, isDirector } from "./access";
 
 export interface LetterTypeDto {
-  id: string; series: "EKS" | "INT"; code: number; codeText: string; name: string; description: string | null; kind: "SURAT" | "SK" | "TUGAS";
+  id: string; series: "EKS" | "INT"; code: number; codeText: string; name: string; description: string | null; kind: LetterKind;
   adminCreateOnly: boolean;
   directorOnly: boolean; signerJobLevels: JobLevel[]; signerDivisionIds: string[]; /** Usulan divisi dari kolom "Penanda tangan (usulan)" Register Excel. */ divisionHint: "PEMASARAN" | "OPERASIONAL" | null; internAllowed: boolean; isActive: boolean;
   confidential: boolean; hrCanSign: boolean; hrCanView: boolean; multiSigner: boolean; funnel: boolean;
@@ -23,7 +23,7 @@ const DIVISION_HINT = new Map<string, "PEMASARAN" | "OPERASIONAL">([
 const DIVISION_PATTERN = { PEMASARAN: /market|pemasaran|relasi|relations|kerja\s?sama|kerjasama/i, OPERASIONAL: /operasional|administrasi|kurikulum|keuangan|operations/i } as const;
 
 const dto = (t: { id: string; series: "EKS" | "INT"; code: number; name: string; description: string | null; kind: string; directorOnly: boolean; signerJobLevels: JobLevel[]; signerDivisionIds: string[]; internAllowed: boolean; isActive: boolean; confidential: boolean; hrCanSign: boolean; hrCanView: boolean; multiSigner: boolean; funnel: boolean; adminCreateOnly: boolean }): LetterTypeDto => ({
-  id: t.id, series: t.series, code: t.code, codeText: String(t.code).padStart(3, "0"), name: t.name, description: t.description, kind: t.kind === "SK" ? "SK" : t.kind === "TUGAS" ? "TUGAS" : "SURAT", adminCreateOnly: t.adminCreateOnly,
+  id: t.id, series: t.series, code: t.code, codeText: String(t.code).padStart(3, "0"), name: t.name, description: t.description, kind: letterKind(t.kind), adminCreateOnly: t.adminCreateOnly,
   directorOnly: t.directorOnly, signerJobLevels: t.signerJobLevels, signerDivisionIds: t.signerDivisionIds, divisionHint: DIVISION_HINT.get(`${t.series}:${t.code}`) ?? null, internAllowed: t.internAllowed, isActive: t.isActive,
   confidential: t.confidential, hrCanSign: t.hrCanSign, hrCanView: t.hrCanView, multiSigner: t.multiSigner, funnel: t.funnel,
 });
@@ -38,7 +38,9 @@ export async function ensureDefaultTypes(): Promise<void> {
     if (cur) {
       // Sifat struktural (rahasia, hak lihat HR, multi-penandatangan, corong) selalu mengikuti katalog master; hak TANDA TANGAN (termasuk HR) adalah kebijakan yang diatur Direktur dan tidak ditimpa.
       if (cur.confidential !== t.confidential || cur.hrCanView !== t.hrCanView || cur.multiSigner !== t.multiSigner || cur.funnel !== t.funnel || cur.adminCreateOnly !== t.adminCreateOnly || cur.kind !== t.kind) {
-        await prisma.letterType.update({ where: { id: cur.id }, data: { confidential: t.confidential, hrCanView: t.hrCanView, multiSigner: t.multiSigner, funnel: t.funnel, adminCreateOnly: t.adminCreateOnly, kind: t.kind } });
+        // Layout (kind) berubah di katalog master (mis. INT-005 → EDARAN): templat awal + salam/penutup ikut disesuaikan agar isi awal cocok dengan layout.
+        // Dokumen yang sudah dibuat memegang salinan isinya sendiri sehingga tidak terpengaruh; surat terbit memakai PDF terkunci.
+        await prisma.letterType.update({ where: { id: cur.id }, data: { confidential: t.confidential, hrCanView: t.hrCanView, multiSigner: t.multiSigner, funnel: t.funnel, adminCreateOnly: t.adminCreateOnly, kind: t.kind, ...(cur.kind !== t.kind ? { templateBody: t.template as object, defaultSalutation: t.salutation, defaultClosing: t.closing } : {}) } });
       }
       // Katalog master berubah (mis. kode lama diganti): selaraskan nama/templat HANYA bila jenis itu belum dipakai satu surat pun. Kebijakan tidak disentuh.
       if (cur.name !== t.name && cur._count.documents === 0) {

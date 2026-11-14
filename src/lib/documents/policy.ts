@@ -48,3 +48,9 @@ export const verifyPath = (token: string): string => `/verifikasi/${token}`;
 /** Pemegang gambar tanda tangan pribadi: Direktur, Supervisor/Manajer, atau HR (calon penandatangan). */
 export const canHoldSignature = (p: Pick<PersonFacts, "role" | "jobLevel" | "isIntern" | "isActive">): boolean =>
   p.isActive && !p.isIntern && (p.role === "SUPER_ADMIN" || p.role === "HR_ADMIN" || p.jobLevel === "MANAGER" || p.jobLevel === "SUPERVISOR");
+
+/** Layout/perilaku jenis surat: SURAT (Nomor/Perihal/Kepada/salam), SK (judul + diktum), TUGAS (isi dari data penugasan), EDARAN (judul + Nomor + TENTANG di kertas, tanpa penerima). Kolom `kind` bertipe teks bebas → selalu lewat sini. */
+export type LetterKind = "SURAT" | "SK" | "TUGAS" | "EDARAN";
+export const letterKind = (raw: string): LetterKind => (raw === "SK" || raw === "TUGAS" || raw === "EDARAN" ? raw : "SURAT");
+/** Jenis yang tidak memakai kolom penerima/tempat/lampiran/salam/penutup (judulnya disusun di kertas atau dibangkitkan). */
+export const hasRecipientBlock = (k: LetterKind): boolean => k === "SURAT";

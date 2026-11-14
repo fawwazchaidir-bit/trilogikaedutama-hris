@@ -7,11 +7,9 @@ export interface ImagePlacement { x: number; y: number; w: number; h: number }
 
 export interface DocLetterhead {
   logo: DocImage | null;
-  tagline: string;        // "Lembaga Pelatihan Kerja Berbasis Kompetensi"
-  name: string;           // "TRILOGIKA EDUTAMA"
-  addressLines: string[]; // alamat resmi (satu sumber: pengaturan lembaga)
-  contactLine: string;    // "Email: … | +62 … (Hotline) | www…"
-  idLine: string | null;  // "Vocational Identity Number: …"
+  tagline: string;        // "Lembaga Pelatihan Kerja Berbasis Kompetensi"  (Cambria bold 12)
+  name: string;           // "TRILOGIKA EDUTAMA"                              (Cambria bold 14)
+  addressLines: string[]; // alamat resmi (satu sumber: pengaturan lembaga)   (Cambria italic 10)
 }
 export interface DocSignatory {
   orgName: string; title: string; name: string;
@@ -24,7 +22,8 @@ export interface DocRecipient { prefix: string | null; lines: { text: string; bo
 
 /** Semua yang dibutuhkan renderer untuk satu dokumen (bagian isi = JSON editor; sisanya "bingkai" yang dikunci template). */
 export interface DocFrame {
-  kind: "SURAT" | "SK";
+  /** SURAT: Nomor/Perihal/Kepada/salam; SK: judul + diktum; EDARAN: judul + Nomor + TENTANG di kertas (tanpa penerima), Cambria 12 pt spasi 1,5. */
+  kind: "SURAT" | "SK" | "EDARAN";
   number: string | null;       // null → draf
   date: string;                // ISO tanggal surat
   place: string;               // "Sleman"

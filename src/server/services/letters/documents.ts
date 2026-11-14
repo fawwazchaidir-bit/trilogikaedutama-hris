@@ -11,7 +11,7 @@ import { parseInput } from "../../validate";
 import { writeAudit } from "../../audit";
 import { notifyUsers } from "../notifications";
 import { hasPlaceholder, normalizeDoc, validateDoc, type PmDoc } from "@/lib/documents/content";
-import { canSignOwn, canTakeOver, isEditable, isEligibleSigner, LETTER_STATUS_LABEL, type LetterStatus } from "@/lib/documents/policy";
+import { canSignOwn, canTakeOver, hasRecipientBlock, isEditable, isEligibleSigner, LETTER_STATUS_LABEL, letterKind, type LetterKind, type LetterStatus } from "@/lib/documents/policy";
 import { formatDocNumber } from "@/lib/documents/text";
 import { stampCancelledCopy } from "@/lib/documents/cancelled-stamp";
 import { requiredText, uuid } from "@/lib/validation/common";
@@ -27,7 +27,7 @@ import { getLetterSettings, buildFrame, renderLetterPdf } from "./frame";
 
 export interface LetterEventDto { id: string; action: string; note: string | null; at: string; actorName: string }
 export interface LetterDto {
-  id: string; status: LetterStatus; statusLabel: string; typeId: string; typeName: string; series: "EKS" | "INT"; kind: "SURAT" | "SK" | "TUGAS";
+  id: string; status: LetterStatus; statusLabel: string; typeId: string; typeName: string; series: "EKS" | "INT"; kind: LetterKind;
   number: string | null; subject: string; issueDate: string | null; createdAt: string; updatedAt: string; submittedAt: string | null;
   creatorId: string; creatorName: string; signerId: string | null; signerName: string | null; verifyToken: string; hasPdf: boolean; archiveOnly: boolean;
 }
@@ -51,7 +51,7 @@ async function names(ids: (string | null)[]): Promise<Map<string, string>> {
   return new Map(rows.map((r) => [r.id, r.employee?.fullName ?? r.name]));
 }
 const toDto = (r: Row, n: Map<string, string>): LetterDto => ({
-  id: r.id, status: r.status, statusLabel: LETTER_STATUS_LABEL[r.status], typeId: r.typeId, typeName: r.type.name, series: r.type.series, kind: r.type.kind === "SK" ? "SK" : r.type.kind === "TUGAS" ? "TUGAS" : "SURAT",
+  id: r.id, status: r.status, statusLabel: LETTER_STATUS_LABEL[r.status], typeId: r.typeId, typeName: r.type.name, series: r.type.series, kind: letterKind(r.type.kind),
   number: r.number, subject: r.subject, issueDate: r.issueDate ? r.issueDate.toISOString().slice(0, 10) : null, createdAt: r.createdAt.toISOString(), updatedAt: r.updatedAt.toISOString(),
   submittedAt: r.submittedAt?.toISOString() ?? null, creatorId: r.creatorId, creatorName: n.get(r.creatorId) ?? "—", signerId: r.signerId, signerName: r.signerId ? n.get(r.signerId) ?? "—" : null,
   verifyToken: r.verifyToken, hasPdf: !!r.pdfFileId, archiveOnly: r.archiveOnly,
@@ -298,7 +298,7 @@ export async function submitLetter(actor: Actor, id: string): Promise<LetterDeta
     else await normalizeAssignment(actor, d.assignment).catch((e) => { fe.assignment = e.message; });
   }
   if ((d.type.kind !== "SK" || d.archiveOnly) && d.subject.trim().length < 3) fe.subject = "Perihal wajib diisi";
-  if (d.type.kind !== "SK" && d.type.kind !== "TUGAS" && !d.archiveOnly && d.recipientLines.filter((l) => l.trim()).length === 0) fe.recipientLines = "Penerima wajib diisi";
+  if (hasRecipientBlock(letterKind(d.type.kind)) && !d.archiveOnly && d.recipientLines.filter((l) => l.trim()).length === 0) fe.recipientLines = "Penerima wajib diisi";
   if (!d.signerId) fe.signerId = "Pilih penandatangan";
   else await assertSignerOk(actor, d.typeId, d.signerId, d.creatorId).catch((e) => { fe.signerId = e.message; });
   const { missing } = d.archiveOnly ? { missing: [] as string[] } : await buildFrame(d, { number: null, date: new Date().toISOString().slice(0, 10), signerUserId: d.signerId ?? actor.userId, draft: true });

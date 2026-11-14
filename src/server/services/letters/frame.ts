@@ -18,9 +18,9 @@ export async function getLetterSettings() {
   return (await prisma.letterSettings.findUnique({ where: { id: 1 } })) ?? (await prisma.letterSettings.create({ data: { id: 1 } }));
 }
 
-/** Nilai bawaan variabel: {{nomor}} dan {{tanggal}}. */
-export function builtinVars(number: string | null, date: string): Record<string, string> {
-  return { nomor: number ?? "[nomor terisi saat terbit]", tanggal: longDate(date) };
+/** Nilai bawaan variabel: {{nomor}}, {{tanggal}}, dan {{perihal}} (perihal surat dalam HURUF BESAR — judul "TENTANG" pada Surat Edaran; kosong bila perihal belum diisi). */
+export function builtinVars(number: string | null, date: string, subject?: string | null): Record<string, string> {
+  return { nomor: number ?? "[nomor terisi saat terbit]", tanggal: longDate(date), perihal: (subject ?? "").trim().toLocaleUpperCase("id-ID") };
 }
 export function varsOf(d: Pick<LetterDocument, "variables">): Record<string, string> {
   const v = d.variables;
@@ -35,7 +35,7 @@ export async function buildFrame(
   const [company, ls, signerFacts, signerRow] = await Promise.all([
     getSettings(), getLetterSettings(), personFacts(o.signerUserId), prisma.letterSigner.findUnique({ where: { userId: o.signerUserId } }),
   ]);
-  const resolved = resolveVariables(d.body as unknown as PmDoc, { ...varsOf(d), ...builtinVars(o.number, o.date) });
+  const resolved = resolveVariables(d.body as unknown as PmDoc, { ...varsOf(d), ...builtinVars(o.number, o.date, d.subject) });
   const signerName = signerFacts?.name ?? "—";
   const signerTitle = signerFacts?.title ?? (signerFacts?.role === "SUPER_ADMIN" ? "Direktur" : "");
   const sign: DocSignatory = {
@@ -52,23 +52,24 @@ export async function buildFrame(
   }
   // Lampiran editor → halaman lampiran di PDF (variabel diganti sama seperti isi surat); lampiran PDF unggahan ditangani saat penggabungan.
   const atts = await prisma.letterAttachment.findMany({ where: { documentId: d.id }, orderBy: { position: "asc" } });
-  const vars = { ...varsOf(d), ...builtinVars(o.number, o.date) };
+  const vars = { ...varsOf(d), ...builtinVars(o.number, o.date, d.subject) };
   const editorAtts = atts.filter((a) => a.kind === "EDITOR").map((a) => ({ title: a.title, body: resolveVariables(a.body as unknown as PmDoc, vars).doc }));
   const attMissing = atts.filter((a) => a.kind === "EDITOR").flatMap((a) => resolveVariables(a.body as unknown as PmDoc, vars).missing);
+  // SK dan Surat Edaran tidak memakai blok Nomor/Perihal/Kepada/salam: judulnya disusun di kertas (lihat templat).
   const isSk = d.type.kind === "SK";
-  const contact = [company.email ? `Email: ${company.email}` : null, company.phone ? `${company.phone} (Hotline)` : null, company.website].filter(Boolean).join(" | ");
+  const bare = isSk || d.type.kind === "EDARAN";
   const frame: DocFrame = {
-    kind: isSk ? "SK" : "SURAT", number: o.number, date: o.date, place: ls.place,
-    attachmentText: isSk ? null : d.attachmentCount ? attachmentText(d.attachmentCount, (d.attachmentUnit as "halaman" | "berkas" | "lembar" | null) ?? "halaman") : atts.length ? attachmentText(atts.length, "berkas") : null,
-    subject: isSk ? null : d.subject,
-    recipient: isSk || d.recipientLines.length === 0 ? null : {
+    kind: isSk ? "SK" : d.type.kind === "EDARAN" ? "EDARAN" : "SURAT", number: o.number, date: o.date, place: ls.place,
+    attachmentText: bare ? null : d.attachmentCount ? attachmentText(d.attachmentCount, (d.attachmentUnit as "halaman" | "berkas" | "lembar" | null) ?? "halaman") : atts.length ? attachmentText(atts.length, "berkas") : null,
+    subject: bare ? null : d.subject,
+    recipient: bare || d.recipientLines.length === 0 ? null : {
       prefix: "Kepada Yth.", lines: d.recipientLines.map((text, i) => ({ text, bold: i < 2 })), cityPrefix: "Di", place: d.recipientPlace ?? "Tempat",
     },
-    salutation: isSk ? null : d.salutation, body: resolved.doc, closing: isSk ? null : d.closing,
+    salutation: bare ? null : d.salutation, body: resolved.doc, closing: bare ? null : d.closing,
     signatories: [sign, ...coSigs], cc: d.cc, attachments: editorAtts,
     letterhead: {
       logo: await img(company.logoFileId), tagline: company.tagline ?? "", name: company.name.toUpperCase(),
-      addressLines: company.address ? [company.address] : [], contactLine: contact, idLine: ls.idLine,
+      addressLines: company.address ? [company.address] : [],
     },
     verify: o.draft ? null : { url: `${env().APP_URL.replace(/\/$/, "")}${verifyPath(d.verifyToken)}`, caption: "Dokumen ini sah secara elektronik. Pindai kode QR untuk verifikasi." },
     footerText: ls.footerText, draft: o.draft,

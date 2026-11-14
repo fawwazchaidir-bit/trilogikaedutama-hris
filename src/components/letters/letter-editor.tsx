@@ -13,7 +13,7 @@ import { useToast } from "@/components/ui/toast";
 import { api, errorMessage } from "@/lib/api-client";
 import { documentExtensions } from "@/lib/documents/editor-extensions";
 import { normalizeDoc, type PmDoc } from "@/lib/documents/content";
-import { LETTER_SERIES_LABEL, type LetterStatus } from "@/lib/documents/policy";
+import { hasRecipientBlock, LETTER_SERIES_LABEL, type LetterStatus } from "@/lib/documents/policy";
 import type { LetterDetailDto, SignatoryDto } from "@/server/services/letters/documents";
 import { EditorToolbar } from "./editor-toolbar";
 import { AttachmentEditor } from "./attachment-editor";
@@ -174,9 +174,11 @@ export function LetterEditor({ initial, signers, people, employees = [], me }: {
               </SelectField>
               {d.kind === "TUGAS" && <AssignmentDialog letterId={d.id} current={d.assignment} employees={employees} editable={editable} selfEmployeeId={me?.employeeId ?? null} isSuper={!!me?.isSuper} onSaved={(n) => { setD(n); setMeta((m) => ({ ...m, subject: n.subject })); editor?.commands.setContent(n.body, { emitUpdate: false }); setPdfKey((k) => k + 1); setErrors({}); }} />}
               {d.kind === "TUGAS" && d.assignmentId && me?.canManage && <Link href={`/persuratan/surat-tugas?q=${encodeURIComponent(d.number ?? "")}`} className="block rounded-md bg-emerald-50 p-2 text-xs font-medium text-emerald-900 hover:underline">Kelola Uang Harian & Bukti Penerimaan →</Link>}
-              {d.kind === "SURAT" && <>
-                <TextField label="Perihal" value={meta.subject} onChange={set("subject")} disabled={!editable} error={errors.subject} maxLength={300} />
+              {(d.kind === "SURAT" || d.kind === "EDARAN") && <>
+                <TextField label="Perihal" value={meta.subject} onChange={set("subject")} disabled={!editable} error={errors.subject} maxLength={300}
+                  hint={d.kind === "EDARAN" ? "Dicetak huruf besar sebagai judul \"TENTANG\" pada surat dan tampil di daftar surat." : undefined} />
                 {!d.archiveOnly && <>
+                {hasRecipientBlock(d.kind) && <>
                 <TextAreaField label="Penerima (satu baris per baris)" rows={3} value={meta.recipientLines} onChange={set("recipientLines")} disabled={!editable} error={errors.recipientLines} hint="Dua baris pertama dicetak tebal." />
                 <TextField label="Tempat penerima" value={meta.recipientPlace} onChange={set("recipientPlace")} disabled={!editable} placeholder="Tempat" />
                 <div className="grid grid-cols-[5rem_1fr] gap-2">
@@ -185,6 +187,7 @@ export function LetterEditor({ initial, signers, people, employees = [], me }: {
                 </div>
                 <TextField label="Salam pembuka" value={meta.salutation} onChange={set("salutation")} disabled={!editable} />
                 <TextField label="Kalimat penutup (opsional)" value={meta.closing} onChange={set("closing")} disabled={!editable} />
+                </>}
                 <TextAreaField label="Tembusan (satu per baris)" rows={2} value={meta.cc} onChange={set("cc")} disabled={!editable} />
                 </>}
               </>}
@@ -226,6 +229,7 @@ export function LetterEditor({ initial, signers, people, employees = [], me }: {
               )}
               {d.confidential && <p className="flex items-start gap-1.5 rounded-md bg-amber-50 p-2 text-xs text-amber-900"><Lock className="mt-0.5 size-3.5 shrink-0" />Surat Rahasia: hanya pembuat, penandatangan, dan Direktur{d.typeName.includes("keterangan kerja") ? " (serta HR)" : ""} yang dapat membukanya. Tulis perihal tanpa nama karyawan.</p>}
               {d.kind === "SK" && <p className="text-xs text-muted">Judul, konsiderans, dan diktum SK disusun langsung pada kertas. Gunakan <code>{"{{nomor}}"}</code> bila nomor perlu muncul di judul.</p>}
+              {d.kind === "EDARAN" && <p className="text-xs text-muted">Judul, Nomor, dan TENTANG disusun langsung pada kertas. <code>{"{{nomor}}"}</code> diisi saat terbit dan <code>{"{{perihal}}"}</code> diambil dari kolom Perihal. Surat edaran tidak memakai penerima, salam, dan tanggal.</p>}
             </div>
           ) : (
             <ol className="space-y-3 p-3 text-sm">

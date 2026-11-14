@@ -1,9 +1,9 @@
-import { b, body, center, dk, diktum, doc, labels, li, ol, p, row, v } from "./builders";
+import { b, body, center, dk, diktum, doc, labels, li, ol, p, row, t, v } from "./builders";
 import type { PmDoc } from "./content";
 
 /** Jenis surat bawaan (disemai idempoten saat modul pertama dipakai). Kode tipe mengikuti glosarium Excel Register. Kebijakan dapat diubah Direktur. */
 export interface DefaultLetterType {
-  series: "EKS" | "INT"; code: number; name: string; description: string; kind: "SURAT" | "SK" | "TUGAS"; adminCreateOnly: boolean;
+  series: "EKS" | "INT"; code: number; name: string; description: string; kind: "SURAT" | "SK" | "TUGAS" | "EDARAN"; adminCreateOnly: boolean;
   directorOnly: boolean; signerJobLevels: ("SUPERVISOR" | "MANAGER")[]; internAllowed: boolean;
   confidential: boolean; hrCanSign: boolean; hrCanView: boolean; multiSigner: boolean; funnel: boolean;
   salutation: string | null; closing: string | null; template: PmDoc;
@@ -41,10 +41,27 @@ const SK = doc(
         dk([p(["Keputusan ini berlaku sejak tanggal ditetapkan, dengan ketentuan apabila terdapat kekeliruan akan diperbaiki sebagaimana mestinya."], { textAlign: "justify" })], "KETIGA"),
       ], { labelWidth: 2.6 }),
     );
+/**
+ * Surat Edaran: mengikuti contoh Memo Internal Trilogika (judul bergaris bawah, "Nomor : …", TENTANG + perihal HURUF BESAR, paragraf pembuka rata kiri-kanan tanpa
+ * menjorok, daftar bernomor dengan angka tebal, paragraf kedua + daftar, penutup). Judul "TENTANG" memakai variabel {{perihal}} (diisi dari kolom Perihal, huruf besar);
+ * layout (tanpa blok Nomor/Perihal/Kepada, Cambria 12 pt spasi 1,5) ditentukan jenis EDARAN pada renderer.
+ */
+const para = (c: Parameters<typeof p>[0]) => p(c, { textAlign: "justify", spaceAfter: 12 });
+const EDARAN = doc(
+      center([t("MEMO INTERNAL", "bold", "underline")], { spaceAfter: 0 }),
+      center(["Nomor : ", v("nomor")], { spaceAfter: 14 }),
+      center([b("TENTANG")], { spaceAfter: 0 }),
+      center([{ ...v("perihal"), marks: [{ type: "bold" }] }], { spaceAfter: 14 }),
+      para(["Sehubungan dengan ", placeholder("dasar / latar belakang"), ", bersama ini disampaikan beberapa ketentuan sebagai berikut:"]),
+      ol([li(placeholder("ketentuan pertama")), li(placeholder("ketentuan kedua"))], { indent: 0.4 }),
+      para(["Berkenaan dengan hal tersebut, seluruh staf diharapkan untuk memperhatikan dan melaksanakan hal-hal berikut:"]),
+      ol([li(placeholder("hal yang harus dilaksanakan pertama")), li(placeholder("hal yang harus dilaksanakan kedua"))], { indent: 0.4 }),
+      para(["Demikian edaran ini disampaikan untuk menjadi perhatian dan dilaksanakan sebagaimana mestinya. Atas perhatian dan kerja samanya, diucapkan terima kasih."]),
+    );
 const UMUM: PmDoc = doc(body(placeholder("isi surat")), body("Demikian kami sampaikan. Atas perhatian Bapak/Ibu, kami ucapkan terima kasih."));
 const INTERNAL: PmDoc = doc(body(placeholder("isi surat")), body("Demikian untuk dilaksanakan sebagaimana mestinya."));
 
-type Row = [series: "EKS" | "INT", code: number, name: string, description: string, signer: "D" | "M", intern: boolean, template: PmDoc, kind?: "SK" | "TUGAS"];
+type Row = [series: "EKS" | "INT", code: number, name: string, description: string, signer: "D" | "M", intern: boolean, template: PmDoc, kind?: "SK" | "TUGAS" | "EDARAN"];
 const salam = (series: "EKS" | "INT") => (series === "EKS" ? "Dengan Hormat," : null);
 
 /**
@@ -69,7 +86,7 @@ const CATALOG: Row[] = [
   ["INT", 2, "Surat tugas (internal)", "Penugasan karyawan (dasar Uang Harian). Hanya HR/Direktur yang membuat; isi dibangkitkan dari data penugasan.", "M", false, INTERNAL, "TUGAS"],
   ["INT", 3, "Surat pemberitahuan (internal)", "Informasi jam kerja, hari libur, perubahan jadwal, atau kebijakan.", "M", false, INTERNAL],
   ["INT", 4, "Surat undangan rapat (internal)", "Undangan rapat evaluasi, koordinasi divisi, atau rapat internal.", "M", false, INTERNAL],
-  ["INT", 5, "Surat edaran (internal)", "Ketentuan atau arahan yang berlaku umum dan berulang.", "M", false, INTERNAL],
+  ["INT", 5, "Surat edaran (internal)", "Ketentuan atau arahan yang berlaku umum dan berulang.", "M", false, EDARAN, "EDARAN"],
   ["INT", 6, "Surat peringatan (internal)", "Peringatan resmi kepada karyawan (Rahasia).", "D", false, INTERNAL],
   ["INT", 7, "Surat izin/persetujuan (internal)", "Persetujuan khusus seperti cuti besar atau izin studi.", "M", false, INTERNAL],
   ["INT", 8, "Berita acara (internal)", "Serah terima aset, hasil rapat penting, atau pelaksanaan kegiatan.", "M", false, INTERNAL],
@@ -95,5 +112,5 @@ const FUNNEL = new Set(["EKS:1", "EKS:2", "EKS:4"]);
 export const DEFAULT_LETTER_TYPES: DefaultLetterType[] = CATALOG.map(([series, code, name, description, signer, intern, template, kind]) => ({
   series, code, name, description, kind: kind ?? "SURAT", adminCreateOnly: kind === "TUGAS", directorOnly: signer === "D" && !HR_SIGN.has(`${series}:${code}`), signerJobLevels: signer === "M" ? ["MANAGER"] : [], internAllowed: intern,
   confidential: CONFIDENTIAL.has(`${series}:${code}`), hrCanSign: HR_SIGN.has(`${series}:${code}`), hrCanView: HR_VIEW.has(`${series}:${code}`), multiSigner: MULTI.has(`${series}:${code}`), funnel: FUNNEL.has(`${series}:${code}`),
-  salutation: kind === "SK" || kind === "TUGAS" ? null : salam(series), closing: null, template,
+  salutation: kind === "SK" || kind === "TUGAS" || kind === "EDARAN" ? null : salam(series), closing: null, template,
 }));

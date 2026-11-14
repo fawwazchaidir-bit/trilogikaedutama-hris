@@ -8,8 +8,7 @@ import { demoLogo, demoSignature, demoStamp } from "./assets";
 export async function letterhead(): Promise<DocLetterhead> {
   return {
     logo: await demoLogo(), tagline: "Lembaga Pelatihan Kerja Berbasis Kompetensi", name: "TRILOGIKA EDUTAMA",
-    addressLines: ["Grha Trilogika, Jln. Ontoseno no. 47, Jambon 01/21, Kel. Trihanggo, Kec. Gamping, Kab. Sleman, Daerah Istimewa Yogyakarta 55291"],
-    contactLine: "Email: info@trilogikaedutama.id | +62 857-0124-6319 (Hotline) | www.trilogikaedutama.id", idLine: "Vocational Identity Number: 2211340401",
+    addressLines: ["Grha Trilogika, Jln. Ontoseno 47, Jambon 01/21, Kel. Trihanggo, Kec. Gamping, Kab. Sleman, Daerah Istimewa Yogyakarta 55291"],
   };
 }
 async function director(title = "Direktur Utama", org = "TRILOGIKA EDUTAMA"): Promise<DocSignatory> {
@@ -83,6 +82,33 @@ export async function frameSk(): Promise<DocFrame> {
       signatory: await director("Direktur,", ""),
     }],
     letterhead: await letterhead(), verify, footerText: null, draft: false,
+  };
+}
+
+/** Surat Edaran (INT-005) meniru contoh "Memo Internal" Trilogika: judul, Nomor, TENTANG + perihal, paragraf, daftar bernomor, penutup. Isi fiktif generik. */
+export async function frameEdaran(): Promise<DocFrame> {
+  const number = "001/TE-INT/005/II/2026";
+  const pj = (c: Parameters<typeof p>[0]) => p(c, { textAlign: "justify", spaceAfter: 12 });
+  const lj = (c: Parameters<typeof p>[0]) => li(p(c, { textAlign: "justify", spaceAfter: 0 }));
+  return {
+    kind: "EDARAN", number, date: "2026-02-10", place: "Sleman", attachmentText: null, subject: null, recipient: null, salutation: null, closing: null,
+    body: doc(
+      center([t("MEMO INTERNAL", "bold", "underline")], { spaceAfter: 0 }), center([`Nomor : ${number}`], { spaceAfter: 14 }),
+      center([b("TENTANG")], { spaceAfter: 0 }), center([b("PENYESUAIAN JAM KERJA SELAMA BULAN RAMADHAN 1447 H")], { spaceAfter: 0 }), center([b("&")], { spaceAfter: 0 }), center([b("CUTI BERSAMA HARI RAYA IDUL FITRI 1447 H")], { spaceAfter: 14 }),
+      pj("Sehubungan dengan pelaksanaan Ibadah Puasa Ramadhan 1447 H (2026 M), bersama ini disampaikan beberapa ketentuan sebagai berikut:"),
+      ol([
+        lj(["Jadwal operasional kantor selama bulan Ramadhan disesuaikan menjadi hari ", b("Senin–Jumat, pukul 08.00–16.00 WIB"), "."]),
+        lj(["Cuti Bersama Hari Raya Idul Fitri 1447 H dilaksanakan pada tanggal ", b("17–20 Maret 2026"), " dan ", b("23–24 Maret 2026."), ""]),
+        lj(["Kegiatan operasional kantor kembali berjalan normal mulai tanggal ", b("25 Maret 2026.")]),
+      ], { indent: 0.4 }),
+      pj("Berkenaan dengan hal tersebut, seluruh staf diharapkan untuk memperhatikan dan melaksanakan hal-hal berikut:"),
+      ol([
+        lj("Mengikuti kegiatan kerja bakti pada tanggal 16 Maret 2026 dalam rangka persiapan Cuti Bersama Idul Fitri 1447 H."),
+        lj("Memastikan seluruh peralatan kantor, termasuk instalasi listrik, kompor gas, dan peralatan lainnya, dalam kondisi aman sebelum ditinggalkan selama masa cuti bersama."),
+      ], { indent: 0.4 }),
+      pj("Demikian memo internal ini disampaikan untuk menjadi perhatian dan dilaksanakan sebagaimana mestinya. Atas perhatian dan kerja samanya, diucapkan terima kasih."),
+    ),
+    signatories: [await director()], cc: [], attachments: [], letterhead: await letterhead(), verify, footerText: "Trilogika Edutama Training Institute Yogyakarta", draft: false,
   };
 }
 void cell; void th;

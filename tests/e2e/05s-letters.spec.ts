@@ -125,6 +125,38 @@ test("penjagaan akses: staf lain mendapat 404; pengaturan hanya Direktur", async
   await ctx.close();
 });
 
+test("Surat edaran: panel Data surat tanpa penerima/salam; diajukan tanpa penerima; PDF dirender", async ({ browser }) => {
+  const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+  const page = await ctx.newPage();
+  await login(page, USERS.ayu);
+  await page.goto("/persuratan");
+  await page.getByRole("button", { name: "Buat surat" }).click();
+  await page.getByRole("button", { name: /Surat edaran/ }).click();
+  await page.waitForURL(/\/persuratan\/[0-9a-f-]{36}$/);
+  const id = page.url().split("/").pop()!;
+  const aside = page.getByRole("complementary", { name: "Data surat" });
+  // layout edaran: hanya Perihal + Tembusan; tidak ada penerima/tempat/lampiran/salam/penutup
+  await expect(aside.getByLabel("Perihal")).toBeVisible();
+  await expect(aside.getByLabel("Tembusan (satu per baris)")).toBeVisible();
+  for (const label of [/^Penerima/, "Tempat penerima", "Salam pembuka", /^Kalimat penutup/]) await expect(aside.getByLabel(label)).toHaveCount(0);
+  await expect(aside.getByText(/Surat edaran tidak memakai penerima, salam, dan tanggal/)).toBeVisible();
+  const editor = page.getByRole("textbox", { name: "Isi surat" });
+  await expect(editor).toContainText("MEMO INTERNAL");
+  await expect(editor).toContainText("TENTANG");
+  await page.getByLabel("Penandatangan", { exact: true }).selectOption({ index: 1 });
+  await aside.getByLabel("Perihal").fill("Penyesuaian jam kerja selama bulan Ramadhan");
+  await editor.click();
+  await page.keyboard.press("ControlOrMeta+A");
+  await page.keyboard.type("Sehubungan dengan pelaksanaan ibadah puasa Ramadhan, jam operasional kantor disesuaikan menjadi Senin sampai Jumat pukul 08.00 sampai 16.00 WIB.");
+  await expect(page.getByText("Tersimpan otomatis")).toBeVisible({ timeout: 8000 });
+  await page.getByRole("button", { name: "Ajukan ke penandatangan" }).click();
+  await expect(page.getByText("Menunggu penandatangan").first()).toBeVisible();
+  const pdf = await page.request.get(`/api/letters/${id}/pdf`);
+  expect(pdf.status()).toBe(200);
+  expect((await pdf.body()).subarray(0, 5).toString()).toBe("%PDF-");
+  await ctx.close();
+});
+
 test("galeri editor: templat narasumber (blok rincian), SK (diktum), dan tabel", async ({ browser }) => {
   test.skip(!SHOTS, "hanya untuk tangkapan layar (LETTER_SHOTS)");
   const ctx = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
