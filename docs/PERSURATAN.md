@@ -154,7 +154,36 @@ tanda tangan + cap tetap dicetak. Saat jenis lama berubah layout (mis. INT-005 s
 
 **Catatan teknis renderer.** (1) `lineHeight` TIDAK boleh dipasang di level `Page`: teks `render` pada elemen `fixed` (nomor halaman) lalu tercetak di luar kertas (y ≈ −8000), sehingga
 kaki halaman tidak pernah tampil. Tinggi baris dipasang per teks dalam satuan pt lewat konteks `LayoutCtx` (uji `documents-pdf.test.ts` memeriksa posisi kaki di tiap halaman).
-(2) Kaki halaman memakai dua teks `fixed` bertumpu-mutlak dengan keluarga font eksplisit.
+(2) Kaki halaman = `View fixed` ber-`render` (halaman pertama dapat dikosongkan beserta garisnya) berisi teks ber-font eksplisit (elemen `fixed` tidak mewarisi font halaman). (3) Teks yang dibuat saat pemenggalan halaman (prop `render`: kaki halaman) tidak ikut fase pemuatan font react-pdf → font kaki halaman dipramuat dengan `Font.load` (bobot numerik 400/700) di `renderDocumentPdf`; tanpa itu teks jatuh ke Helvetica bawaan. (4) `createContext` tidak boleh dipakai di modul PDF (ditolak build Next di sisi server): pengaturan tata letak diteruskan sebagai prop `lay`.
+
+## Kaki halaman (footer)
+
+Satu konfigurasi (**Pengaturan Persuratan → Kaki halaman (footer)**, hanya Direktur) berlaku untuk **semua halaman PDF yang dibuat sistem**: halaman surat, SK, dan halaman lampiran dari
+editor. Lampiran PDF unggahan yang "digabung" adalah berkas pihak lain dan tidak diubah.
+
+| Pengaturan | Pilihan |
+|---|---|
+| Tampilkan kaki halaman | hidup/mati |
+| Isi | **tiga zona** — kiri (kolom lama `footerText`), tengah, kanan; masing-masing maks 200 karakter, boleh kosong |
+| Token | `{halaman}` `{total}` `{nomor}` (nomor surat; "(draf)" sebelum terbit) `{tanggal}`; salah ketik seperti `{halamn}` **ditolak** (tidak dicetak apa adanya) |
+| Font | Times New Roman (Liberation Serif), Arial (Liberation Sans), Cambria (Caladea), Calibri (Carlito) — keempatnya tertanam di PDF (SIL OFL, `public/fonts`) |
+| Ukuran | 6–14 pt, kelipatan 0,5 |
+| Gaya | tebal, miring, garis bawah, warna `#RRGGBB` |
+| Garis pemisah | garis tipis di atas kaki halaman |
+| Halaman | tampilkan di halaman pertama; tampilkan di halaman lampiran |
+
+**Bawaan** (tidak mengubah tampilan sebelum fitur ini): zona kiri = teks kaki yang sudah ada, kanan = `Hal. {halaman} dari {total}`, miring, abu-abu `#444444`, 8,5 pt, Liberation Serif.
+Penomoran berlanjut lintas surat + lampiran ("Hal. 3 dari 3"). Halaman lampiran **tidak lagi** memakai label khusus "Lampiran <nomor>" (judul dan nomor surat sudah di atas halaman lampiran);
+bila ingin nomor di setiap halaman, pakai `{nomor}`.
+
+- **Lebar zona** sebanding panjang teks contoh (teks pendek tidak memenuhi 1/3 lebar); satu zona saja memakai seluruh lebar. Teks panjang/ukuran besar membungkus; padding bawah halaman
+  bertambah otomatis (`footerReserve`) agar isi tidak tertimpa; konfigurasi bawaan tidak mengubah pemenggalan halaman.
+- **Pratinjau** di layar: baris pratinjau cepat (perkiraan, memakai tumpukan font CSS) dan tombol **Pratinjau PDF** (`POST /api/letters/settings/footer-preview`): PDF dua halaman (surat + lampiran
+  contoh, kop asli lembaga, isi fiktif) dengan konfigurasi yang *sedang disunting* — belum perlu disimpan; bagian yang tidak dikirim memakai nilai tersimpan.
+- **Penyimpanan**: kolom `letter_settings.footer*` (migrasi aditif `20261114120000_letter_footer_settings`, dengan CHECK ukuran/warna/font). `PATCH /api/letters/settings` menerima objek `footer`
+  (sebagian saja) dan nama lama `footerText` (= zona kiri; bila dihilangkan **tidak** menghapus teks kiri). Perubahan tercatat di Audit Log. Data kaki yang rusak di basis data jatuh ke bawaan
+  (PDF tidak pernah gagal karena kaki halaman).
+- Kop slip gaji dan laporan tidak terpengaruh.
 
 ## Verifikasi publik (QR)
 
@@ -193,7 +222,7 @@ PDF **asli** (yang dulu diterbitkan) tidak pernah diubah atau dihapus — trigge
 
 ## Pengaturan (Direktur)
 
-Kota penerbitan, baris identitas (arsip; tidak dicetak), teks kaki, batas eskalasi; cap lembaga; gambar tanda tangan per penandatangan (PNG dinormalisasi); nomor urut.
+Kota penerbitan, baris identitas (arsip; tidak dicetak), **kaki halaman** (lihat bagian di atas), batas eskalasi; cap lembaga; gambar tanda tangan per penandatangan (PNG dinormalisasi); nomor urut.
 Nama/tagline/alamat/logo kop mengikuti **Pengaturan lembaga** (satu sumber).
 
 ## API (`/api/letters`, flag `LETTERS_MODULE_ENABLED`)

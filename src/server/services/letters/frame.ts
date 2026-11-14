@@ -8,7 +8,9 @@ import { personFacts } from "./access";
 import { resolveVariables, type PmDoc } from "@/lib/documents/content";
 import { renderDocumentPdf } from "../../pdf/document-render";
 import { mergePdfs } from "./attachments";
-import { attachmentText, longDate } from "@/lib/documents/text";
+import { attachmentText, formatDocNumber, longDate } from "@/lib/documents/text";
+import { footerFromRow, type DocFooter } from "@/lib/documents/footer";
+import { body as pBody, doc as pDoc } from "@/lib/documents/builders";
 import { verifyPath } from "@/lib/documents/policy";
 import type { DocFrame, DocImage, DocSignatory } from "@/lib/documents/frame";
 
@@ -25,6 +27,32 @@ export function builtinVars(number: string | null, date: string, subject?: strin
 export function varsOf(d: Pick<LetterDocument, "variables">): Record<string, string> {
   const v = d.variables;
   return v && typeof v === "object" && !Array.isArray(v) ? Object.fromEntries(Object.entries(v as Record<string, unknown>).filter(([, x]) => typeof x === "string")) as Record<string, string> : {};
+}
+
+/** Kop surat dari Pengaturan lembaga (tagline, nama, alamat + logo) — satu sumber untuk surat sungguhan dan pratinjau pengaturan. */
+async function companyLetterhead(company: { name: string; tagline: string | null; address: string | null; logoFileId: string | null }): Promise<DocFrame["letterhead"]> {
+  return { logo: await img(company.logoFileId), tagline: company.tagline ?? "", name: company.name.toUpperCase(), addressLines: company.address ? [company.address] : [] };
+}
+
+/**
+ * Bingkai CONTOH (dua halaman: surat + satu lampiran) untuk pratinjau pengaturan kaki halaman: kop asli lembaga, isi fiktif, kaki halaman = `footer` yang sedang disunting
+ * (belum tentu tersimpan). Nomor contoh memakai format master; tanpa QR dan tanpa tanda tangan.
+ */
+export async function buildFooterSampleFrame(footer: DocFooter): Promise<DocFrame> {
+  const [company, ls] = await Promise.all([getSettings(), getLetterSettings()]);
+  const date = new Date().toISOString().slice(0, 10);
+  return {
+    kind: "SURAT", number: formatDocNumber({ seq: 1, series: "EKS", typeCode: "001", date }), date, place: ls.place, attachmentText: attachmentText(1, "berkas"), subject: "Contoh pratinjau kaki halaman",
+    recipient: { prefix: "Kepada Yth.", lines: [{ text: "Bapak/Ibu Penerima Contoh", bold: true }, { text: "Instansi Contoh", bold: true }], cityPrefix: "Di", place: "Tempat" },
+    salutation: "Dengan Hormat,",
+    body: pDoc(
+      pBody("Ini adalah surat contoh untuk melihat tampilan kaki halaman pada setiap halaman, termasuk halaman lampiran. Isi surat ini fiktif dan tidak tersimpan."),
+      pBody("Ubah teks, font, ukuran, dan gaya di Pengaturan Persuratan, lalu tekan Pratinjau PDF untuk melihat hasilnya sebelum disimpan."),
+    ),
+    closing: null, signatories: [{ orgName: company.name.toUpperCase(), title: "Penandatangan", name: "Nama Penandatangan", signature: null, stamp: null }], cc: [],
+    attachments: [{ title: "CONTOH LAMPIRAN", body: pDoc(pBody("Halaman lampiran contoh. Kaki halaman pada halaman ini mengikuti pengaturan \"Tampilkan di halaman lampiran\".")) }],
+    letterhead: await companyLetterhead(company), verify: null, footer, draft: false,
+  };
 }
 
 /** Bingkai PDF dari dokumen. `number`=null → draf (watermark). Isi tersimpan sebagai JSON; gambar dibaca dari berkas privat. */
@@ -67,12 +95,9 @@ export async function buildFrame(
     },
     salutation: bare ? null : d.salutation, body: resolved.doc, closing: bare ? null : d.closing,
     signatories: [sign, ...coSigs], cc: d.cc, attachments: editorAtts,
-    letterhead: {
-      logo: await img(company.logoFileId), tagline: company.tagline ?? "", name: company.name.toUpperCase(),
-      addressLines: company.address ? [company.address] : [],
-    },
+    letterhead: await companyLetterhead(company),
     verify: o.draft ? null : { url: `${env().APP_URL.replace(/\/$/, "")}${verifyPath(d.verifyToken)}`, caption: "Dokumen ini sah secara elektronik. Pindai kode QR untuk verifikasi." },
-    footerText: ls.footerText, draft: o.draft,
+    footer: footerFromRow(ls), draft: o.draft,
   };
   return { frame, missing: [...resolved.missing, ...attMissing], signer: { name: signerName, title: signerTitle } };
 }

@@ -157,6 +157,55 @@ test("Surat edaran: panel Data surat tanpa penerima/salam; diajukan tanpa peneri
   await ctx.close();
 });
 
+test("Pengaturan kaki halaman: Direktur mengatur teks/font/ukuran/gaya, pratinjau cepat + PDF, validasi token, tersimpan", async ({ browser }) => {
+  const ctx = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
+  const page = await ctx.newPage();
+  await login(page, USERS.pimpinan);
+  await page.goto("/persuratan/pengaturan");
+  await expect(page.getByRole("heading", { name: "Kaki halaman (footer)" })).toBeVisible();
+  await page.getByLabel("Teks tengah").fill("Nomor {nomor}");
+  await page.getByLabel("Teks kanan").fill("Halaman {halaman} / {total}");
+  await page.getByLabel("Font", { exact: true }).selectOption("CALADEA");
+  await page.getByLabel("Ukuran (pt)").fill("9.5");
+  await page.getByLabel("Tebal", { exact: true }).check();
+  await page.getByLabel("Garis pemisah di atas kaki halaman").check();
+  const live = page.getByTestId("footer-live-preview");
+  await expect(live).toContainText("Nomor 001/TE-EKS/003/XI/2026");
+  await expect(live).toContainText("Halaman 1 / 3");
+  await expect(live).toHaveCSS("font-weight", "700");
+  // token salah ketik: pesan jelas + simpan dinonaktifkan
+  await page.getByLabel("Teks kiri").fill("Hal. {halamn}");
+  await expect(page.getByText("Token tidak dikenal: {halamn}").first()).toBeVisible();
+  await expect(page.getByRole("button", { name: "Simpan kaki halaman" })).toBeDisabled();
+  await page.getByLabel("Teks kiri").fill("Trilogika Edutama");
+  await shot(page, "40-pengaturan-kaki-halaman");
+  await page.getByRole("button", { name: "Pratinjau PDF" }).click();
+  await expect(page.locator("iframe[title='Pratinjau PDF kaki halaman']")).toBeVisible();
+  await page.getByRole("button", { name: "Simpan kaki halaman" }).click();
+  await expect(page.getByText("Kaki halaman disimpan.")).toBeVisible();
+  await page.reload();
+  await expect(page.getByLabel("Teks tengah")).toHaveValue("Nomor {nomor}");
+  await expect(page.getByLabel("Font", { exact: true })).toHaveValue("CALADEA");
+  await expect(page.getByLabel("Tebal", { exact: true })).toBeChecked();
+  const dto = (await (await dir.get("/api/letters/settings")).json()).data as { footer: Record<string, unknown>; footerText: string };
+  expect(dto.footer).toMatchObject({ left: "Trilogika Edutama", center: "Nomor {nomor}", right: "Halaman {halaman} / {total}", fontKey: "CALADEA", size: 9.5, bold: true, rule: true });
+  expect(dto.footerText).toBe("Trilogika Edutama");
+  // pratinjau PDF memakai konfigurasi tersimpan (dua halaman: surat + lampiran contoh)
+  const pv = await dir.post("/api/letters/settings/footer-preview", { data: {}, headers: { origin: base } });
+  expect(pv.status()).toBe(200);
+  expect(pv.headers()["content-type"]).toBe("application/pdf");
+  const pdfDoc = await PDFDocument.load(await pv.body());
+  expect(pdfDoc.getPageCount()).toBe(2);
+  // pegawai non-Direktur: pratinjau ditolak
+  const other = await session(USERS.budi);
+  expect((await other.post("/api/letters/settings/footer-preview", { data: {}, headers: { origin: base } })).status()).toBe(403);
+  await other.dispose();
+  // kembalikan ke bawaan agar tes lain tidak terpengaruh
+  const back = await dir.patch("/api/letters/settings", { data: { place: "Sleman", escalationDays: 2, footer: { left: "Trilogika Edutama Training Institute", center: null, right: "Hal. {halaman} dari {total}", fontKey: "LIBERATION_SERIF", size: 8.5, bold: false, rule: false } }, headers: { origin: base } });
+  expect(back.status()).toBe(200);
+  await ctx.close();
+});
+
 test("galeri editor: templat narasumber (blok rincian), SK (diktum), dan tabel", async ({ browser }) => {
   test.skip(!SHOTS, "hanya untuk tangkapan layar (LETTER_SHOTS)");
   const ctx = await browser.newContext({ viewport: { width: 1440, height: 1000 } });

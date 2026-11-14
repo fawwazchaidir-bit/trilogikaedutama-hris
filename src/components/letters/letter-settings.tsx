@@ -9,13 +9,14 @@ import { TextField } from "@/components/ui/field";
 import { useToast } from "@/components/ui/toast";
 import { api, errorMessage } from "@/lib/api-client";
 import type { LetterSettingsDto } from "@/server/services/letters/admin";
+import { FooterSettings } from "./footer-settings";
 import type { LetterTypeDto, SignerMatrixRow, SignerPerson } from "@/server/services/letters/types";
 
 type Holder = { userId: string; name: string; title: string | null; hasSignature: boolean };
 
 export function LetterSettings({ settings, types, holders, matrix, divisions }: { settings: LetterSettingsDto; types: LetterTypeDto[]; holders: Holder[]; matrix: { rows: SignerMatrixRow[]; people: SignerPerson[] }; divisions: { id: string; name: string }[] }) {
   const router = useRouter(); const toast = useToast();
-  const [s, setS] = useState({ place: settings.place, idLine: settings.idLine ?? "", footerText: settings.footerText ?? "", escalationDays: String(settings.escalationDays), annualTarget: String(settings.annualTarget), products: settings.products.join("\n") });
+  const [s, setS] = useState({ place: settings.place, idLine: settings.idLine ?? "", escalationDays: String(settings.escalationDays), annualTarget: String(settings.annualTarget), products: settings.products.join("\n") });
   const [counter, setCounter] = useState({ series: "EKS", year: String(new Date().getFullYear()), lastSeq: "" });
   const [busy, setBusy] = useState<string | null>(null);
   const [suggestNote, setSuggestNote] = useState<string | null>(null);
@@ -106,16 +107,17 @@ export function LetterSettings({ settings, types, holders, matrix, divisions }: 
 
       <Card>
         <CardHeader title="Kop & eskalasi" description="Alamat, telepon, dan logo kop diambil dari Pengaturan lembaga." />
-        <form className="grid gap-3 p-4 sm:grid-cols-2" onSubmit={(e) => { e.preventDefault(); void run("settings", () => api("/api/letters/settings", { method: "PATCH", body: { place: s.place, idLine: s.idLine || null, footerText: s.footerText || null, escalationDays: Number(s.escalationDays), annualTarget: Number(s.annualTarget), products: s.products.split("\n").map((x) => x.trim()).filter(Boolean) } }), "Pengaturan disimpan."); }}>
+        <form className="grid gap-3 p-4 sm:grid-cols-2" onSubmit={(e) => { e.preventDefault(); void run("settings", () => api("/api/letters/settings", { method: "PATCH", body: { place: s.place, idLine: s.idLine || null, escalationDays: Number(s.escalationDays), annualTarget: Number(s.annualTarget), products: s.products.split("\n").map((x) => x.trim()).filter(Boolean) } }), "Pengaturan disimpan."); }}>
           <TextField label="Kota penerbitan" value={s.place} onChange={(e) => setS({ ...s, place: e.target.value })} />
           <TextField label="Batas eskalasi (hari kerja)" type="number" min={0} max={30} value={s.escalationDays} onChange={(e) => setS({ ...s, escalationDays: e.target.value })} hint="Setelah ini Direktur boleh mengambil alih surat yang belum ditandatangani. 0 = kapan saja. Penandatangan di PDF menjadi Direktur; riwayat mencatat penandatangan semula." />
           <TextField label="Baris identitas (arsip)" value={s.idLine} onChange={(e) => setS({ ...s, idLine: e.target.value })} className="sm:col-span-2" placeholder="Vocational Identity Number: …" hint="Disimpan, tetapi tidak dicetak. Kop surat memuat tagline, nama, dan alamat lembaga (dari Pengaturan lembaga)." />
-          <TextField label="Teks kaki halaman" value={s.footerText} onChange={(e) => setS({ ...s, footerText: e.target.value })} className="sm:col-span-2" />
           <TextField label="Target revenue tahunan (Rp)" type="number" min={0} value={s.annualTarget} onChange={(e) => setS({ ...s, annualTarget: e.target.value })} hint="Dipakai untuk capaian di dasbor penjualan." />
           <label className="block text-sm"><span className="mb-1 block font-medium text-ink">Daftar produk penawaran (satu per baris)</span><textarea rows={5} value={s.products} onChange={(e) => setS({ ...s, products: e.target.value })} className="w-full rounded-md border border-line px-3 py-2 text-sm" /></label>
           <div className="sm:col-span-2"><Button type="submit" variant="primary" loading={busy === "settings"}>Simpan</Button></div>
         </form>
       </Card>
+
+      <FooterSettings footer={settings.footer} />
 
       <Card>
         <CardHeader title="Cap & tanda tangan" description="PNG berlatar transparan disarankan. Gambar dipakai di PDF surat dan tidak tampil di halaman verifikasi." />

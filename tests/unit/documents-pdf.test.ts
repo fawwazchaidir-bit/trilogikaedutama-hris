@@ -4,30 +4,16 @@
  */
 import { describe, expect, it } from "vitest";
 import { mkdirSync, writeFileSync } from "node:fs";
-import { PDFArray, PDFDocument, PDFName, PDFRawStream, decodePDFRawStream, type PDFRef } from "pdf-lib";
 import { renderDocumentPdf } from "@/server/pdf/document-render";
-import { frameEdaran, frameSk, frameSuratNarasumber, frameSuratPenawaran } from "../fixtures/documents/frames";
+import { footerOf, frameEdaran, frameSk, frameSuratNarasumber, frameSuratPenawaran } from "../fixtures/documents/frames";
+import { pageStreams, runsOfSize } from "../helpers/pdf-streams";
 
 const pages = (b: Buffer) => (b.toString("latin1").match(/\/Type \/Page[^s]/g) ?? []).length;
-/** Isi aliran konten (operator PDF) tiap halaman, didekompresi — dipakai untuk memeriksa ukuran huruf kop dan keberadaan kaki halaman tanpa pustaka ekstraksi teks. */
-async function pageStreams(buf: Buffer): Promise<string[]> {
-  const pdf = await PDFDocument.load(buf);
-  return pdf.getPages().map((page) => {
-    const c = page.node.get(PDFName.of("Contents"));
-    const refs = c instanceof PDFArray ? (c.asArray() as PDFRef[]) : [c as PDFRef];
-    return refs.map((r) => Buffer.from(decodePDFRawStream(pdf.context.lookup(r) as PDFRawStream).decode()).toString("latin1")).join("\n");
-  });
-}
 /**
- * Posisi vertikal (koordinat halaman, dari atas) tiap teks kaki halaman = run ber-ukuran 8,5 pt (teks lembaga + "Hal. X dari Y"). Teks `render` yang kehilangan pengaturannya tetap
- * "tercetak" tetapi di luar kertas (y ≈ −8772), jadi yang diperiksa adalah POSISINYA, bukan sekadar keberadaan operator teks.
+ * Posisi vertikal mutlak tiap teks kaki halaman = run ber-ukuran 8,5 pt (teks lembaga + "Hal. X dari Y"). Teks `render` yang kehilangan pengaturannya tetap "tercetak" tetapi di luar
+ * kertas (y ≈ −8000), jadi yang diperiksa adalah POSISINYA, bukan sekadar keberadaan operator teks.
  */
-function footerYs(stream: string): number[] {
-  return [...stream.matchAll(/\/F\d+ 8\.5 Tf/g)].map((m) => {
-    const cms = [...stream.slice(0, m.index).matchAll(/1 0 0 1 [-\d.]+ ([-\d.]+) cm\nq\n1 0 0 1 0 [\d.]+ cm/g)];
-    return Number(cms.at(-1)?.[1] ?? NaN);
-  });
-}
+const footerYs = (stream: string): number[] => runsOfSize(stream, 8.5).map((r) => r.y);
 const out = process.env.DOC_SPIKE_OUT;
 if (out) mkdirSync(out, { recursive: true });
 const save = (name: string, b: Buffer) => { if (out) writeFileSync(`${out}/${name}.pdf`, b); };
@@ -71,7 +57,7 @@ describe("renderer PDF persuratan", () => {
   });
   it("kaki halaman tercetak di setiap halaman (teks lembaga + nomor halaman) — pada surat satu halaman, SK berlampiran, dan edaran", async () => {
     for (const [name, frame, minPages] of [["penawaran", await frameSuratPenawaran(), 1], ["sk", await frameSk(), 2], ["edaran", await frameEdaran(), 1]] as const) {
-      const b = await renderDocumentPdf({ ...frame, footerText: "Trilogika Edutama Training Institute Yogyakarta" });
+      const b = await renderDocumentPdf({ ...frame, footer: footerOf("Trilogika Edutama Training Institute Yogyakarta") });
       const streams = await pageStreams(b);
       expect(streams.length, name).toBeGreaterThanOrEqual(minPages);
       for (const [i, st] of streams.entries()) {

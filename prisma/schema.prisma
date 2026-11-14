@@ -387,7 +387,21 @@ model LetterSettings {
   id             Int      @id @default(1)
   place          String   @default("Sleman")
   idLine         String?
-  footerText     String?
+  /// Kaki halaman = tiga zona teks (kiri = footerText, tengah, kanan) + gaya; token {halaman} {total} {nomor} {tanggal}. Lihat src/lib/documents/footer.ts.
+  footerEnabled     Boolean @default(true)
+  footerText        String?
+  footerCenter      String?
+  footerRight       String? @default("Hal. {halaman} dari {total}")
+  footerFont        String  @default("LIBERATION_SERIF")
+  footerSize        Float   @default(8.5)
+  footerBold        Boolean @default(false)
+  footerItalic      Boolean @default(true)
+  footerUnderline   Boolean @default(false)
+  footerColor       String  @default("#444444")
+  /// Garis tipis di atas kaki halaman.
+  footerRule        Boolean @default(false)
+  footerFirstPage   Boolean @default(true)
+  footerAttachments Boolean @default(true)
   stampFileId    String?  @db.Uuid
   /// Hari kerja sejak diajukan sebelum Direktur boleh mengambil alih.
   escalationDays Int      @default(2)

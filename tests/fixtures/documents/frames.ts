@@ -2,7 +2,11 @@ import { attachmentText, dayDate, timeRange } from "@/lib/documents/text";
 import { b, body, cell, center, dk, diktum, doc, i, labels, li, ol, p, row, t, table, th } from "@/lib/documents/builders";
 import type { DocFrame, DocLetterhead, DocSignatory } from "@/lib/documents/frame";
 import type { PmNode } from "@/lib/documents/content";
+import { DEFAULT_FOOTER, type DocFooter } from "@/lib/documents/footer";
 import { demoLogo, demoSignature, demoStamp } from "./assets";
+
+/** Kaki halaman bawaan dengan teks kiri tertentu (null = tanpa teks lembaga; nomor halaman di kanan tetap). */
+export const footerOf = (left: string | null): DocFooter => ({ ...DEFAULT_FOOTER, left });
 
 /** Fixture dokumen FIKTIF yang meniru tiga surat contoh (penawaran 080, permohonan narasumber 034, SK). Tanpa data pribadi nyata. */
 export async function letterhead(): Promise<DocLetterhead> {
@@ -28,7 +32,7 @@ export async function frameSuratPenawaran(): Promise<DocFrame> {
       body(["Demikian penawaran ini kami sampaikan. Besar harapan kami kegiatan ini dapat terlaksana sebagai bentuk kontribusi nyata dalam meningkatkan kompetensi tenaga kerja yang profesional, kompeten, dan berdaya saing. Penawaran ini berlaku selama 5 (lima) hari kalender sejak tanggal surat diterbitkan. Untuk memudahkan koordinasi dan komunikasi lebih lanjut, Bapak/Ibu dapat menugaskan perwakilan untuk menghubungi nomor hotline kami di +62 857-0124-6319 (Sdri. Sari)."]),
       body("Atas perhatian dan kerja samanya, diucapkan terima kasih."),
     ),
-    closing: "Salam.", signatories: [await director()], cc: [], attachments: [], letterhead: await letterhead(), verify, footerText: "Trilogika Edutama Training Institute Yogyakarta", draft: false,
+    closing: "Salam.", signatories: [await director()], cc: [], attachments: [], letterhead: await letterhead(), verify, footer: footerOf("Trilogika Edutama Training Institute Yogyakarta"), draft: false,
   };
 }
 
@@ -43,7 +47,7 @@ export async function frameSuratNarasumber(): Promise<DocFrame> {
       body("Sehubungan dengan hal tersebut, kami memohon kesediaan Bapak untuk menjadi Narasumber Utama sekaligus mengajak Narasumber yang akan berkolaborasi bersama dalam mengampu kegiatan pelatihan tersebut. Kami percaya bahwa pengalaman dan pengetahuan Bapak akan memberikan banyak manfaat bagi peserta pelatihan. Besar harapan kami agar Bapak bersedia menjadi narasumber pada kegiatan tersebut. Untuk informasi lebih lanjut, Bapak dapat menghubungi kontak 0857-0124-6319 (Sdri. Sari)."),
       body("Demikian surat permohonan ini kami sampaikan, atas perhatian dan kerjasamanya diucapkan terima kasih."),
     ),
-    closing: null, signatories: [await director()], cc: ["Arsip", "Manajer Operasional"], attachments: [], letterhead: await letterhead(), verify, footerText: null, draft: false,
+    closing: null, signatories: [await director()], cc: ["Arsip", "Manajer Operasional"], attachments: [], letterhead: await letterhead(), verify, footer: footerOf(null), draft: false,
   };
 }
 
@@ -81,7 +85,7 @@ export async function frameSk(): Promise<DocFrame> {
       ),
       signatory: await director("Direktur,", ""),
     }],
-    letterhead: await letterhead(), verify, footerText: null, draft: false,
+    letterhead: await letterhead(), verify, footer: footerOf(null), draft: false,
   };
 }
 
@@ -108,7 +112,7 @@ export async function frameEdaran(): Promise<DocFrame> {
       ], { indent: 0.4 }),
       pj("Demikian memo internal ini disampaikan untuk menjadi perhatian dan dilaksanakan sebagaimana mestinya. Atas perhatian dan kerja samanya, diucapkan terima kasih."),
     ),
-    signatories: [await director()], cc: [], attachments: [], letterhead: await letterhead(), verify, footerText: "Trilogika Edutama Training Institute Yogyakarta", draft: false,
+    signatories: [await director()], cc: [], attachments: [], letterhead: await letterhead(), verify, footer: footerOf("Trilogika Edutama Training Institute Yogyakarta"), draft: false,
   };
 }
 void cell; void th;

@@ -4,6 +4,7 @@ import path from "node:path";
 import type { PmDoc, PmNode } from "@/lib/documents/content";
 import type { DocFrame, DocImage, DocSignatory } from "@/lib/documents/frame";
 import { diktumLabel, listMarker, longDate, type ListStyle } from "@/lib/documents/text";
+import { FOOTER_FONTS, footerReserve, footerZones, resolveFooterText } from "@/lib/documents/footer";
 
 /**
  * RENDERER PDF DOKUMEN (persuratan): membaca JSON isi + bingkai dan menghasilkan PDF A4.
@@ -13,24 +14,18 @@ import { diktumLabel, listMarker, longDate, type ListStyle } from "@/lib/documen
 const FONT_DIR = path.join(process.cwd(), "public", "fonts");
 const F = "LiberationSerif";
 const C = "Caladea"; // pengganti Cambria (metrik sama)
-Font.register({
-  family: C,
-  fonts: [
-    { src: path.join(FONT_DIR, "Caladea-Regular.ttf") },
-    { src: path.join(FONT_DIR, "Caladea-Bold.ttf"), fontWeight: "bold" },
-    { src: path.join(FONT_DIR, "Caladea-Italic.ttf"), fontStyle: "italic" },
-    { src: path.join(FONT_DIR, "Caladea-BoldItalic.ttf"), fontWeight: "bold", fontStyle: "italic" },
-  ],
-});
-Font.register({
-  family: F,
-  fonts: [
-    { src: path.join(FONT_DIR, "LiberationSerif-Regular.ttf") },
-    { src: path.join(FONT_DIR, "LiberationSerif-Bold.ttf"), fontWeight: "bold" },
-    { src: path.join(FONT_DIR, "LiberationSerif-Italic.ttf"), fontStyle: "italic" },
-    { src: path.join(FONT_DIR, "LiberationSerif-BoldItalic.ttf"), fontWeight: "bold", fontStyle: "italic" },
-  ],
-});
+/** Empat keluarga tertanam (juga pilihan font kaki halaman, lihat lib/documents/footer.ts): Times New Roman, Arial, Cambria, Calibri → padanan metrik-kompatibel (SIL OFL). */
+for (const family of ["LiberationSerif", "LiberationSans", "Caladea", "Carlito"]) {
+  Font.register({
+    family,
+    fonts: [
+      { src: path.join(FONT_DIR, `${family}-Regular.ttf`) },
+      { src: path.join(FONT_DIR, `${family}-Bold.ttf`), fontWeight: "bold" },
+      { src: path.join(FONT_DIR, `${family}-Italic.ttf`), fontStyle: "italic" },
+      { src: path.join(FONT_DIR, `${family}-BoldItalic.ttf`), fontWeight: "bold", fontStyle: "italic" },
+    ],
+  });
+}
 Font.registerHyphenationCallback((w) => [w]);
 
 const CM = 28.3465; // pt per cm
@@ -73,7 +68,7 @@ const s = StyleSheet.create({
   qrCap: { fontSize: 7.5, lineHeight: 1.25, marginTop: 3, width: 140 },
   signBox: { width: 200, alignItems: "center" },
   signArt: { width: 200, height: 82, position: "relative" },
-  footerText: { position: "absolute", bottom: 1.2 * CM, fontSize: 8.5 },
+  footerBox: { position: "absolute", left: 2 * CM, right: 2 * CM, bottom: 1.2 * CM },
   watermark: { position: "absolute", top: 300, left: 70, fontSize: 130, lineHeight: 1.3, color: "#e6e6e6", transform: "rotate(-35deg)", fontWeight: "bold" },
 });
 
@@ -289,14 +284,36 @@ function Cc({ items }: { items: string[] }) {
   );
 }
 
-/** Kaki halaman: teks lembaga (kiri) + "Hal. X dari Y" (kanan). PdfText + keluarga font eksplisit: teks `render` pada elemen `fixed` tidak mewarisi font halaman (Helvetica bawaan). */
-function Footer({ f, label }: { f: DocFrame; label?: string }) {
-  const fontFamily = f.kind === "EDARAN" ? C : F;
+/**
+ * Kaki halaman (dapat diatur: lib/documents/footer.ts): tiga zona teks + token, font/ukuran/tebal/miring/garis bawah/warna, garis pemisah, halaman pertama, halaman lampiran.
+ * View `fixed` ber-`render` (bukan teks `render` terpisah) agar halaman pertama dapat dikosongkan sekaligus garisnya. PdfText + keluarga font eksplisit: elemen `fixed` tidak mewarisi
+ * font halaman (Helvetica bawaan). `lineHeight` Page tidak boleh dipasang (lihat catatan di atas) — jika tidak, teks kaki tercetak di luar kertas.
+ */
+function Footer({ f, attachment = false }: { f: DocFrame; attachment?: boolean }) {
+  const ft = f.footer;
+  if (!ft.enabled || (attachment && !ft.attachments)) return null;
+  const zones = footerZones(ft);
+  if (zones.length === 0) return null;
+  const text = {
+    fontFamily: FOOTER_FONTS[ft.fontKey].family, fontSize: ft.size, fontWeight: ft.bold ? ("bold" as const) : ("normal" as const), fontStyle: ft.italic ? ("italic" as const) : ("normal" as const),
+    textDecoration: ft.underline ? ("underline" as const) : ("none" as const), color: ft.color,
+  };
   return (
-    <>
-      <PdfText fixed style={{ ...s.footerText, fontFamily, left: 2 * CM, fontStyle: "italic", color: "#444" }}>{label ?? f.footerText ?? ""}</PdfText>
-      <PdfText fixed style={{ ...s.footerText, fontFamily, right: 2 * CM }} render={({ pageNumber, totalPages }) => `Hal. ${pageNumber} dari ${totalPages}`} />
-    </>
+    <View
+      fixed
+      style={s.footerBox}
+      render={(args) => {
+        // Tipe `render` pada View di react-pdf belum memuat `totalPages`, padahal diberikan saat render (diuji).
+        const { pageNumber, totalPages } = args as typeof args & { totalPages: number };
+        if (pageNumber === 1 && !ft.firstPage) return null;
+        const ctx = { page: pageNumber, total: totalPages, number: f.number, date: f.date };
+        return (
+          <View style={{ flexDirection: "row", ...(ft.rule ? { borderTopWidth: 0.5, borderTopColor: ft.color, paddingTop: 3 } : {}) }}>
+            {zones.map((z) => <PdfText key={z.key} style={{ ...text, flex: z.flex, textAlign: z.align }}>{resolveFooterText(z.text, ctx)}</PdfText>)}
+          </View>
+        );
+      }}
+    />
   );
 }
 
@@ -322,10 +339,12 @@ export function DocumentPdf({ frame: f, qrDataUrl }: { frame: DocFrame; qrDataUr
   // SK dan Surat Edaran: judul, nomor, dan "TENTANG" disusun di kertas (isi), bukan blok Nomor/Perihal/Kepada.
   const bare = isSk || isEdaran;
   const lay = isEdaran ? EDARAN_LAYOUT : DEFAULT_LAYOUT;
+  /** Ruang bawah halaman: minimal 2,1 cm; bertambah bila kaki halaman besar/berbaris banyak. */
+  const pb = Math.max(2.1 * CM, footerReserve(f.footer));
   const { head, tail } = splitTail(body.content);
   return (
     <Document title={f.number ?? "Draf dokumen"} author="Trilogika Edutama">
-      <Page size="A4" style={isEdaran ? [s.page, EDARAN_PAGE] : s.page}>
+      <Page size="A4" style={[s.page, ...(isEdaran ? [EDARAN_PAGE] : []), { paddingBottom: pb }]}>
         {f.draft ? <PdfText style={s.watermark} fixed>DRAF</PdfText> : null}
                 <Kop f={f} />
         {bare ? null : <Identity f={f} />}
@@ -343,13 +362,13 @@ export function DocumentPdf({ frame: f, qrDataUrl }: { frame: DocFrame; qrDataUr
         <Footer f={f} />
       </Page>
       {f.attachments.map((a, k) => (
-        <Page key={k} size="A4" style={s.page}>
+        <Page key={k} size="A4" style={[s.page, { paddingBottom: pb }]}>
           {f.draft ? <PdfText style={s.watermark} fixed>DRAF</PdfText> : null}
           <Text style={{ fontWeight: "bold", marginBottom: 2 }}>{`Lampiran${f.attachments.length > 1 ? ` ${k + 1}` : ""} — Surat Nomor ${f.number ?? "(draf)"}`}</Text>
           <Text style={{ textAlign: "center", fontWeight: "bold", fontSize: 13, marginBottom: 10 }}>{a.title}</Text>
           <Blocks nodes={a.body.content} lay={DEFAULT_LAYOUT} />
           {a.signatory ? <SignBlock f={f} qr={qrDataUrl} extra={[a.signatory]} /> : null}
-          <Footer f={f} label={`Lampiran ${f.number ?? ""}`} />
+          <Footer f={f} attachment />
         </Page>
       ))}
     </Document>

@@ -1,4 +1,5 @@
 import type { PmDoc } from "./content";
+import type { DocFooter } from "./footer";
 
 /** Gambar untuk PDF (dibaca server dari berkas privat). */
 export interface DocImage { data: Buffer; mimeType: string }
@@ -37,6 +38,7 @@ export interface DocFrame {
   attachments: { title: string; body: PmDoc; signatory?: DocSignatory | null }[];
   letterhead: DocLetterhead;
   verify: { url: string; caption: string } | null;
-  footerText: string | null;
+  /** Kaki halaman (dapat diatur Direktur; lihat footer.ts). */
+  footer: DocFooter;
   draft: boolean;
 }
