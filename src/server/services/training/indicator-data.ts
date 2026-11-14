@@ -435,6 +435,8 @@ export interface WorkloadTaskDto {
   adjusted: boolean;
   /** Disesuaikan DAN kini berbeda dari hitungan template (jam/tanggal/staf/nama) — peringatan "tidak ikut berubah". */
   differsFromTemplate: boolean;
+  /** Nilai hitungan template saat ini untuk baris ini (rujukan di dialog "Ubah jam & tanggal"); null bila bukan asal-template / belum diterapkan / tidak terlihat. */
+  templateValues: { hours: number; startDate: string; endDate: string } | null;
   /** Dapat dikembalikan ke template (Terbuka, asal template jelas, pekerjaan itu masih berlaku, dan ada yang berbeda atau penanda disesuaikan). */
   canRevert: boolean;
   /** Baris LAMA yang tidak dapat ditentukan asalnya ("UNLINKED") atau kembar dengan baris lain untuk pekerjaan yang sama ("DUPLICATE"); null = jelas. */
@@ -475,6 +477,7 @@ export async function listWorkloadTasks(actor: Actor, projectId: string): Promis
       id: r.id, employeeId: r.employeeId, employeeName: r.employee.fullName, employeeInactive: !r.employee.isActive, name: r.name, hours: r.hours, startDate: dateToIso(r.startDate), endDate: dateToIso(r.endDate), status: r.status,
       source: r.source === "MANUAL" ? "MANUAL" as const : "TEMPLATE" as const, roleKey: r.roleKey, canManage,
       templateKey: r.templateKey, adjusted, differsFromTemplate: adjusted && r.status === "OPEN" && diff.length > 0,
+      templateValues: tpl ? { hours: tpl.hours, startDate: tpl.startDate, endDate: tpl.endDate } : null,
       canRevert: canManage && r.status === "OPEN" && !!r.templateKey && !!tpl && (r.adjusted || diff.length > 0),
       review: legacy && legacy.state !== "LINK" ? (legacy.state === "DUPLICATE" ? "DUPLICATE" as const : "UNLINKED" as const) : dup ? "DUPLICATE" as const : null,
       reviewSuggestion: legacy?.state === "UNLINKED" ? legacy.suggestion : null,
@@ -531,9 +534,19 @@ export async function updateWorkloadTask(actor: Actor, id: string, raw: unknown)
     if (adjustedNow) { data.adjusted = true; data.adjustedAt = new Date(); }
     if (Object.keys(data).length === 0) return;                                // tidak ada yang berubah: tidak menulis, tidak mencatat
     await tx.trainingWorkloadTask.update({ where: { id }, data });
+    // Jejak lengkap: nilai SEBELUM dan SESUDAH (nama, jam, tanggal mulai/selesai, status) agar perubahan dapat ditelusuri — bukan hanya jam.
+    const oldStart = dateToIso(w.startDate), oldEnd = dateToIso(w.endDate);
+    const changes: string[] = [];
+    if (newName !== w.name) changes.push(`nama "${w.name}" → "${newName}"`);
+    if (Math.abs(newHours - w.hours) > 1e-9) changes.push(`jam ${w.hours} → ${newHours}`);
+    if (start !== oldStart) changes.push(`mulai ${oldStart} → ${start}`);
+    if (end !== oldEnd) changes.push(`selesai ${oldEnd} → ${end}`);
+    if (data.status !== undefined) changes.push(`status ${w.status} → ${data.status}`);
     await auditProject(tx, actor, w.projectId, {
-      action: "training.workload.update", summary: `Tugas jam kerja "${w.name}" diubah${adjustedNow && w.source === "TEMPLATE" ? " (disesuaikan dari template)" : ""}`,
-      before: { taskId: id, name: w.name, hours: w.hours, status: w.status, adjusted: w.adjusted }, after: { taskId: id, ...input, adjusted: w.adjusted || adjustedNow },
+      action: "training.workload.update",
+      summary: `Tugas jam kerja "${w.name}" diubah: ${changes.join("; ")}${adjustedNow && w.source === "TEMPLATE" ? " (disesuaikan dari template)" : ""}`,
+      before: { taskId: id, name: w.name, hours: w.hours, startDate: oldStart, endDate: oldEnd, status: w.status, adjusted: w.adjusted, source: w.source },
+      after: { taskId: id, name: newName, hours: newHours, startDate: start, endDate: end, status: data.status ?? w.status, adjusted: w.adjusted || adjustedNow, source: w.source },
     });
   });
 }

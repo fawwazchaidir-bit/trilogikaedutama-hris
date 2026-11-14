@@ -274,14 +274,25 @@ Tampilan: bentrok pasti berwarna amber ("Ruangan yang sama (lokasi sama) dipakai
 
 Tahap berikutnya (belum dibuat): bentrok instruktur/PIC dengan **cuti** dan **surat tugas** karyawan.
 
-### Keputusan operasional: dialog edit jam kerja
+### Dialog edit jam & tanggal baris jam kerja
 
-Perbaikan hitung ganda dan penanda tugas operasional siap masuk UAT. Dialog **edit jam/tanggal baris jam kerja** belum ada (perubahan hanya lewat API `PATCH /training/workload/:id`), dan mengganti **status** saja bukan "penyesuaian" — sehingga alur "disesuaikan → dipertahankan saat hitung ulang → Kembalikan ke template" belum dapat dicoba penuh lewat layar biasa. Dicatat sebagai **keputusan operasional**, bukan penghalang pekerjaan lain:
+PIC tidak perlu lagi bergantung pada API untuk penyesuaian harian. Pada tab **Pemantauan** proyek, tiap baris jam kerja punya tombol **Ubah** (hanya tampil bagi pengguna yang berhak mengelola tugas proyek; sisi server tetap menegakkan izin yang sama dengan `PATCH /training/workload/:id`).
 
-- Bila PIC perlu menyesuaikan jam/tanggal lewat aplikasi **sejak awal pemakaian**, dialog edit harus dibuat **sebelum** fitur ini dipakai operasional.
-- Bila untuk sementara jam mengikuti template dan perubahan program, dialog dapat menyusul **setelah** perbaikan nomor 14 dan persuratan (urutan prioritas dari pimpinan).
+- **Validasi di layar** (satu sumber dengan server, `src/lib/training/workload-edit.ts`): jam wajib angka > 0 dan paling banyak 2000 (koma atau titik desimal diterima, maks. 2 angka di belakang koma), tanggal mulai dan selesai wajib terisi, tanggal selesai tidak boleh sebelum tanggal mulai. Tombol **Simpan** nonaktif selama belum ada perubahan atau masih ada kesalahan.
+- **Asal baris tidak berubah.** Baris Template tetap Template; baris Manual tetap Manual. Yang berubah hanya penanda **Disesuaikan** (nama/jam/tanggal berbeda dari nilai segar template). Dialog menampilkan nilai template saat ini sebagai rujukan dan memberi tahu bahwa baris akan ditandai Disesuaikan, tidak ikut berubah saat **Hitung ulang dari template**, dan dapat dikembalikan lewat **Kembalikan ke template**.
+- **Status tidak pernah berubah karena edit.** Baris **Selesai** boleh disesuaikan jam/tanggalnya dan tetap Selesai; tidak ada pembukaan kembali otomatis. Status hanya berubah bila dikirim eksplisit (pemilih status di baris).
+- **Jejak audit** (`training.workload.update`) menyimpan nilai **lama dan baru** untuk jam, tanggal mulai, tanggal selesai, status, penanda disesuaikan, dan asal (`before`/`after`), dengan ringkasan seperti `jam 16 → 18; mulai 10/12/2026 → …; selesai 27/12/2026 → 28/12/2026`. Sebelumnya hanya jam lama yang tercatat.
+- Penulisan memakai kunci proyek + kunci baris, dan nilai dibaca ulang di dalam kunci, sehingga dua pengubah serentak tidak saling menimpa tanpa jejak dan edit pada proyek yang sudah Selesai/Dibatalkan ditolak.
 
-Keputusan mana yang berlaku ditetapkan pimpinan setelah UAT.
+### Rujukan setelah proyek ditutup: tetap boleh dicatat
+
+Keputusan pimpinan: rujukan **tidak** dijadikan read-only menyeluruh. Alasan operasional: nomor invoice atau referensi keuangan sering baru tersedia **setelah** pelatihan selesai. Aturan yang berlaku dan dipertahankan untuk UAT:
+
+- Pengguna berwenang dapat **menambah maupun melepas** rujukan (tautan surat tugas dan referensi sistem lain) pada proyek **Selesai atau Dibatalkan**.
+- Setiap penambahan/pelepasan tercatat di **audit log**.
+- Referensi sistem lain masih berupa **catatan manual**; tidak tersinkron otomatis dengan sistem keuangan (lihat §14).
+- Menautkan **surat tugas** tetap memerlukan izin HRIS yang relevan.
+- Pengecualian ini disengaja dan dijaga tes statis (`training-write-guard`): hanya `linkAssignment`, `unlinkAssignment`, `addExternalRef`, `removeExternalRef`. Bila kelak ingin read-only, cukup pasang `assertEditableLocked` pada keempatnya dan hapus dari daftar pengecualian.
 
 ### 3b. Otomasi: snapshot harian, eskalasi, pengingat tenggat
 
@@ -468,7 +479,7 @@ pengaturan level akses (Super Admin) dengan usulan dari bagan organisasi · noti
 - **Integrasi eksternal belum ada** (lihat §14). Peserta dan referensi dicatat manual.
 - **Dokumen**: hanya PDF/PNG/JPEG; "hapus" = sembunyikan (belum ada penghapusan permanen/retensi); disimpan di PostgreSQL (pertimbangkan penyimpanan objek bila volume besar). Tidak ada pemindai malware.
 - **Peringatan bentrok** (lihat [Bentrok jadwal](#bentrok-jadwal)): ruangan menurut lokasi + ruangan (teks bebas, bukan master) dan instruktur. Belum ada master lokasi/ruangan/sumber daya, sehingga penulisan lokasi yang sangat berbeda untuk tempat yang sama ("Aston" vs "Hotel Aston Magelang") hanya terdeteksi sebagai *perlu diperiksa*, dan kesalahan ketik tidak terdeteksi. **Belum ada** pemeriksaan bentrok dengan **cuti** dan **surat tugas** karyawan (tahap berikutnya, setelah aturan dasar lokasi/ruangan ini dipakai di lapangan).
-- **Dialog edit jam/tanggal baris jam kerja** belum ada (lihat [keputusan operasional](#keputusan-operasional-dialog-edit-jam-kerja)).
+- **Dialog edit jam/tanggal baris jam kerja** sudah ada (lihat [dialog edit](#dialog-edit-jam--tanggal-baris-jam-kerja)); rujukan pascatutup sengaja tetap boleh dicatat (lihat [keputusannya](#rujukan-setelah-proyek-ditutup-tetap-boleh-dicatat)).
 - Kalender berbentuk **daftar per tanggal**, bukan grid bulanan; belum ada ekspor iCal/Google Calendar (sengaja, butuh izin & konfigurasi).
 - **Template checklist**: menyimpan mengganti seluruh item; belum ada riwayat versi template.
 - **Penghapusan** tugas/peserta/jadwal tidak ada (dibatalkan/diubah statusnya); duplikat salah-ketik tetap terlihat sebagai "Dibatalkan".

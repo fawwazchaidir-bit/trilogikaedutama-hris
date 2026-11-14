@@ -1,6 +1,6 @@
 "use client";
 import { useState } from "react";
-import { Check, Plus, RotateCcw } from "lucide-react";
+import { Check, Pencil, Plus, RotateCcw } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
@@ -10,6 +10,7 @@ import { Table, TableWrap, Td, Th } from "@/components/ui/table";
 import { api } from "@/lib/api-client";
 import { formatDateShort, formatDateTime } from "@/lib/format";
 import { COMPONENT_LABEL, ITEM_COMPONENTS } from "@/lib/training/indicators/config";
+import { validateWorkloadEdit } from "@/lib/training/workload-edit";
 import { UNAVAILABLE_LABEL } from "@/lib/training/availability";
 import type { ProgramIndicatorDto } from "@/server/services/training/indicator-compute";
 import type { MilestoneDto, ReadinessItemDto, WorkloadRevertPreview, WorkloadSyncResult, WorkloadTaskDto, WorkloadTemplateEntryDto } from "@/server/services/training/indicator-data";
@@ -48,6 +49,7 @@ export function MonitoringPanel(p: Props) {
   const [revert, setRevert] = useState<{ row: WorkloadTaskDto; preview: WorkloadRevertPreview | null } | null>(null);
   const [review, setReview] = useState<{ row: WorkloadTaskDto; key: string } | null>(null);
   const [merge, setMerge] = useState<{ ids: string[]; keep: string } | null>(null);
+  const [edit, setEdit] = useState<{ row: WorkloadTaskDto; hours: string; startDate: string; endDate: string } | null>(null);
   const reviewCount = p.workload.filter((x) => x.review !== null).length;
 
   const applied = p.indicators.applied;
@@ -55,7 +57,7 @@ export function MonitoringPanel(p: Props) {
 
   return (
     <div className="space-y-8">
-      {error && !finish && !reopen && !addWork && !revert && !review && !merge && <Notice tone="danger">{error}</Notice>}
+      {error && !finish && !reopen && !addWork && !revert && !review && !merge && !edit && <Notice tone="danger">{error}</Notice>}
       <IndicatorTiles ind={p.indicators} />
 
       {!applied ? (
@@ -150,6 +152,7 @@ export function MonitoringPanel(p: Props) {
                           {x.differsFromTemplate && <span className="block text-xs text-amber-800">berbeda dari template — tidak ikut berubah</span>}
                           {p.canManageTasks && live && (
                             <span className="mt-1 flex flex-wrap gap-1">
+                              {x.status !== "CANCELLED" && <Button size="sm" variant="ghost" aria-label={`Ubah jam dan tanggal ${x.name}`} onClick={() => { reset(); setEdit({ row: x, hours: String(x.hours), startDate: x.startDate, endDate: x.endDate }); }}><Pencil className="size-3.5" />Ubah</Button>}
                               {x.canRevert && <Button size="sm" variant="ghost" aria-label={`Kembalikan ${x.name} ke template`} onClick={() => { reset(); setRevert({ row: x, preview: null }); void api<WorkloadRevertPreview>(`/api/training/workload/${x.id}/revert`).then((pv) => setRevert({ row: x, preview: pv })).catch(() => setRevert(null)); }}><RotateCcw className="size-3.5" />Kembalikan ke template…</Button>}
                               {x.review === "UNLINKED" && <Button size="sm" variant="ghost" aria-label={`Tinjau asal ${x.name}`} onClick={() => { reset(); setReview({ row: x, key: "" }); }}>Tinjau asal…</Button>}
                               {x.review === "DUPLICATE" && x.duplicateGroup && <Button size="sm" variant="ghost" aria-label={`Rapikan baris kembar ${x.name}`} onClick={() => { reset(); setMerge({ ids: x.duplicateGroup!, keep: "" }); }}>Rapikan duplikat…</Button>}
@@ -267,6 +270,42 @@ export function MonitoringPanel(p: Props) {
           {merge.keep !== "" && p.workload.filter((x) => merge.ids.includes(x.id) && x.id !== merge.keep).some((x) => x.status !== "OPEN") && <Notice tone="warn">Baris yang sudah selesai/dibatalkan tidak dapat dihapus (riwayatnya dijaga). Pertahankan baris itu.</Notice>}
           <p className="text-xs text-muted">Dicatat di riwayat: siapa yang merapikan, baris mana yang dipertahankan dan yang dihapus (beserta jam dan tanggalnya).</p>
         </div>}
+      </Dialog>
+
+      {/* Ubah jam & tanggal: dialog sederhana untuk pengelola tugas. Asal baris (Template/Manual) tidak berubah; baris template ditandai "Disesuaikan"; status TIDAK berubah (baris Selesai tidak dibuka kembali). */}
+      <Dialog open={edit !== null} onClose={() => !busy && setEdit(null)} size="md" title="Ubah jam & tanggal" description={edit ? `${edit.row.name} · ${edit.row.employeeName}` : undefined}
+        footer={(() => {
+          if (!edit) return null;
+          const v = validateWorkloadEdit(edit, edit.row);
+          return <><Button onClick={() => setEdit(null)} disabled={busy}>Batal</Button><Button variant="primary" loading={busy} disabled={!v.ok || Object.keys(v.patch).length === 0} onClick={() => void run(() => api(`/api/training/workload/${edit.row.id}`, { method: "PATCH", body: v.patch }), "Jam dan tanggal diperbarui.", () => setEdit(null))}>Simpan</Button></>;
+        })()}>
+        {edit && (() => {
+          const x = edit.row;
+          const v = validateWorkloadEdit(edit, x);
+          const changed = Object.keys(v.patch).length > 0;
+          return (
+            <div className="space-y-4">
+              {error && <Notice tone="danger">{error}</Notice>}
+              <div className="flex flex-wrap items-center gap-1.5 text-sm">
+                <Badge tone={x.source === "MANUAL" ? "blue" : "gray"}>{x.source === "MANUAL" ? "Manual" : "Template"}</Badge>
+                {x.adjusted && <Badge tone="amber">Disesuaikan</Badge>}
+                <Badge tone={x.status === "DONE" ? "green" : "gray"}>{x.status === "OPEN" ? "Terbuka" : x.status === "DONE" ? "Selesai" : "Dibatalkan"}</Badge>
+              </div>
+              {x.source === "TEMPLATE"
+                ? <p className="text-xs text-muted">Baris ini berasal dari Tabel Jam Standar. Asalnya tidak berubah; setelah diubah baris ditandai <strong>Disesuaikan</strong>, tidak ikut berubah saat hitung ulang, dan dapat dikembalikan ke template kapan saja.</p>
+                : <p className="text-xs text-muted">Baris manual. Perubahan dicatat di riwayat (nilai lama dan baru).</p>}
+              {x.status === "DONE" && <Notice tone="warn">Baris ini berstatus <strong>Selesai</strong> dan tetap Selesai setelah diubah.</Notice>}
+              {x.templateValues && <p className="text-xs text-muted" data-testid="workload-template-values">Nilai template saat ini: {x.templateValues.hours} jam · {formatDateShort(x.templateValues.startDate)} – {formatDateShort(x.templateValues.endDate)}</p>}
+              <div className="grid gap-4 sm:grid-cols-2">
+                <TextField className="sm:col-span-2" label="Jam total" required inputMode="decimal" value={edit.hours} onChange={(e) => setEdit({ ...edit, hours: e.target.value })} error={v.errors.hours ?? fieldErrors.hours} hint="Dibagi rata pada hari kerja jendela tugas." />
+                <TextField label="Mulai" type="date" required value={edit.startDate} onChange={(e) => setEdit({ ...edit, startDate: e.target.value })} error={v.errors.startDate ?? fieldErrors.startDate} />
+                <TextField label="Selesai" type="date" required value={edit.endDate} min={edit.startDate || undefined} onChange={(e) => setEdit({ ...edit, endDate: e.target.value })} error={v.errors.endDate ?? fieldErrors.endDate} />
+              </div>
+              {v.ok && changed && x.source === "TEMPLATE" && !x.adjusted && <p className="text-xs font-medium text-amber-800" data-testid="workload-will-adjust">Setelah disimpan, baris ini ditandai Disesuaikan.</p>}
+              {v.ok && !changed && <p className="text-xs text-muted">Belum ada perubahan.</p>}
+            </div>
+          );
+        })()}
       </Dialog>
 
       <Dialog open={addWork} onClose={() => !busy && setAddWork(false)} size="md" title="Tambah tugas jam kerja" description="Tugas manual (di luar Tabel Jam Standar) dihitung pada beban staf."

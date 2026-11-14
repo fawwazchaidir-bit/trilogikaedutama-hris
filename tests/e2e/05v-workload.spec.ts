@@ -87,6 +87,68 @@ test("baris disesuaikan: dipertahankan saat dihitung ulang (peringatan), lalu 'K
   await ctx.close();
 });
 
+const shiftDay = (iso: string, days: number) => new Date(Date.parse(`${iso}T00:00:00Z`) + days * 86_400_000).toISOString().slice(0, 10);
+
+test("dialog 'Ubah jam & tanggal': validasi di layar, asal Template tetap, ditandai Disesuaikan, nilai template jadi rujukan, baris Selesai tidak dibuka kembali, riwayat memuat tanggal lama & baru", async ({ browser }) => {
+  type R2 = Row & { startDate: string; endDate: string };
+  const { ctx, page } = await as(browser, "ayu");
+  await page.goto(tab);
+  const rows = (await call(page, "get", `/api/training/projects/${projectId}/workload`)) as R2[];
+  const target = rows.find((r) => r.status === "OPEN" && r.source === "TEMPLATE" && !r.adjusted)!;
+  expect(target, "perlu satu baris template terbuka yang belum disesuaikan").toBeTruthy();
+  const row = () => page.getByTestId("workload-row").filter({ hasText: target.name });
+  await row().getByRole("button", { name: `Ubah jam dan tanggal ${target.name}` }).click();
+  const dlg = page.getByRole("dialog");
+  const save = dlg.getByRole("button", { name: "Simpan" });
+  await expect(dlg.getByText("Template", { exact: true })).toBeVisible();
+  await expect(dlg.getByTestId("workload-template-values")).toContainText(`${target.hours} jam`);
+  await expect(save).toBeDisabled();                                                  // belum ada perubahan
+  // validasi jam dan tanggal
+  await dlg.getByLabel("Jam total").fill("0");
+  await expect(dlg.getByText(/lebih dari 0/)).toBeVisible();
+  await expect(save).toBeDisabled();
+  await dlg.getByLabel("Jam total").fill(String(target.hours + 2));
+  await dlg.getByLabel(/^Selesai\b/).fill(shiftDay(target.startDate, -1));
+  await expect(dlg.getByText("Tanggal selesai tidak boleh sebelum tanggal mulai")).toBeVisible();
+  await expect(save).toBeDisabled();
+  const newEnd = shiftDay(target.endDate, 1);
+  await dlg.getByLabel(/^Selesai\b/).fill(newEnd);
+  await expect(dlg.getByTestId("workload-will-adjust")).toBeVisible();
+  await expect(save).toBeEnabled();
+  await save.click();
+  await expect(page.getByText("Jam dan tanggal diperbarui.").last()).toBeVisible();
+  await expect(row().getByText("Disesuaikan")).toBeVisible();
+  await expect(row().getByText("Template", { exact: true })).toBeVisible();           // asal baris tidak berubah
+  const after = ((await call(page, "get", `/api/training/projects/${projectId}/workload`)) as R2[]).find((r) => r.id === target.id)!;
+  expect(after).toMatchObject({ adjusted: true, source: "TEMPLATE", hours: target.hours + 2, endDate: newEnd, startDate: target.startDate, status: "OPEN" });
+
+  // riwayat (audit) memuat tanggal LAMA dan BARU
+  const prisma = new PrismaClient({ datasources: { db: { url: process.env.TEST_DATABASE_URL! } } });
+  try {
+    const a = await prisma.auditLog.findFirstOrThrow({ where: { action: "training.workload.update", before: { path: ["taskId"], equals: target.id } }, orderBy: { createdAt: "desc" } });
+    expect(a.before).toMatchObject({ hours: target.hours, startDate: target.startDate, endDate: target.endDate });
+    expect(a.after).toMatchObject({ hours: target.hours + 2, startDate: target.startDate, endDate: newEnd });
+  } finally { await prisma.$disconnect(); }
+
+  // kembalikan baris yang disesuaikan ke template agar uji berikutnya berangkat dari keadaan yang sama
+  await call(page, "post", `/api/training/workload/${target.id}/revert`, {});
+
+  // baris SELESAI: dapat disesuaikan, tetap Selesai
+  const done = rows.find((r) => r.status === "DONE")!;
+  expect(done, "perlu satu baris Selesai dari uji sebelumnya").toBeTruthy();
+  const drow = page.getByTestId("workload-row").filter({ hasText: done.name });
+  await drow.getByRole("button", { name: `Ubah jam dan tanggal ${done.name}` }).click();
+  await expect(dlg.getByText(/tetap Selesai setelah diubah/)).toBeVisible();
+  await dlg.getByLabel("Jam total").fill(String(done.hours + 1));
+  await dlg.getByRole("button", { name: "Simpan" }).click();
+  await expect(page.getByText("Jam dan tanggal diperbarui.").last()).toBeVisible();
+  await expect(drow.getByLabel(`Status ${done.name}`)).toHaveValue("DONE");
+  const doneAfter = ((await call(page, "get", `/api/training/projects/${projectId}/workload`)) as R2[]).find((r) => r.id === done.id)!;
+  expect(doneAfter).toMatchObject({ status: "DONE", adjusted: true, hours: done.hours + 1 });
+  await ctx.close();
+});
+
+
 test("baris KEMBAR warisan bug: ditandai, tidak diubah saat dihitung ulang; pengguna melihat kedua baris, memilih satu, dan hasilnya tercatat", async ({ browser }) => {
   // Simulasi data lama (sebelum ada ID asal): baris diedit → MANUAL, ditambah salinan template untuk pekerjaan yang sama.
   const prisma = new PrismaClient({ datasources: { db: { url: process.env.TEST_DATABASE_URL! } } });

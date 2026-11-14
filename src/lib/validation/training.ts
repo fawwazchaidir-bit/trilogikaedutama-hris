@@ -291,7 +291,7 @@ export const workloadSchema = z.object({
   hours: z.number({ error: "Jam harus berupa angka" }).min(0, "Tidak boleh negatif").max(2000), startDate: isoDate, endDate: isoDate,
 }).superRefine((v, ctx) => { if (v.endDate < v.startDate) ctx.addIssue({ code: "custom", path: ["endDate"], message: "Tanggal selesai tidak boleh sebelum tanggal mulai" }); });
 export const workloadUpdateSchema = z.object({
-  name: requiredText(3, 200, "Nama tugas").optional(), hours: z.number().min(0).max(2000).optional(), startDate: isoDate.optional(), endDate: isoDate.optional(),
+  name: requiredText(3, 200, "Nama tugas").optional(), hours: z.number({ error: "Jam harus berupa angka" }).gt(0, "Jam harus lebih dari 0").max(2000, "Jam terlalu besar").optional(), startDate: isoDate.optional(), endDate: isoDate.optional(),
   status: z.enum(["OPEN", "DONE", "CANCELLED"]).optional(),
 });
 /** Tinjau baris jam kerja LAMA yang asalnya belum jelas: tautkan ke pekerjaan template (ID baris tabel jam) atau nyatakan berdiri sendiri. */
